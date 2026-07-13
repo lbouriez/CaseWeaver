@@ -1,0 +1,8 @@
+{
+  "data": [{ "embedding": [0.1, 0.2] }],
+  "model": "effective-embedding",
+  "usage": {
+    "prompt_tokens": 5,
+    "prompt_tokens_details": { "cached_tokens": 2 }
+  }
+}

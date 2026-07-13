@@ -387,3 +387,277 @@ model ResourceLease {
   @@unique([workspaceId, resourceType, resourceKey])
   @@map("resource_leases")
 }
+
+model AiCatalogSnapshot {
+  id                String   @id
+  upstreamUrl       String   @map("upstream_url")
+  upstreamCommitSha String   @map("upstream_commit_sha")
+  fetchedAt         DateTime @map("fetched_at") @db.Timestamptz(6)
+  sha256            String
+  rawEntries        Json     @map("raw_entries")
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("ai_catalog_snapshots")
+}
+
+model AiCatalogModel {
+  id                 String   @id
+  catalogSnapshotId  String   @map("catalog_snapshot_id")
+  canonicalModel     String   @map("canonical_model")
+  provider           String
+  supportedRoles     Json     @map("supported_roles")
+  capabilities       Json
+  maximumInputTokens Int?     @map("maximum_input_tokens")
+  maximumOutputTokens Int?    @map("maximum_output_tokens")
+  rawEntry           Json     @map("raw_entry")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([catalogSnapshotId, canonicalModel])
+  @@map("ai_catalog_models")
+}
+
+model AiCatalogPriceComponent {
+  id             String   @id
+  catalogModelId String   @map("catalog_model_id")
+  componentKind  String   @map("component_kind")
+  billingUnit    String   @map("billing_unit")
+  amount         Decimal  @db.Decimal(38, 18)
+  currency       String   @db.Char(3)
+  effectiveFrom  DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo    DateTime? @map("effective_to") @db.Timestamptz(6)
+  conditions     Json
+  sourceRevision String   @map("source_revision")
+  rawEntry       Json     @map("raw_entry")
+
+  @@map("ai_catalog_price_components")
+}
+
+model AiProviderInstance {
+  id          String   @id
+  workspaceId String   @map("workspace_id")
+  providerType String  @map("provider_type")
+  lifecycle   String
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, id])
+  @@map("ai_provider_instances")
+}
+
+model AiProviderInstanceVersion {
+  id                 String   @id
+  workspaceId        String   @map("workspace_id")
+  providerInstanceId String   @map("provider_instance_id")
+  version            Int
+  endpoint           String
+  wireApi            String   @map("wire_api")
+  parameters         Json
+  secretReference    String   @map("secret_reference")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, providerInstanceId, version])
+  @@map("ai_provider_instance_versions")
+}
+
+model AiModelBinding {
+  id          String   @id
+  workspaceId String   @map("workspace_id")
+  role        String
+  lifecycle   String
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, id])
+  @@map("ai_model_bindings")
+}
+
+model AiModelBindingVersion {
+  id                        String   @id
+  workspaceId               String   @map("workspace_id")
+  modelBindingId            String   @map("model_binding_id")
+  version                   Int
+  providerInstanceVersionId String   @map("provider_instance_version_id")
+  catalogSnapshotId         String   @map("catalog_snapshot_id")
+  catalogModelId            String   @map("catalog_model_id")
+  canonicalModel            String   @map("canonical_model")
+  wireApi                   String   @map("wire_api")
+  parameters                Json
+  capabilities              Json
+  maximumInputTokens        Int?     @map("maximum_input_tokens")
+  maximumOutputTokens       Int?     @map("maximum_output_tokens")
+  secretReference           String   @map("secret_reference")
+  createdAt                 DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, modelBindingId, version])
+  @@map("ai_model_binding_versions")
+}
+
+model AiWorkspaceBindingDefault {
+  workspaceId           String   @map("workspace_id")
+  role                  String
+  modelBindingVersionId String   @map("model_binding_version_id")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([workspaceId, role])
+  @@map("ai_workspace_binding_defaults")
+}
+
+model AiInstallationPriceOverride {
+  id             String   @id
+  provider       String
+  canonicalModel String   @map("canonical_model")
+  source         String
+  effectiveFrom  DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo    DateTime? @map("effective_to") @db.Timestamptz(6)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("ai_installation_price_overrides")
+}
+
+model AiWorkspacePriceOverride {
+  id             String   @id
+  workspaceId    String   @map("workspace_id")
+  provider       String
+  canonicalModel String   @map("canonical_model")
+  source         String
+  effectiveFrom  DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo    DateTime? @map("effective_to") @db.Timestamptz(6)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, id])
+  @@map("ai_workspace_price_overrides")
+}
+
+model AiBindingPriceOverride {
+  id                    String   @id
+  workspaceId           String   @map("workspace_id")
+  modelBindingVersionId String   @map("model_binding_version_id")
+  source                String
+  effectiveFrom         DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveTo           DateTime? @map("effective_to") @db.Timestamptz(6)
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, id])
+  @@map("ai_binding_price_overrides")
+}
+
+model AiPriceOverrideComponent {
+  id                           String   @id
+  installationPriceOverrideId  String?  @map("installation_price_override_id")
+  workspaceId                  String?  @map("workspace_id")
+  workspacePriceOverrideId     String?  @map("workspace_price_override_id")
+  bindingPriceOverrideId       String?  @map("binding_price_override_id")
+  componentKind                String   @map("component_kind")
+  billingUnit                  String   @map("billing_unit")
+  amount                       Decimal  @db.Decimal(38, 18)
+  currency                     String   @db.Char(3)
+  conditions                   Json
+  rawEntry                     Json     @map("raw_entry")
+
+  @@map("ai_price_override_components")
+}
+
+model AiBudgetPolicy {
+  id          String   @id
+  workspaceId String   @map("workspace_id")
+  scope       String
+  scopeKey    String   @map("scope_key")
+  limitAmount Decimal  @map("limit_amount") @db.Decimal(38, 18)
+  currency    String   @db.Char(3)
+  hard        Boolean
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, id])
+  @@map("ai_budget_policies")
+}
+
+model AiBudgetBalance {
+  id             String   @id
+  workspaceId    String   @map("workspace_id")
+  budgetPolicyId String   @map("budget_policy_id")
+  scopeKey       String   @map("scope_key")
+  reservedAmount Decimal  @default(0) @map("reserved_amount") @db.Decimal(38, 18)
+  spentAmount    Decimal  @default(0) @map("spent_amount") @db.Decimal(38, 18)
+  currency       String   @db.Char(3)
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, budgetPolicyId, scopeKey])
+  @@map("ai_budget_balances")
+}
+
+model AiOperation {
+  id                        String   @id
+  workspaceId               String   @map("workspace_id")
+  role                      String
+  operationKind             String   @map("operation_kind")
+  modelBindingVersionId     String   @map("model_binding_version_id")
+  providerInstanceVersionId String   @map("provider_instance_version_id")
+  catalogSnapshotId         String   @map("catalog_snapshot_id")
+  configuredModel           String   @map("configured_model")
+  effectiveModel            String?  @map("effective_model")
+  providerRequestId         String?  @map("provider_request_id")
+  retryCount                Int      @default(0) @map("retry_count")
+  latencyMs                 Int?     @map("latency_ms")
+  rawRedacted               Json?    @map("raw_redacted")
+  status                    String
+  errorCode                 String?  @map("error_code")
+  errorRetryable            Boolean? @map("error_retryable")
+  startedAt                 DateTime @map("started_at") @db.Timestamptz(6)
+  finishedAt                DateTime? @map("finished_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, id])
+  @@map("ai_operations")
+}
+
+model AiOperationUsage {
+  id                  String   @id
+  workspaceId         String   @map("workspace_id")
+  operationId         String   @map("operation_id")
+  inputTokens         Int?     @map("input_tokens")
+  outputTokens        Int?     @map("output_tokens")
+  cacheReadInputTokens Int?    @map("cache_read_input_tokens")
+  cacheCreationInputTokens Int? @map("cache_creation_input_tokens")
+  reasoningTokens     Int?     @map("reasoning_tokens")
+  imageUnits          Int?     @map("image_units")
+  audioUnits          Int?     @map("audio_units")
+  rawUsage            Json?    @map("raw_usage")
+
+  @@unique([workspaceId, operationId])
+  @@map("ai_operation_usage")
+}
+
+model AiOperationCost {
+  id                     String   @id
+  workspaceId            String   @map("workspace_id")
+  operationId            String   @map("operation_id")
+  estimatedAmount        Decimal? @map("estimated_amount") @db.Decimal(38, 18)
+  calculatedAmount       Decimal? @map("calculated_amount") @db.Decimal(38, 18)
+  currency               String?  @db.Char(3)
+  providerReportedAmount Decimal? @map("provider_reported_amount") @db.Decimal(38, 18)
+  providerCurrency       String?  @map("provider_currency") @db.Char(3)
+  providerCurrencyStatus String   @default("notReported") @map("provider_currency_status")
+  calculationStatus      String   @map("calculation_status")
+  priceInputs            Json     @map("price_inputs")
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, operationId])
+  @@map("ai_operation_costs")
+}
+
+model AiBudgetReservation {
+  id             String   @id
+  workspaceId    String   @map("workspace_id")
+  operationId    String   @map("operation_id")
+  budgetBalanceId String  @map("budget_balance_id")
+  amount         Decimal? @db.Decimal(38, 18)
+  currency       String   @db.Char(3)
+  status         String
+  overReservationAmount Decimal? @map("over_reservation_amount") @db.Decimal(38, 18)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  reconciledAt   DateTime? @map("reconciled_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, operationId, status])
+  @@map("ai_budget_reservations")
+}

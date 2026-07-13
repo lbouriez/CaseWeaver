@@ -2,8 +2,7 @@
 
 **PBI:** 003
 
-Provider-neutral contracts for embeddings, vision, generation, reranking, and repository
-agents, including normalized usage, capabilities, streaming, cancellation, and typed
-errors.
-
-Contains no provider SDK imports.
+Provider-neutral contracts for embedding, vision, generation, reranking, and repository
+agents. It exposes normalized usage, provider metadata, typed safe errors, cancellation,
+and deterministic test dispatchers. It contains no provider SDK imports, pricing policy,
+binding selection, or persistence behavior.

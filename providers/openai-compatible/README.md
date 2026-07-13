@@ -2,7 +2,7 @@
 
 **PBI:** 003
 
-Embedding, vision, and structured-generation adapter for configurable OpenAI-compatible
-endpoints. Supports immutable endpoint/model bindings and normalized usage.
-
-It must not assume OpenAI-hosted infrastructure.
+Boundary-only embedding, vision, and generation adapter for configurable
+OpenAI-compatible endpoints. It uses safe `fetch`, validates configuration and responses,
+normalizes usage and provider identifiers, and propagates cancellation. It does not
+choose bindings, resolve secrets, reserve budgets, calculate costs, or persist operations.

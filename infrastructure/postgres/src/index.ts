@@ -657,3 +657,5 @@ export function createPostgresPersistence(
     close: async () => client.$disconnect(),
   });
 }
+
+export * from "./ai/index.js";

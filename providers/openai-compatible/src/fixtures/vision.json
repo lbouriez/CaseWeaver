@@ -1,0 +1,14 @@
+{
+  "model": "effective-chat",
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "message": { "content": "fixture answer" }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 3,
+    "completion_tokens": 4,
+    "completion_tokens_details": { "reasoning_tokens": 1 }
+  }
+}
