@@ -1,0 +1,28 @@
+{
+  "name": "@caseweaver/queue-postgres",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "typecheck": "tsc --noEmit --project tsconfig.json",
+    "test": "vitest run --exclude \"src/**/*.integration.test.ts\"",
+    "test:integration": "node --input-type=module -e \"if (process.env.PG_BOSS_INTEGRATION !== '1') throw new Error('Set PG_BOSS_INTEGRATION=1 to run pg-boss integration tests.'); if (!process.env.DATABASE_URL) throw new Error('pg-boss integration tests require DATABASE_URL.');\" && vitest run src/pg-boss.integration.test.ts"
+  },
+  "dependencies": {
+    "@caseweaver/application": "workspace:*",
+    "@caseweaver/domain": "workspace:*",
+    "pg-boss": "12.26.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.7",
+    "typescript": "5.9.3",
+    "vitest": "4.0.18"
+  }
+}

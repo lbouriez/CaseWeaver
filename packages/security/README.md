@@ -2,7 +2,9 @@
 
 **PBIs:** 002, 008, 010, 012, 013
 
-Principal/permission policy, secret-reference contracts, redaction, content trust labels,
-retention decisions, and security audit primitives.
+Code-owned workspace roles (`administrator`, `operator`, `analyst`, and `viewer`),
+permission policy, secret-reference audit contracts, and immutable audit record
+contracts. Decisions always require matching workspace and principal IDs.
 
-Authentication transports and secret stores are outer adapters.
+Authentication transports and secret stores are outer adapters. This package depends
+only on `@caseweaver/domain`.

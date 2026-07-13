@@ -35,3 +35,19 @@ src/
 ```
 
 See `.features/20-persistence-and-database-guide.md`.
+
+## PBI-002 foundation
+
+`prisma/migrations/20260713190000_pbi_002_foundation` is the first forward-only
+migration. It enables `vector` but deliberately creates no vector columns, retrieval
+indexes, normalized content, or connector configuration fields. Apply it with:
+
+```powershell
+$env:DATABASE_URL = "postgresql://..."
+pnpm --filter @caseweaver/postgres run prisma:migrate:deploy
+```
+
+The adapter exposes application ports only. Its outbox claim/ack and resource-lease
+operations use parameterized PostgreSQL SQL with database time, `SKIP LOCKED`, and
+fencing tokens. `test:integration` requires a disposable `DATABASE_URL` whose database
+name includes `test`.

@@ -16,3 +16,13 @@ workspace, correlation/causation IDs, payload, and delivery metadata.
 Production runtime uses pinned pg-boss and disables startup auto-migration with
 `migrate: false`. A dedicated migration command upgrades the pg-boss schema before
 services start. Runtime service roles do not receive DDL permission.
+
+## PBI-002 adapter
+
+`PgBossDurableMessageQueue` is a thin `pg-boss@12.26.0` implementation of the
+application `DurableMessageQueue`. It uses schema `caseweaver_queue`, queue
+`caseweaver.envelope.v1`, and the outbox envelope ID as the pg-boss job ID. Runtime
+always sets `migrate`, `createSchema`, `schedule`, and `useListenNotify` to `false`.
+Envelope IDs must be UUID-formatted because pg-boss stores job IDs as UUID values.
+Call `runPgBossMigrations()` from the controlled installation migration path before
+starting workers; runtime startup then fails rather than creating DDL objects.

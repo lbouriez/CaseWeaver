@@ -1,0 +1,389 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model InstallationState {
+  singleton     Boolean   @id @default(true)
+  workspaceId   String?   @unique @map("workspace_id")
+  principalId   String?   @map("principal_id")
+  initializedAt DateTime? @map("initialized_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@map("installation_state")
+}
+
+model Workspace {
+  id                    String                    @id
+  createdAt             DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  principals            Principal[]
+  roleAssignments       WorkspaceRoleAssignment[]
+  credentials           CredentialRegistration[]
+  connectors            ConnectorRegistration[]
+  externalReferences    ExternalReference[]
+  caseSnapshots         CaseSnapshot[]
+  knowledgeItems        KnowledgeItem[]
+  attachments           Attachment[]
+  analysisProfiles      AnalysisProfile[]
+  analysisProfileVersions AnalysisProfileVersion[]
+  analysisIdentities    AnalysisIdentity[]
+  analysisJobs          AnalysisJob[]
+  analysisAttempts      AnalysisAttempt[]
+  analysisResults       AnalysisResult[]
+  evidence              Evidence[]
+  publicationIntents    PublicationIntent[]
+  publicationAttempts   PublicationAttempt[]
+  auditEvents           AuditEvent[]
+  idempotencyRecords    IdempotencyRecord[]
+  inboxMessages         InboxMessage[]
+  outboxEnvelopes       OutboxEnvelope[]
+  resourceLeases        ResourceLease[]
+
+  @@map("workspaces")
+}
+
+model Principal {
+  id              String                    @id
+  workspaceId     String                    @map("workspace_id")
+  createdAt       DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace       Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  roleAssignments WorkspaceRoleAssignment[]
+
+  @@unique([workspaceId, id])
+  @@map("principals")
+}
+
+model WorkspaceRoleAssignment {
+  workspaceId String   @map("workspace_id")
+  principalId String   @map("principal_id")
+  role        String
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  principal   Principal @relation(fields: [workspaceId, principalId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@id([workspaceId, principalId, role])
+  @@map("workspace_role_assignments")
+}
+
+model CredentialRegistration {
+  id              String   @id
+  workspaceId     String   @map("workspace_id")
+  secretReference String   @map("secret_reference")
+  lifecycle       String
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@unique([workspaceId, secretReference])
+  @@map("credential_registrations")
+}
+
+model ConnectorRegistration {
+  id           String                @id
+  workspaceId  String                @map("workspace_id")
+  lifecycle    String
+  version      Int                   @default(1)
+  createdAt    DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace    Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  capabilities ConnectorCapability[]
+  references   ExternalReference[]
+
+  @@unique([workspaceId, id])
+  @@map("connector_registrations")
+}
+
+model ConnectorCapability {
+  workspaceId              String                @map("workspace_id")
+  connectorRegistrationId  String                @map("connector_registration_id")
+  capability               String
+  createdAt                DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  connector                ConnectorRegistration @relation(fields: [workspaceId, connectorRegistrationId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@id([workspaceId, connectorRegistrationId, capability])
+  @@map("connector_capabilities")
+}
+
+model ExternalReference {
+  id                      String                @id
+  workspaceId             String                @map("workspace_id")
+  connectorRegistrationId String                @map("connector_registration_id")
+  kind                    String
+  externalId              String                @map("external_id")
+  observedHash            String?               @map("observed_hash")
+  createdAt               DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt               DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace               Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  connector               ConnectorRegistration @relation(fields: [workspaceId, connectorRegistrationId], references: [workspaceId, id], onDelete: Restrict)
+  caseSnapshots           CaseSnapshot[]
+  knowledgeItems          KnowledgeItem[]
+  attachments             Attachment[]
+
+  @@unique([workspaceId, connectorRegistrationId, kind, externalId])
+  @@unique([workspaceId, id])
+  @@map("external_references")
+}
+
+model CaseSnapshot {
+  id                  String             @id
+  workspaceId         String             @map("workspace_id")
+  externalReferenceId String             @map("external_reference_id")
+  lifecycle           String
+  snapshotHash        String             @map("snapshot_hash")
+  observedAt          DateTime           @map("observed_at") @db.Timestamptz(6)
+  createdAt           DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace           Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  externalReference   ExternalReference  @relation(fields: [workspaceId, externalReferenceId], references: [workspaceId, id], onDelete: Restrict)
+  analysisIdentities  AnalysisIdentity[]
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, externalReferenceId, snapshotHash])
+  @@map("case_snapshots")
+}
+
+model KnowledgeItem {
+  id                  String            @id
+  workspaceId         String            @map("workspace_id")
+  externalReferenceId String            @map("external_reference_id")
+  lifecycle           String
+  version             Int
+  contentHash         String            @map("content_hash")
+  observedAt          DateTime          @map("observed_at") @db.Timestamptz(6)
+  createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace           Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  externalReference   ExternalReference @relation(fields: [workspaceId, externalReferenceId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@unique([workspaceId, externalReferenceId, version])
+  @@map("knowledge_items")
+}
+
+model Attachment {
+  id                  String            @id
+  workspaceId         String            @map("workspace_id")
+  externalReferenceId String            @map("external_reference_id")
+  lifecycle           String
+  contentHash         String?           @map("content_hash")
+  observedAt          DateTime          @map("observed_at") @db.Timestamptz(6)
+  createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace           Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  externalReference   ExternalReference @relation(fields: [workspaceId, externalReferenceId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@unique([workspaceId, id])
+  @@map("attachments")
+}
+
+model AnalysisProfile {
+  id        String                   @id
+  workspaceId String                 @map("workspace_id")
+  lifecycle String
+  createdAt DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  versions  AnalysisProfileVersion[]
+
+  @@unique([workspaceId, id])
+  @@map("analysis_profiles")
+}
+
+model AnalysisProfileVersion {
+  id                String             @id
+  workspaceId       String             @map("workspace_id")
+  analysisProfileId String             @map("analysis_profile_id")
+  version           Int
+  definitionHash    String             @map("definition_hash")
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace         Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  profile           AnalysisProfile    @relation(fields: [workspaceId, analysisProfileId], references: [workspaceId, id], onDelete: Restrict)
+  identities        AnalysisIdentity[]
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, analysisProfileId, version])
+  @@map("analysis_profile_versions")
+}
+
+model AnalysisIdentity {
+  id                      String                 @id
+  workspaceId             String                 @map("workspace_id")
+  identityHash            String                 @map("identity_hash")
+  analysisProfileVersionId String                @map("analysis_profile_version_id")
+  caseSnapshotId          String                 @map("case_snapshot_id")
+  createdAt               DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace               Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  profileVersion          AnalysisProfileVersion @relation(fields: [workspaceId, analysisProfileVersionId], references: [workspaceId, id], onDelete: Restrict)
+  caseSnapshot            CaseSnapshot           @relation(fields: [workspaceId, caseSnapshotId], references: [workspaceId, id], onDelete: Restrict)
+  jobs                    AnalysisJob[]
+
+  @@unique([workspaceId, identityHash])
+  @@unique([workspaceId, id])
+  @@map("analysis_identities")
+}
+
+model AnalysisJob {
+  id                 String             @id
+  workspaceId        String             @map("workspace_id")
+  analysisIdentityId String             @map("analysis_identity_id")
+  runOrdinal         Int                @map("run_ordinal")
+  state              String
+  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace          Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  identity           AnalysisIdentity   @relation(fields: [workspaceId, analysisIdentityId], references: [workspaceId, id], onDelete: Restrict)
+  attempts           AnalysisAttempt[]
+  results            AnalysisResult[]
+  publicationIntents PublicationIntent[]
+
+  @@unique([analysisIdentityId, runOrdinal])
+  @@unique([workspaceId, id])
+  @@map("analysis_jobs")
+}
+
+model AnalysisAttempt {
+  id          String      @id
+  workspaceId String      @map("workspace_id")
+  analysisJobId String    @map("analysis_job_id")
+  attemptOrdinal Int      @map("attempt_ordinal")
+  state       String
+  startedAt   DateTime    @map("started_at") @db.Timestamptz(6)
+  finishedAt  DateTime?   @map("finished_at") @db.Timestamptz(6)
+  errorCode   String?     @map("error_code")
+  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  job         AnalysisJob @relation(fields: [workspaceId, analysisJobId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@unique([analysisJobId, attemptOrdinal])
+  @@map("analysis_attempts")
+}
+
+model AnalysisResult {
+  id          String      @id
+  workspaceId String      @map("workspace_id")
+  analysisJobId String    @map("analysis_job_id")
+  resultHash  String      @map("result_hash")
+  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  job         AnalysisJob @relation(fields: [workspaceId, analysisJobId], references: [workspaceId, id], onDelete: Restrict)
+  evidence    Evidence[]
+
+  @@unique([workspaceId, analysisJobId])
+  @@unique([workspaceId, id])
+  @@map("analysis_results")
+}
+
+model Evidence {
+  id               String         @id
+  workspaceId      String         @map("workspace_id")
+  analysisResultId String         @map("analysis_result_id")
+  evidenceHash     String         @map("evidence_hash")
+  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace        Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  analysisResult   AnalysisResult @relation(fields: [workspaceId, analysisResultId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@unique([workspaceId, id])
+  @@map("evidence")
+}
+
+model PublicationIntent {
+  id            String       @id
+  workspaceId   String       @map("workspace_id")
+  analysisJobId String       @map("analysis_job_id")
+  state         String
+  intentHash    String       @map("intent_hash")
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace     Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  job           AnalysisJob  @relation(fields: [workspaceId, analysisJobId], references: [workspaceId, id], onDelete: Restrict)
+  attempts      PublicationAttempt[]
+
+  @@unique([workspaceId, id])
+  @@map("publication_intents")
+}
+
+model PublicationAttempt {
+  id                  String            @id
+  workspaceId         String            @map("workspace_id")
+  publicationIntentId String            @map("publication_intent_id")
+  attemptOrdinal      Int               @map("attempt_ordinal")
+  state               String
+  createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  finishedAt          DateTime?         @map("finished_at") @db.Timestamptz(6)
+  workspace           Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  intent              PublicationIntent @relation(fields: [workspaceId, publicationIntentId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@unique([publicationIntentId, attemptOrdinal])
+  @@map("publication_attempts")
+}
+
+model AuditEvent {
+  id               String     @id
+  workspaceId      String     @map("workspace_id")
+  actorPrincipalId String?    @map("actor_principal_id")
+  action           String
+  targetId         String?    @map("target_id")
+  beforeHash       String?    @map("before_hash")
+  afterHash        String?    @map("after_hash")
+  occurredAt       DateTime   @map("occurred_at") @db.Timestamptz(6)
+  workspace        Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@map("audit_events")
+}
+
+model IdempotencyRecord {
+  workspaceId    String   @map("workspace_id")
+  operation      String
+  keyDigest      String   @map("key_digest")
+  requestDigest  String   @map("request_digest")
+  resourceId     String   @map("resource_id")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@id([workspaceId, operation, keyDigest])
+  @@map("idempotency_records")
+}
+
+model InboxMessage {
+  id          String   @id
+  workspaceId String   @map("workspace_id")
+  messageHash String   @map("message_hash")
+  receivedAt  DateTime @default(now()) @map("received_at") @db.Timestamptz(6)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@unique([workspaceId, messageHash])
+  @@map("inbox_messages")
+}
+
+model OutboxEnvelope {
+  id             String   @id
+  workspaceId    String   @map("workspace_id")
+  kind           String
+  type           String
+  schemaVersion  Int      @map("schema_version")
+  occurredAt     DateTime @map("occurred_at") @db.Timestamptz(6)
+  correlationId  String   @map("correlation_id")
+  causationId    String   @map("causation_id")
+  payload        Json
+  availableAt    DateTime @default(now()) @map("available_at") @db.Timestamptz(6)
+  claimToken     String?  @map("claim_token")
+  claimedUntil   DateTime? @map("claimed_until") @db.Timestamptz(6)
+  claimAttempts  Int      @default(0) @map("claim_attempts")
+  deliveredAt    DateTime? @map("delivered_at") @db.Timestamptz(6)
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@index([deliveredAt, availableAt, claimedUntil])
+  @@map("outbox_envelopes")
+}
+
+model ResourceLease {
+  id            String   @id
+  workspaceId   String   @map("workspace_id")
+  resourceType  String   @map("resource_type")
+  resourceKey   String   @map("resource_key")
+  fencingToken  BigInt   @map("fencing_token")
+  expiresAt     DateTime @map("expires_at") @db.Timestamptz(6)
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@unique([workspaceId, resourceType, resourceKey])
+  @@map("resource_leases")
+}

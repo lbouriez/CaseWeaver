@@ -22,6 +22,12 @@ Implement portable domain primitives, durable jobs, and initial database migrati
 - Single-workspace bootstrap while retaining workspace IDs in all owned records.
 - Application-service authorization guard and one-administrator bootstrap flow.
 
+PBI-002 persists identity, ownership, lifecycle, version, hash, and provenance
+placeholders only. It does not define normalized case/message bodies or hashing
+(PBI-006), knowledge content/revisions/chunks (PBI-004), attachment derivatives
+(PBI-008), model/budget data (PBI-003), structured analysis/evidence payloads
+(PBI-011), or publication profile/destination details (PBI-012).
+
 ## Acceptance criteria
 
 - Expired running jobs are recoverable without duplicate active leases.

@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Node.js 22 or later
+- Node.js 22.12 or later
 - Corepack
 - Docker Desktop for PostgreSQL integration checks
 
@@ -25,6 +25,9 @@ pnpm deps:check
 pnpm typecheck
 pnpm build
 pnpm test
+pnpm db:test:up
+pnpm test:integration
+pnpm db:test:down
 ```
 
 Start a disposable PostgreSQL/pgvector instance when needed:

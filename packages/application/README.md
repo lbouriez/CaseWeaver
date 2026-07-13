@@ -2,11 +2,10 @@
 
 **PBIs:** 002, 011, 012, 013
 
-Use-case interfaces, commands, queries, transaction boundaries, authorization checks,
-repository/queue/clock/secret ports, inbox/outbox contracts, and orchestration contracts.
+Owns vendor-neutral ports, opaque transaction boundaries, authorization contexts, and
+the PBI-002 `BootstrapWorkspace`, `RequestAnalysis`, `ForceRerunAnalysis`,
+`CancelAnalysisJob`, and `OutboxRelay` use cases. The relay claims briefly, publishes
+outside the transaction, and acknowledges only after publication.
 
-Owns the outbox relay application service. The relay claims committed envelopes through
-`OutboxStore`, publishes typed command/domain-event envelopes through
-`DurableMessageQueue`, and marks delivery idempotently.
-
-May depend on domain and SDK contracts. Must not depend on concrete adapters.
+This package depends only on domain/security contracts, never Prisma, pg-boss, HTTP, or
+other concrete adapters.

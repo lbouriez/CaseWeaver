@@ -5,7 +5,7 @@
   "type": "module",
   "packageManager": "pnpm@11.12.0",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "format": "biome format --write .",
@@ -14,6 +14,7 @@
     "typecheck": "pnpm -r --if-present run typecheck",
     "build": "pnpm -r --if-present run build",
     "test": "pnpm -r --if-present run test",
+    "test:integration": "pnpm --filter @caseweaver/postgres run test:integration && pnpm --filter @caseweaver/queue-postgres run test:integration",
     "deps:check": "depcruise --config .dependency-cruiser.cjs apps packages connectors providers infrastructure --output-type err",
     "ci": "pnpm format:check && pnpm lint && pnpm deps:check && pnpm typecheck && pnpm build && pnpm test",
     "db:test:up": "docker compose -f deploy/docker/compose.test.yml up -d --wait",
