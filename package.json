@@ -14,7 +14,7 @@
     "typecheck": "pnpm -r --if-present run typecheck",
     "build": "pnpm -r --if-present run build",
     "test": "pnpm -r --if-present run test && pnpm test:contract",
-    "test:contract": "vitest run tests/contract/ai tests/contract/connectors",
+    "test:contract": "pnpm --filter @caseweaver/attachments run build && pnpm --filter @caseweaver/object-storage run build && pnpm --filter @caseweaver/attachment-runtime run build && vitest run tests/contract/ai tests/contract/attachments tests/contract/connectors",
     "test:integration": "pnpm --filter @caseweaver/postgres run test:integration && pnpm --filter @caseweaver/queue-postgres run test:integration",
     "deps:check": "depcruise --config .dependency-cruiser.cjs apps packages connectors providers infrastructure --output-type err",
     "ci": "pnpm format:check && pnpm lint && pnpm deps:check && pnpm typecheck && pnpm build && pnpm test",

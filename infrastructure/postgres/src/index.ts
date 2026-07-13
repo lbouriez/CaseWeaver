@@ -659,5 +659,6 @@ export function createPostgresPersistence(
 }
 
 export * from "./ai/index.js";
+export * from "./attachments/index.js";
 export * from "./knowledge/index.js";
 export * from "./scheduling/index.js";

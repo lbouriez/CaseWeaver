@@ -27,6 +27,9 @@ model Workspace {
   caseSnapshots         CaseSnapshot[]
   knowledgeItems        KnowledgeItem[]
   attachments           Attachment[]
+  attachmentBlobs       AttachmentBlob[]
+  attachmentDerivatives AttachmentDerivative[]
+  attachmentDerivativeSources AttachmentDerivativeSource[]
   knowledgeCollections  KnowledgeCollection[]
   knowledgeSources      KnowledgeSource[]
   knowledgeSourceStates KnowledgeSourceState[]
@@ -411,18 +414,120 @@ model KnowledgeScheduleCommand {
 }
 
 model Attachment {
-  id                  String            @id
-  workspaceId         String            @map("workspace_id")
-  externalReferenceId String            @map("external_reference_id")
-  lifecycle           String
-  contentHash         String?           @map("content_hash")
-  observedAt          DateTime          @map("observed_at") @db.Timestamptz(6)
-  createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
-  workspace           Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  externalReference   ExternalReference @relation(fields: [workspaceId, externalReferenceId], references: [workspaceId, id], onDelete: Restrict)
+  id                      String                       @id
+  workspaceId             String                       @map("workspace_id")
+  externalReferenceId     String                       @map("external_reference_id")
+  lifecycle               String
+  contentHash             String?                      @map("content_hash")
+  blobId                  String?                      @map("blob_id")
+  byteLength              BigInt?                      @map("byte_length")
+  declaredMimeType        String?                      @map("declared_mime_type")
+  detectedMimeType        String?                      @map("detected_mime_type")
+  sanitizedFilename       String?                      @map("sanitized_filename")
+  retentionExpiresAt      DateTime?                    @map("retention_expires_at") @db.Timestamptz(6)
+  retentionState          String                       @default("active") @map("retention_state")
+  retentionClaimId        String?                      @map("retention_claim_id")
+  retentionClaimedAt      DateTime?                    @map("retention_claimed_at") @db.Timestamptz(6)
+  retentionClaimExpiresAt DateTime?                    @map("retention_claim_expires_at") @db.Timestamptz(6)
+  retentionDeletedAt      DateTime?                    @map("retention_deleted_at") @db.Timestamptz(6)
+  observedAt              DateTime                     @map("observed_at") @db.Timestamptz(6)
+  createdAt               DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace               Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  externalReference       ExternalReference            @relation(fields: [workspaceId, externalReferenceId], references: [workspaceId, id], onDelete: Restrict)
+  blob                    AttachmentBlob?              @relation(fields: [workspaceId, blobId], references: [workspaceId, id], onDelete: Restrict)
+  derivativeSources       AttachmentDerivativeSource[]
 
   @@unique([workspaceId, id])
+  @@unique([workspaceId, blobId])
   @@map("attachments")
+}
+
+model AttachmentBlob {
+  id                      String       @id
+  workspaceId             String       @map("workspace_id")
+  storageKey              String?      @map("storage_key")
+  contentHash             String       @map("content_hash")
+  byteLength              BigInt       @map("byte_length")
+  detectedMimeType        String       @map("detected_mime_type")
+  retentionState          String       @default("active") @map("retention_state")
+  retentionClaimId        String?      @map("retention_claim_id")
+  retentionClaimedAt      DateTime?    @map("retention_claimed_at") @db.Timestamptz(6)
+  retentionClaimExpiresAt DateTime?    @map("retention_claim_expires_at") @db.Timestamptz(6)
+  retentionDeletedAt      DateTime?    @map("retention_deleted_at") @db.Timestamptz(6)
+  createdAt               DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace               Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  references              Attachment[]
+
+  @@unique([workspaceId, id])
+  @@map("attachment_blobs")
+}
+
+model AttachmentDerivative {
+  id                      String                       @id
+  workspaceId             String                       @map("workspace_id")
+  identityKey             String                       @map("identity_key")
+  accessPolicyHash        String                       @map("access_policy_hash")
+  contentHash             String                       @map("content_hash")
+  processor               String
+  processorVersion        String                       @map("processor_version")
+  securityPolicyVersion   String                       @map("security_policy_version")
+  normalizationVersion    String                       @map("normalization_version")
+  visionPromptVersion     String?                      @map("vision_prompt_version")
+  visionBindingVersionId  String?                      @map("vision_binding_version_id")
+  status                  String
+  claimId                 String?                      @map("claim_id")
+  claimExpiresAt          DateTime?                    @map("claim_expires_at") @db.Timestamptz(6)
+  claimAttempts           Int                          @default(0) @map("claim_attempts")
+  outputStorageKey        String?                      @map("output_storage_key")
+  outputMimeType          String?                      @map("output_mime_type")
+  aiOperationId           String?                      @map("ai_operation_id")
+  failureCode             String?                      @map("failure_code")
+  failureRetryable        Boolean?                     @map("failure_retryable")
+  createdAt               DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt             DateTime?                    @map("completed_at") @db.Timestamptz(6)
+  failedAt                DateTime?                    @map("failed_at") @db.Timestamptz(6)
+  retentionExpiresAt      DateTime?                    @map("retention_expires_at") @db.Timestamptz(6)
+  retentionState          String                       @default("active") @map("retention_state")
+  retentionClaimId        String?                      @map("retention_claim_id")
+  retentionClaimedAt      DateTime?                    @map("retention_claimed_at") @db.Timestamptz(6)
+  retentionClaimExpiresAt DateTime?                    @map("retention_claim_expires_at") @db.Timestamptz(6)
+  retentionDeletedAt      DateTime?                    @map("retention_deleted_at") @db.Timestamptz(6)
+  workspace               Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  sources                 AttachmentDerivativeSource[]
+  failures                AttachmentDerivativeFailure[]
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, identityKey])
+  @@map("attachment_derivatives")
+}
+
+model AttachmentDerivativeSource {
+  workspaceId            String               @map("workspace_id")
+  attachmentDerivativeId String               @map("attachment_derivative_id")
+  attachmentId           String               @map("attachment_id")
+  sourceJobId            String               @map("source_job_id")
+  createdAt              DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace              Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  derivative             AttachmentDerivative @relation(fields: [workspaceId, attachmentDerivativeId], references: [workspaceId, id], onDelete: Restrict)
+  attachment             Attachment           @relation(fields: [workspaceId, attachmentId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@id([workspaceId, attachmentDerivativeId, attachmentId, sourceJobId])
+  @@map("attachment_derivative_sources")
+}
+
+model AttachmentDerivativeFailure {
+  id                     String               @id
+  workspaceId            String               @map("workspace_id")
+  attachmentDerivativeId String               @map("attachment_derivative_id")
+  claimId                String               @map("claim_id")
+  code                   String
+  retryable              Boolean
+  failedAt               DateTime             @map("failed_at") @db.Timestamptz(6)
+  derivative             AttachmentDerivative @relation(fields: [workspaceId, attachmentDerivativeId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, attachmentDerivativeId, claimId])
+  @@map("attachment_derivative_failures")
 }
 
 model AnalysisProfile {
