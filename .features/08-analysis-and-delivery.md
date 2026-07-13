@@ -10,7 +10,6 @@ An analysis profile versions:
 - repository bindings,
 - prompt templates,
 - output schema,
-- publication policy,
 - and cost/token budgets.
 
 Changing a profile creates a new version. Existing analyses remain linked to the version
@@ -37,8 +36,8 @@ Probable causes and recommendations reference evidence IDs. Evidence types inclu
 messages, attachment derivatives, knowledge chunks, and repository file/line ranges.
 Assertions without evidence must be marked as hypotheses.
 
-The model returns structured data validated by Zod. HTML and Markdown are rendered by
-CaseWeaver, not authored as trusted HTML by the model.
+The model returns destination-neutral structured data validated by Zod. It does not
+select destinations or produce trusted destination markup.
 
 ## Repository investigation
 
@@ -61,7 +60,15 @@ leaves explicit tombstones and hashes rather than a claim of exact reproduction.
 
 ## Publication policy
 
-Profiles support:
+A separate publication profile versions:
+
+- destination binding,
+- renderer and template,
+- notice/disclaimer policy,
+- visibility and destination-specific limits,
+- and publication mode.
+
+Publication modes support:
 
 - `previewOnly`
 - `approvalRequired`

@@ -13,7 +13,7 @@ through the originating support system.
 - Knowledge sources are independently configured adapter instances. Each source chooses
   its synchronization policy, knowledge collection, chunking profile, and embedding
   binding.
-- Destinations are adapter instances selected by an analysis profile. Jitbit, Odoo, or
+- Destinations are adapter instances selected by a publication profile. Jitbit, Odoo, or
   another destination must be replaceable without changing analysis orchestration.
 - AI providers and models are configuration. Embedding, vision, generation, reranking,
   and repository-agent roles may use different providers and models.
@@ -65,6 +65,21 @@ The `.features` directory is the authoritative implementation specification:
 Implementation-ready backlog items are temporarily maintained under
 [`temp/pbi`](temp/pbi/README.md). They can later be imported into GitHub Issues and
 removed from the repository.
+
+## Repository structure
+
+The repository is scaffolded as a hexagonal TypeScript monorepo:
+
+- `apps/` contains deployable process entry points.
+- `packages/` contains vendor-neutral domain and application modules.
+- `connectors/` contains source and destination adapters.
+- `providers/` contains AI and agent-runtime adapters.
+- `infrastructure/` contains database, queue, storage, and sandbox adapters.
+- `deploy/` contains deployment composition.
+- `tests/` contains cross-package contract, integration, and end-to-end suites.
+
+Temporary folder READMEs define ownership and PBI mappings for parallel coding agents.
+See [`AGENTS.md`](AGENTS.md) before implementing a package.
 
 ## Status
 

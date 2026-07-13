@@ -13,6 +13,7 @@ Define portable case and destination contracts before implementing a vendor adap
 - Connector configuration, capability, cursor, cancellation, pagination, rate-limit,
   and typed-error primitives.
 - Opaque discovery fingerprint/revision contract and source synchronization-policy schema.
+- Snapshot/delta discovery mode, scan epoch/completion, and explicit tombstone contracts.
 - Connector conformance test kit and fixture builders.
 - Jitbit-shaped, Odoo-shaped, and capability-limited fixtures.
 

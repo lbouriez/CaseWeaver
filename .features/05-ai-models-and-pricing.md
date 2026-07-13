@@ -45,6 +45,12 @@ interface RepositoryAgentProvider {}
 interface RerankerProvider {}
 ```
 
+Feature packages do not invoke these provider ports directly. A single metered AI
+execution gateway resolves the immutable binding, reserves budgets, calls the provider,
+normalizes usage, finalizes the operation ledger and costs, then returns the normalized
+result. This applies to embeddings, vision, generation, reranking, repository agents,
+and future chat.
+
 Interfaces return normalized output and normalized usage while preserving the encrypted
 or redacted provider response needed for diagnostics. Provider-specific request options
 must not leak into domain services; an explicitly typed extension bag may be attached to

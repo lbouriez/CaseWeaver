@@ -24,6 +24,8 @@ Safely convert supported case and knowledge attachments into reusable text deriv
 - Standalone images always reach case analysis as evidence.
 - Zip Slip, archive bombs, excessive nesting, symlinks, and unsupported MIME fixtures are
   rejected.
+- Parsers execute outside the privileged worker with workspace-scoped inputs/outputs and
+  no network or credentials.
 - Temporary files are cleaned after success, failure, timeout, and cancellation.
 - Vision usage and cost link to the attachment and analysis/source job.
 

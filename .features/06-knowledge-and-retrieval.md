@@ -34,6 +34,10 @@ explicit.
 
 - Every source instance runs from its own manual, cron, polling, webhook, or combined
   synchronization policy.
+- Discovery declares either snapshot or delta semantics.
+- Snapshot synchronization uses a stable scan epoch across every page. Items absent from
+  a snapshot are eligible for deletion only after the complete scan succeeds.
+- Delta synchronization deletes only from explicit tombstones/events.
 - Discovery uses connector cursors and cheap external fingerprints where possible.
 - If the discovered external fingerprint equals the last successful observation, the
   item is a no-op: do not load content, process attachments, chunk, or call embeddings.
@@ -48,6 +52,9 @@ explicit.
   embedding profile, vector dimensions, and relevant normalization version.
 - Deleted source items are tombstoned and removed from active retrieval.
 - Failed revisions remain inspectable without replacing the prior successful revision.
+
+Activation, eligible deletion reconciliation, and cursor advancement commit atomically.
+A failed, cancelled, or incomplete scan performs none of those final state changes.
 
 Examples:
 

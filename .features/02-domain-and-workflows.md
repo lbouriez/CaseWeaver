@@ -62,11 +62,14 @@ An unsuccessful revision must not replace the last searchable successful revisio
 6. Hybrid retrieval returns evidence from configured sources.
 7. The repository agent inspects an explicitly configured repository and pinned commit.
 8. The analysis model produces a validated structured result.
-9. Server code adds policy-controlled notices and renders destination-specific output.
-10. The analysis is stored before any publication attempt.
-11. Auto-publish, approval-required, or preview-only policy is applied.
+9. The destination-neutral analysis is stored.
 
 ## Workflow C: publish an analysis
+
+1. Publication policy selects preview, approval, or internal auto-publication.
+2. The configured publication profile selects destination and renderer.
+3. Server code renders destination-specific output and appends policy-controlled notices.
+4. The publication command acquires its idempotency lease and invokes the destination.
 
 Publication is independently retryable and idempotent. A successful remote write with a
 lost local response must not create a duplicate comment on retry. Adapters should use a
@@ -77,10 +80,10 @@ CaseWeaver publication marker before writing.
 
 Synchronization: `queued -> running -> completed | failed | cancelled`
 
-Analysis: `queued -> running -> awaiting_approval | completed | failed | cancelled`
+Analysis: `queued -> running -> completed | failed | cancelled`
 
 Publication:
-`pending -> publishing -> published | outcome_unknown | failed | skipped`
+`pending -> awaiting_approval | publishing -> published | outcome_unknown | failed | skipped`
 
 Running records have expiring leases. Expired work is recoverable and increments an
 attempt counter. Terminal failures preserve a typed error and retry classification.

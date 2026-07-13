@@ -40,8 +40,9 @@ structured analysis that can be reviewed or published through a destination adap
 
 Each knowledge source has its own synchronization policy and may target a configured
 knowledge collection. Analysis profiles independently select knowledge collections,
-destination adapters, and immutable model bindings for embedding, vision, analysis, and
-repository-agent roles.
+and immutable model bindings for embedding, vision, analysis, and repository-agent
+roles. Separate publication profiles select destinations, rendering, notices, and
+approval policy.
 
 ## Explicit non-goals for the first release
 

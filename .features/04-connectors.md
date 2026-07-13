@@ -81,10 +81,10 @@ Connectors expose capabilities; the scheduler decides when to invoke them.
 
 ## Destination configuration
 
-Analysis profiles reference configured `AnalysisDestination` instances. A destination is
-not assumed to be the same connector that supplied the case. Profiles may use no
-destination, one destination, or policy-controlled multiple destinations without changing
-the analysis engine.
+Publication profiles reference configured `AnalysisDestination` instances. A destination
+is not assumed to be the same connector that supplied the case. Profiles may use no
+destination, one destination, or policy-controlled multiple destinations without
+changing the analysis engine.
 
 ## Reference adapters
 

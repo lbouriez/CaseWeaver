@@ -20,6 +20,7 @@ budgets.
 - Transactional budget reservations for operation, analysis, day, and workspace scopes.
 - Deterministic fake providers for tests.
 - Workspace defaults plus knowledge-collection and analysis-profile binding selection.
+- Exclusive metered AI execution gateway used by every feature package.
 
 ## Acceptance criteria
 
@@ -36,6 +37,8 @@ budgets.
 - Every successful or failed provider call creates an operation record.
 - Binding role, capability, and context/output limits are validated.
 - Core services select providers and models only through binding IDs and interfaces.
+- Tests prove feature packages cannot bypass budget reservation and ledger finalization
+  through direct provider access.
 
 ## Excluded
 

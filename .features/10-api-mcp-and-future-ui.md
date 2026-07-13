@@ -43,6 +43,15 @@ not bypass queueing, budgets, attachment limits, or publication policy.
 Knowledge synchronization and case analysis are separate command types and schedules.
 Running one source never implicitly synchronizes every configured source.
 
+Public webhook URLs contain a server-generated opaque endpoint ID. Server-side
+configuration maps that ID to workspace, connector instance, adapter, and secret
+reference before any body/header value is trusted. Signature verification uses exact raw
+request bytes.
+
+After verification, webhook idempotency/inbox and command outbox records commit in one
+transaction. Queue delivery is performed by a deduplicating outbox relay, so a crash
+cannot leave a persisted event without its command or enqueue an unpersisted event.
+
 ## CLI
 
 The CLI supports local administration and automation:

@@ -15,6 +15,8 @@ Build the source-neutral ingestion pipeline.
 - Deterministic chunk IDs and content hashes.
 - Batched embeddings with reuse across unchanged chunks.
 - Deletion/tombstone handling.
+- Snapshot/delta discovery semantics, stable scan epochs, and atomic activation/deletion/
+  cursor commit.
 - Failed-revision diagnostics and synchronization statistics.
 
 ## Acceptance criteria
@@ -29,6 +31,7 @@ Build the source-neutral ingestion pipeline.
 - A failed revision leaves the prior revision searchable.
 - Deletion removes the item from active retrieval.
 - Cursor advancement and activation commit atomically where required.
+- Failed or incomplete snapshot scans neither delete missing items nor advance cursors.
 - Embedding operations allocate usage and cost to affected chunks.
 
 ## Excluded

@@ -12,6 +12,7 @@ Make CaseWeaver operable as an autonomous, recoverable service.
 - Retention jobs and privacy deletion with audit events and tombstones.
 - Redacted diagnostic export.
 - Docker Compose production example and installation documentation.
+- Distributed and standalone profiles using the identical durable queue and handlers.
 
 ## Acceptance criteria
 
@@ -20,6 +21,8 @@ Make CaseWeaver operable as an autonomous, recoverable service.
 - Cost and reservations can be queried by analysis, model role, connector, and time.
 - Privacy deletion removes governed content and leaves the documented audit tombstone.
 - Operational commands enforce workspace permissions and record their actor.
+- Switching between standalone and distributed deployment preserves queued work and
+  execution semantics.
 
 ## Excluded
 
