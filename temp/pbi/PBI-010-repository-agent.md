@@ -4,6 +4,19 @@
 
 Provide an optional isolated implementation of the repository-agent port.
 
+## Existing implementation reference
+
+Before implementing, inspect
+`C:\GIT\Nectari\Scripts\Tools\AITinyBootstrap`, particularly its provider wiring,
+configuration loading, MCP injection, skill resolution, structured logging, artifact
+output, cancellation behavior, and usage/cost capture. Its `README.md` documents the
+expected operational flow.
+
+This is behavioral reference material, not a runtime dependency. CaseWeaver must retain
+provider neutrality, use its exclusive AI execution gateway, enforce the PBI sandbox and
+budget requirements, and support Copilot SDK BYOK without requiring a Copilot
+subscription or GitHub authentication.
+
 ## Scope
 
 - Checkout broker using administrator-configured repository and secret reference.

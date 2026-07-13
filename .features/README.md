@@ -43,3 +43,4 @@ authoritative after the PBIs are moved to an issue tracker.
 - `21-chat-and-mcp-guide.md`
 - `22-testing-strategy.md`
 - `23-implementation-workflow.md`
+- `24-legacy-reference-implementations.md`

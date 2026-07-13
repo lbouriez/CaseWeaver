@@ -4,6 +4,25 @@
 
 Prove the helpdesk-neutral contracts with a complete Jitbit implementation.
 
+## Existing implementation reference
+
+Before implementing, inspect
+`C:\GIT\Nectari\Scripts\Cloud\Modules\HelpDeskHelper.psm1`, especially:
+
+- `Get-JitbitAllTicketSummaries` for cheap paginated ticket discovery;
+- `Get-JitbitTicketDetail` and `Get-JitbitTicketComments` for full records, ordered
+  comments, and system/agent-comment exclusion;
+- `Get-JitbitTicketAttachments` for attachment metadata from ticket bodies, ticket
+  attachments, and comments;
+- `Get-UnanalyzedJitbitTickets`, `Publish-JitbitComment`, and
+  `Register-TicketAnalysis` for the current selection, publication, and reconciliation
+  behavior.
+
+This is behavioral reference material, not a dependency or a design template. Reuse
+the API knowledge and edge cases while implementing the CaseWeaver contracts,
+incremental fingerprints, secret references, typed failures, and publication marker
+semantics defined in `.features/15-connectors-and-destinations-guide.md`.
+
 ## Scope
 
 - Jitbit configuration and authenticated client.

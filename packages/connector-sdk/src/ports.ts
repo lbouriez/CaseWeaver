@@ -84,6 +84,11 @@ export interface RenderedPublication {
 }
 
 export interface FindPublicationRequest extends OperationContext {
+  /**
+   * Limits reconciliation to the resource that would receive the publication.
+   * A marker alone is not globally unique across all destination resources.
+   */
+  readonly target: ExternalReference;
   readonly marker: PublicationMarker;
 }
 
