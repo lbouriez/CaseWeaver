@@ -5,8 +5,9 @@ must preserve. It is written for both maintainers and coding agents.
 
 ## Reading order
 
-Read files `01` through `12` before making cross-cutting changes. For a focused change,
-read the target file plus all documents it links to.
+Read files `01` through `12` for product and architecture context. Files `13` through
+`23` are implementation guides for coding agents. For a focused change, read the target
+guide, its package README, and its PBI.
 
 ## Normative language
 
@@ -28,3 +29,17 @@ read the target file plus all documents it links to.
 
 The temporary PBI files describe delivery slices. These feature files remain
 authoritative after the PBIs are moved to an issue tracker.
+
+## Implementation guides
+
+- `13-domain-and-application-guide.md`
+- `14-knowledge-sources-guide.md`
+- `15-connectors-and-destinations-guide.md`
+- `16-ai-execution-guide.md`
+- `17-analysis-and-prompts-guide.md`
+- `18-attachments-guide.md`
+- `19-scheduler-and-webhook-guide.md`
+- `20-persistence-and-database-guide.md`
+- `21-chat-and-mcp-guide.md`
+- `22-testing-strategy.md`
+- `23-implementation-workflow.md`

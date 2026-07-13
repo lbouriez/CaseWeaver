@@ -81,6 +81,10 @@ The repository is scaffolded as a hexagonal TypeScript monorepo:
 Temporary folder READMEs define ownership and PBI mappings for parallel coding agents.
 See [`AGENTS.md`](AGENTS.md) before implementing a package.
 
+Implementation agents should also read the detailed guides in `.features/13` through
+`.features/23`. [`START_CODING_PROMPT.md`](START_CODING_PROMPT.md) contains the
+orchestrator prompt for beginning implementation with independent subagents.
+
 ## Status
 
 CaseWeaver is currently in specification and foundation planning. No implementation

@@ -3,6 +3,10 @@
 Read `.features/README.md`, the relevant feature specifications, the target PBI, and each
 folder README before changing code.
 
+Implementation details are defined in `.features/13` through `.features/23`. Database
+work must read `.features/20-persistence-and-database-guide.md`; every change must follow
+`.features/22-testing-strategy.md`.
+
 ## Architecture rules
 
 1. Dependencies point inward: apps/adapters -> application/features -> domain.

@@ -13,6 +13,7 @@ Make CaseWeaver operable as an autonomous, recoverable service.
 - Redacted diagnostic export.
 - Docker Compose production example and installation documentation.
 - Distributed and standalone profiles using the identical durable queue and handlers.
+- Documented disposable PostgreSQL/pgvector integration-test environment.
 
 ## Acceptance criteria
 

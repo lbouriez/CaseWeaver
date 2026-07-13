@@ -13,6 +13,9 @@ Operate analyses manually or automatically and safely publish through destinatio
 - Preview-only, approval-required, and auto-publish-internal policies.
 - Versioned publication profiles selecting destination, renderer, notices, visibility,
   and destination limits.
+- Durable publication intents created atomically with analysis request resolution and
+  command outbox creation.
+- Idempotent `AnalysisCompleted` consumer that enqueues eligible publication commands.
 - Authorized approval API with actor audit.
 - Publication renderer, stable marker, database uniqueness constraint, and lease.
 - Idempotent Jitbit internal-note publication.
@@ -28,6 +31,9 @@ Operate analyses manually or automatically and safely publish through destinatio
 - Dry-run does not suppress a later approved publication.
 - Customer-visible publishing is unavailable by default.
 - Analysis completion remains destination-neutral and does not render or publish.
+- Auto-publication survives worker restart between analysis completion and publication.
+- Creating an intent for an already-completed deduplicated analysis immediately schedules
+  publication, and reconciliation finds any pending ready intent.
 
 ## Excluded
 

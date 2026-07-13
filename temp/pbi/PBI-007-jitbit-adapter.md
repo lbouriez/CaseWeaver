@@ -7,6 +7,8 @@ Prove the helpdesk-neutral contracts with a complete Jitbit implementation.
 ## Scope
 
 - Jitbit configuration and authenticated client.
+- `KnowledgeSource` implementation for resolved cases and `CaseSource` implementation
+  for live cases.
 - Incremental resolved-case discovery and revision detection.
 - Current case, ordered messages, actors, visibility, and attachment metadata loading.
 - Webhook verification and domain-event translation where supported.

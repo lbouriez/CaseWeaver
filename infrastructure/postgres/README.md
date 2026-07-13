@@ -9,3 +9,29 @@ Business ranking and state-transition policy remain in vendor-neutral packages.
 
 Owns inbox/outbox persistence and schedule/domain leases. It does not own queue-job
 leases or worker heartbeats.
+
+Implements `OutboxStore` with multi-replica-safe claiming, retry metadata, and envelopes
+for both commands and domain events. It does not publish them directly.
+
+## Implementation decision
+
+- Prisma schema/client/migrations for conventional relational data and transactions.
+- Checked-in custom migration SQL for extensions and specialized indexes.
+- Parameterized Prisma raw/TypedSQL or narrowly scoped `pg` queries for pgvector,
+  full-text, bulk operations, leases, and outbox claiming.
+- No Prisma-generated type leaves this package.
+
+Planned internal layout:
+
+```text
+prisma/
+  schema.prisma
+  migrations/
+src/
+  client/
+  repositories/<capability>/
+  queries/
+  unit-of-work/
+```
+
+See `.features/20-persistence-and-database-guide.md`.

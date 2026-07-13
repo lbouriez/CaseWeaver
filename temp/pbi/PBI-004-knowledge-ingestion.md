@@ -6,7 +6,7 @@ Build the source-neutral ingestion pipeline.
 
 ## Scope
 
-- `KnowledgeSource` contract and discovery cursor.
+- Consume the `KnowledgeSource` and discovery contracts owned by PBI 006.
 - Per-source manual, cron, interval, webhook, and periodic full-rescan policies.
 - Opaque external fingerprints and cheap pre-load change checks.
 - Knowledge collections with immutable embedding binding/version and dimensions.

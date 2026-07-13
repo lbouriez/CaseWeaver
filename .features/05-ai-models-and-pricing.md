@@ -171,8 +171,12 @@ workspace scopes. An upper-bound amount is reserved before each provider request
 reconciled or released afterward. Retry, timeout, cancellation, missing-usage, and
 provider-overage behavior is recorded explicitly.
 
-Repository agents may make several model turns. Each underlying request must receive
-budget authorization and an AI operation record. Agent profiles also limit turns, tool
-calls, elapsed time, and total tokens. If an agent provider cannot expose reliable
-per-turn usage, CaseWeaver stores an aggregate estimate and cannot claim strict monetary
-budget enforcement for that binding.
+Repository agents may make several model turns. The run creates a parent AI operation
+and reserves a conservative whole-run bound. Observable nested requests receive child
+operations and per-turn reconciliation. Agent profiles also limit turns, tool calls,
+elapsed time, and total tokens.
+
+If an agent provider does not expose nested usage, hard-budget execution is allowed only
+when the complete run can be safely bounded and reserved in advance. If neither per-turn
+metering nor a safe aggregate bound exists, that binding cannot run under a hard monetary
+budget and must be rejected rather than silently bypassing enforcement.

@@ -19,6 +19,7 @@ Create a buildable TypeScript monorepo and local runtime skeleton.
 
 - A clean checkout installs and builds with documented commands.
 - Docker Compose starts PostgreSQL with pgvector enabled.
+- `deploy/docker/compose.test.yml` can be started and reset with documented commands.
 - API readiness verifies database access.
 - Invalid configuration fails before serving traffic.
 - No package has circular dependencies.

@@ -17,6 +17,7 @@ durable structured analysis.
 - Structured generation with Zod validation and bounded repair policy.
 - Evidence linkage, confidence, unanswered questions, and hypotheses.
 - Analysis budget reservations and complete operation correlation.
+- Atomic `AnalysisCompleted` domain event emission with the stored result.
 
 ## Acceptance criteria
 

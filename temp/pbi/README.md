@@ -10,10 +10,10 @@ temporary source material for GitHub Issues and should be removed after issue mi
 | 001 | Repository foundation | None |
 | 002 | Domain and persistence foundation | 001 |
 | 003 | AI providers, model catalog, and cost | 001, 002 |
-| 004 | Incremental knowledge ingestion | 002, 003 |
-| 005 | Git/Markdown and Docusaurus source | 004 |
 | 006 | Helpdesk-neutral connector contracts | 002 |
-| 007 | Jitbit reference adapter | 006 |
+| 004 | Incremental knowledge ingestion | 002, 003, 006 |
+| 005 | Git/Markdown and Docusaurus source | 004 |
+| 007 | Jitbit reference adapter | 004, 006 |
 | 008 | Secure attachment processing | 002, 003, 006 |
 | 009 | Hybrid retrieval | 003, 004, 005, 006 |
 | 010 | Repository-agent sandbox and Copilot BYOK adapter | 003 |
@@ -21,6 +21,7 @@ temporary source material for GitHub Issues and should be removed after issue mi
 | 012 | Destinations, triggers, and publication | 007, 011 |
 | 013 | Production operations | 012 |
 | 014 | MCP foundation | 013 |
+| 015 | Evidence-aware chat service | 003, 009, 014 |
 
 PBIs should be implemented in order unless their declared dependencies are complete.
 Each PBI must satisfy `.features/11-engineering-standards.md`.
@@ -42,7 +43,8 @@ Each PBI must satisfy `.features/11-engineering-standards.md`.
 | 011 | `packages/analysis`, `packages/prompts`, `apps/worker` |
 | 012 | `packages/webhooks`, `packages/publication`, `apps/webhook`, `apps/api`, `apps/scheduler` |
 | 013 | `packages/observability`, `apps/standalone`, `deploy/docker`, `tests/integration`, `tests/e2e` |
-| 014 | `packages/chat`, `apps/mcp` |
+| 014 | `apps/mcp` |
+| 015 | `packages/chat` |
 
 Agents may touch shared contracts only when their PBI owns the contract or after
 coordinating the change with the owning PBI.

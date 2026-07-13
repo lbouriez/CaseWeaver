@@ -62,14 +62,24 @@ An unsuccessful revision must not replace the last searchable successful revisio
 6. Hybrid retrieval returns evidence from configured sources.
 7. The repository agent inspects an explicitly configured repository and pinned commit.
 8. The analysis model produces a validated structured result.
-9. The destination-neutral analysis is stored.
+9. The destination-neutral analysis and `AnalysisCompleted` event are stored atomically.
 
 ## Workflow C: publish an analysis
 
-1. Publication policy selects preview, approval, or internal auto-publication.
-2. The configured publication profile selects destination and renderer.
-3. Server code renders destination-specific output and appends policy-controlled notices.
-4. The publication command acquires its idempotency lease and invokes the destination.
+1. A trigger/application transaction creates or resolves the analysis request and creates
+   the durable publication intent before the analysis command is placed in the outbox.
+   The intent references an immutable publication profile.
+2. An idempotent `AnalysisCompleted` consumer resolves matching intents and enqueues
+   publication commands.
+3. Publication policy selects preview, approval, or internal auto-publication.
+4. The configured publication profile selects destination and renderer.
+5. Server code renders destination-specific output and appends policy-controlled notices.
+6. The publication command acquires its idempotency lease and invokes the destination.
+
+If the analysis request already completed before a new intent is created, the transaction
+that creates the intent also emits a publication-ready command/event. A reconciliation
+job finds completed analyses with pending intents so event/intent timing cannot strand
+automatic publication.
 
 Publication is independently retryable and idempotent. A successful remote write with a
 lost local response must not create a duplicate comment on retry. Adapters should use a

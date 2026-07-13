@@ -7,6 +7,10 @@ Retrieve bounded, auditable evidence from documentation and resolved cases.
 ## Scope
 
 - pgvector indexes and PostgreSQL full-text indexes.
+- Parameterized PostgreSQL queries contained in the persistence adapter; retrieval policy
+  remains database-neutral.
+- Exclusive ownership of retrieval migrations and
+  `infrastructure/postgres/src/retrieval`.
 - Metadata filters and workspace/source access constraints.
 - Vector and lexical candidate search.
 - Deterministic score fusion and source-specific quotas.

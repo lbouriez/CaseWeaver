@@ -1,0 +1,28 @@
+name: caseweaver-test
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: caseweaver_test
+      POSTGRES_USER: caseweaver
+      POSTGRES_PASSWORD: caseweaver
+    ports:
+      - "127.0.0.1:${CASEWEAVER_TEST_DB_PORT:-54329}:5432"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          pg_isready -U caseweaver -d caseweaver_test &&
+          psql -U caseweaver -d caseweaver_test -v ON_ERROR_STOP=1
+          -c "SELECT 1 / COUNT(*) FROM pg_extension WHERE extname = 'vector';"
+          > /dev/null
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - caseweaver_test_data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+
+volumes:
+  caseweaver_test_data:

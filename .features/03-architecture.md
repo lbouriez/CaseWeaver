@@ -120,6 +120,9 @@ hold expensive work, bypass budgets, or create a second orchestration path.
   cost/ledger state, and returns the normalized result.
 - Verified webhook events are committed through an inbox/outbox transaction before
   asynchronous queue delivery.
+- An application-layer relay hosted by worker/standalone uses `OutboxStore` and
+  `DurableMessageQueue` ports. Typed envelopes carry commands or domain events through
+  the same durable delivery contract. Infrastructure adapters never call one another.
 - Queue job leases belong to the queue adapter. Schedule/domain leases are separate
   records owned by PostgreSQL repositories.
 - Standalone and distributed deployments use the same PostgreSQL queue, handlers, leases,
