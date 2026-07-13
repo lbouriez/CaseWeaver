@@ -1,0 +1,11 @@
+{
+  "folders": [
+    {
+      "name": "CaseWeaver",
+      "path": "."
+    }
+  ],
+  "settings": {
+    "terminal.integrated.cwd": "${workspaceFolder}"
+  }
+}
