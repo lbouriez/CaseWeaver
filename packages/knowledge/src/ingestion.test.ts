@@ -6,9 +6,11 @@ import type {
 } from "@caseweaver/ai-execution";
 import {
   type DiscoveryPage,
+  type DiscoveredKnowledgeItem,
   type ExternalReference,
   type KnowledgeDocument,
   type KnowledgeSource,
+  type LoadKnowledgeRequest,
   versionedOpaqueValue,
 } from "@caseweaver/connector-sdk";
 import { describe, expect, it } from "vitest";
@@ -24,6 +26,7 @@ import {
   type KnowledgeMutation,
   type KnowledgeSynchronizationRequest,
   type NewCachedEmbedding,
+  type NormalizedKnowledgeDocument,
   normalizedContentHash,
   type StoredKnowledgeItem,
 } from "./index.js";
@@ -51,30 +54,22 @@ function document(body: string): KnowledgeDocument {
 
 class Source implements KnowledgeSource {
   public loads = 0;
+  public readonly loadRequests: LoadKnowledgeRequest[] = [];
 
   public constructor(
-    private readonly pages: readonly DiscoveryPage<
-      Readonly<{
-        reference: ExternalReference;
-        fingerprint?: ReturnType<typeof versionedOpaqueValue>;
-      }>
-    >[],
+    private readonly pages: readonly DiscoveryPage<DiscoveredKnowledgeItem>[],
     private readonly loaded: KnowledgeDocument,
   ) {}
 
   public async *discover(): AsyncIterable<
-    DiscoveryPage<
-      Readonly<{
-        reference: ExternalReference;
-        fingerprint?: ReturnType<typeof versionedOpaqueValue>;
-      }>
-    >
+    DiscoveryPage<DiscoveredKnowledgeItem>
   > {
     yield* this.pages;
   }
 
-  public async load(): Promise<KnowledgeDocument> {
+  public async load(request: LoadKnowledgeRequest): Promise<KnowledgeDocument> {
     this.loads += 1;
+    this.loadRequests.push(request);
     return this.loaded;
   }
 }
@@ -213,23 +208,23 @@ function request(
 function snapshot(
   fingerprint = versionedOpaqueValue("etag.v1", "1"),
   complete = true,
-): readonly DiscoveryPage<
-  Readonly<{
-    reference: ExternalReference;
-    fingerprint?: ReturnType<typeof versionedOpaqueValue>;
-  }>
->[] {
+  item: Omit<DiscoveredKnowledgeItem, "reference" | "fingerprint"> = {},
+): readonly DiscoveryPage<DiscoveredKnowledgeItem>[] {
   return [
     {
       mode: "snapshot",
       scanEpoch: versionedOpaqueValue("scan.v1", "epoch-1"),
-      items: [{ reference, fingerprint }],
+      items: [{ reference, fingerprint, ...item }],
       complete,
     },
   ];
 }
 
-function service(store: Store, gateway: Gateway): KnowledgeIngestionService {
+function service(
+  store: Store,
+  gateway: Gateway,
+  onChunkDocument?: (document: NormalizedKnowledgeDocument) => void,
+): KnowledgeIngestionService {
   let revision = 0;
   return new KnowledgeIngestionService({
     store,
@@ -242,8 +237,13 @@ function service(store: Store, gateway: Gateway): KnowledgeIngestionService {
       }),
     },
     chunker: {
-      chunk: async ({ document: normalized }) =>
-        normalized.normalizedText.split("|").map((content) => ({ content })),
+      chunk: async ({ document: normalized }) => {
+        onChunkDocument?.(normalized);
+        return normalized.normalizedText.split("|").map((content, index) => ({
+          content,
+          sourceAnchor: normalized.sourceAnchors?.[index]?.anchor,
+        }));
+      },
     },
   });
 }
@@ -296,6 +296,87 @@ describe("KnowledgeIngestionService", () => {
     expect(result.activatedRevisions).toBe(0);
     expect(gateway.inputs).toEqual([]);
     expect(store.commits[0]?.newEmbeddings).toEqual([]);
+  });
+
+  it("passes discovery pins to load and preserves generic provenance and anchors", async () => {
+    const store = new Store();
+    const gateway = new Gateway();
+    const externalRevision = versionedOpaqueValue("revision.v1", "commit-1");
+    const loadToken = versionedOpaqueValue("load.v1", "pin-1");
+    const loaded: KnowledgeDocument = {
+      reference,
+      externalRevision,
+      body: { format: "markdown", normalizedText: "First|Second" },
+      attachments: [],
+      provenance: {
+        sourceUrl: "https://docs.example.invalid/guides/install",
+        sourceLocator: "guides/install.md",
+        contentIdentity: versionedOpaqueValue("content.v1", "blob-1"),
+      },
+      sourceAnchors: [
+        { anchor: "first", label: "First", position: 1 },
+        { anchor: "second", label: "Second", position: 4 },
+      ],
+    };
+    const source = new Source(
+      snapshot(versionedOpaqueValue("etag.v1", "2"), true, {
+        externalRevision,
+        loadToken,
+      }),
+      loaded,
+    );
+    const chunkDocuments: NormalizedKnowledgeDocument[] = [];
+
+    await service(store, gateway, (normalized) => {
+      chunkDocuments.push(normalized);
+    }).synchronize(request(source, versionedOpaqueValue("etag.v1", "2")));
+
+    expect(source.loadRequests).toEqual([
+      expect.objectContaining({ reference, externalRevision, loadToken }),
+    ]);
+    expect(chunkDocuments).toEqual([
+      expect.objectContaining({
+        externalRevision,
+        sourceUrl: "https://docs.example.invalid/guides/install",
+        provenance: loaded.provenance,
+        sourceAnchors: loaded.sourceAnchors,
+      }),
+    ]);
+    expect(store.commits[0]?.mutations).toEqual([
+      expect.objectContaining({
+        kind: "activate",
+        normalized: expect.objectContaining({
+          externalRevision,
+          provenance: loaded.provenance,
+          sourceAnchors: loaded.sourceAnchors,
+        }),
+        chunks: [
+          expect.objectContaining({ sourceAnchor: "first" }),
+          expect.objectContaining({ sourceAnchor: "second" }),
+        ],
+      }),
+    ]);
+  });
+
+  it("rejects a loaded document from a revision other than discovery", async () => {
+    const store = new Store();
+    const gateway = new Gateway();
+    const source = new Source(
+      snapshot(versionedOpaqueValue("etag.v1", "2"), true, {
+        externalRevision: versionedOpaqueValue("revision.v1", "commit-1"),
+      }),
+      {
+        ...document("content"),
+        externalRevision: versionedOpaqueValue("revision.v1", "commit-2"),
+      },
+    );
+
+    await expect(
+      service(store, gateway).synchronize(
+        request(source, versionedOpaqueValue("etag.v1", "2")),
+      ),
+    ).rejects.toMatchObject({ code: "knowledge.revisionMismatch" });
+    expect(store.failures[0]).toMatchObject({ stage: "load" });
   });
 
   it("embeds only changed chunks and binds cache entries to the embedding identity", async () => {
@@ -397,12 +478,7 @@ describe("KnowledgeIngestionService", () => {
     ).rejects.toBeInstanceOf(KnowledgeIngestionError);
     expect(store.commits).toHaveLength(0);
 
-    const delta: readonly DiscoveryPage<
-      Readonly<{
-        reference: ExternalReference;
-        fingerprint?: ReturnType<typeof versionedOpaqueValue>;
-      }>
-    >[] = [
+    const delta: readonly DiscoveryPage<DiscoveredKnowledgeItem>[] = [
       {
         mode: "delta",
         events: [{ kind: "tombstone", reference }],
@@ -421,12 +497,7 @@ describe("KnowledgeIngestionService", () => {
   it("does not commit any snapshot mutations or cursor state when scan epochs change", async () => {
     const store = new Store();
     const gateway = new Gateway();
-    const pages: readonly DiscoveryPage<
-      Readonly<{
-        reference: ExternalReference;
-        fingerprint?: ReturnType<typeof versionedOpaqueValue>;
-      }>
-    >[] = [
+    const pages: readonly DiscoveryPage<DiscoveredKnowledgeItem>[] = [
       {
         mode: "snapshot",
         scanEpoch: versionedOpaqueValue("scan.v1", "epoch-1"),

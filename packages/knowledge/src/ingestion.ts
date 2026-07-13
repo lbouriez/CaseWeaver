@@ -4,6 +4,7 @@ import type {
   DiscoveredKnowledgeItem,
   DiscoveryPage,
   ExternalReference,
+  KnowledgeDocument,
   SnapshotDiscoveryPage,
   VersionedOpaqueValue,
 } from "@caseweaver/connector-sdk";
@@ -138,6 +139,44 @@ function validateNormalizedDocument(
       false,
     );
   }
+}
+
+function preserveSourceMetadata(
+  document: KnowledgeDocument,
+  normalized: NormalizedKnowledgeDocument,
+): NormalizedKnowledgeDocument {
+  const documentProvenance = document.provenance;
+  const normalizedProvenance = normalized.provenance;
+  const provenance =
+    documentProvenance === undefined && normalizedProvenance === undefined
+      ? undefined
+      : {
+          sourceUrl:
+            normalizedProvenance?.sourceUrl ?? documentProvenance?.sourceUrl,
+          sourceLocator:
+            normalizedProvenance?.sourceLocator ??
+            documentProvenance?.sourceLocator,
+          contentIdentity:
+            normalizedProvenance?.contentIdentity ??
+            documentProvenance?.contentIdentity,
+        };
+  const sourceAnchors = [
+    ...(document.sourceAnchors ?? []),
+    ...(normalized.sourceAnchors ?? []),
+  ].filter(
+    (anchor, index, anchors) =>
+      anchors.findIndex((candidate) => candidate.anchor === anchor.anchor) ===
+      index,
+  );
+
+  return {
+    ...normalized,
+    externalRevision: normalized.externalRevision ?? document.externalRevision,
+    sourceUrl: normalized.sourceUrl ?? provenance?.sourceUrl,
+    provenance,
+    sourceAnchors:
+      sourceAnchors.length === 0 ? undefined : Object.freeze(sourceAnchors),
+  };
 }
 
 function errorDiagnostic(
@@ -355,12 +394,7 @@ export class KnowledgeIngestionService {
     page: SnapshotDiscoveryPage<DiscoveredKnowledgeItem>,
   ): Promise<void> {
     for (const item of page.items) {
-      await this.processUpsert(
-        request,
-        state,
-        item.reference,
-        item.fingerprint,
-      );
+      await this.processUpsert(request, state, item);
     }
   }
 
@@ -380,21 +414,16 @@ export class KnowledgeIngestionService {
         state.result.tombstones += 1;
         continue;
       }
-      await this.processUpsert(
-        request,
-        state,
-        event.item.reference,
-        event.item.fingerprint,
-      );
+      await this.processUpsert(request, state, event.item);
     }
   }
 
   private async processUpsert(
     request: KnowledgeSynchronizationRequest,
     state: ScanState,
-    reference: ExternalReference,
-    fingerprint: VersionedOpaqueValue | undefined,
+    item: DiscoveredKnowledgeItem,
   ): Promise<void> {
+    const { reference, fingerprint } = item;
     ensureReferenceBelongsToSource(request.configuration, reference);
     assertActive(request.signal);
     const observedAt = this.dependencies.clock.now();
@@ -425,6 +454,8 @@ export class KnowledgeIngestionService {
     try {
       const loaded = await request.source.load({
         reference,
+        externalRevision: item.externalRevision,
+        loadToken: item.loadToken,
         signal: request.signal,
       });
       if (!sameReference(reference, loaded.reference)) {
@@ -434,13 +465,26 @@ export class KnowledgeIngestionService {
           false,
         );
       }
+      if (
+        item.externalRevision !== undefined &&
+        !sameOpaqueValue(item.externalRevision, loaded.externalRevision)
+      ) {
+        throw new KnowledgeIngestionError(
+          "Loaded knowledge document does not match its discovered external revision.",
+          "knowledge.revisionMismatch",
+          false,
+        );
+      }
       stage = "normalize";
-      const normalized = await this.dependencies.normalizer.normalize({
-        document: loaded,
-        normalizationProfileVersion:
-          request.configuration.normalizationProfileVersion,
-        signal: request.signal,
-      });
+      const normalized = preserveSourceMetadata(
+        loaded,
+        await this.dependencies.normalizer.normalize({
+          document: loaded,
+          normalizationProfileVersion:
+            request.configuration.normalizationProfileVersion,
+          signal: request.signal,
+        }),
+      );
       validateNormalizedDocument(normalized);
       contentHash = normalizedContentHash(
         request.configuration.normalizationProfileVersion,

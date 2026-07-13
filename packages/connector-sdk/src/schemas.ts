@@ -7,6 +7,37 @@ import {
 } from "./primitives.js";
 
 const optionalTextSchema = z.string().max(100_000).optional();
+const safeSourceTextSchema = z
+  .string()
+  .min(1)
+  .max(4_096)
+  .refine(
+    (value) =>
+      [...value].every((character) => {
+        const code = character.codePointAt(0) ?? 0;
+        return code >= 0x20 && code !== 0x7f;
+      }),
+    "Source metadata must not contain control characters.",
+  );
+const safeSourceUrlSchema = z
+  .string()
+  .max(8_192)
+  .url()
+  .superRefine((value, context) => {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      context.addIssue({
+        code: "custom",
+        message: "Source URLs must use HTTP or HTTPS.",
+      });
+    }
+    if (url.username.length > 0 || url.password.length > 0) {
+      context.addIssue({
+        code: "custom",
+        message: "Source URLs must not contain credentials.",
+      });
+    }
+  });
 const utcTimestampSchema = z
   .string()
   .datetime({ offset: true })
@@ -151,6 +182,31 @@ export function createNormalizedCaseSchema<TMetadata extends z.ZodType>(
   });
 }
 
+/**
+ * Source-neutral evidence about where knowledge content came from. Values are
+ * bounded and safe to persist; their versioned contents remain connector-opaque.
+ */
+export const knowledgeProvenanceSchema = z
+  .object({
+    sourceUrl: safeSourceUrlSchema.optional(),
+    sourceLocator: safeSourceTextSchema.optional(),
+    contentIdentity: versionedOpaqueValueSchema.optional(),
+  })
+  .strict();
+export type KnowledgeProvenance = z.infer<typeof knowledgeProvenanceSchema>;
+
+/**
+ * A source-defined location within a document, such as a heading or page section.
+ */
+export const sourceAnchorSchema = z
+  .object({
+    anchor: safeSourceTextSchema.max(512),
+    label: safeSourceTextSchema.optional(),
+    position: z.number().int().positive().max(1_000_000).optional(),
+  })
+  .strict();
+export type SourceAnchor = z.infer<typeof sourceAnchorSchema>;
+
 export const knowledgeDocumentSchema = z
   .object({
     reference: externalReferenceSchema,
@@ -159,6 +215,8 @@ export const knowledgeDocumentSchema = z
     body: messageBodySchema,
     attachments: z.array(attachmentMetadataSchema).default([]),
     access: caseAccessSchema.optional(),
+    provenance: knowledgeProvenanceSchema.optional(),
+    sourceAnchors: z.array(sourceAnchorSchema).max(10_000).optional(),
   })
   .strict();
 export type KnowledgeDocument = z.infer<typeof knowledgeDocumentSchema>;
@@ -167,6 +225,8 @@ export const discoveredKnowledgeItemSchema = z
   .object({
     reference: externalReferenceSchema,
     fingerprint: versionedOpaqueValueSchema.optional(),
+    externalRevision: versionedOpaqueValueSchema.optional(),
+    loadToken: versionedOpaqueValueSchema.optional(),
   })
   .strict();
 export type DiscoveredKnowledgeItem = z.infer<

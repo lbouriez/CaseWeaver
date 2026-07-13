@@ -2,9 +2,11 @@ import type { Sha256Digest } from "@caseweaver/domain";
 
 import type {
   ConnectorCursor,
+  ExternalRevision,
   ExternalFingerprint,
   ExternalReference,
   OperationContext,
+  VersionedOpaqueValue,
 } from "./primitives.js";
 import type {
   DiscoveredCase,
@@ -26,6 +28,16 @@ export interface CaseDiscoveryRequest extends OperationContext {
 
 export interface LoadKnowledgeRequest extends OperationContext {
   readonly reference: ExternalReference;
+  /**
+   * The immutable revision observed during discovery, when the source exposes one.
+   * It is opaque to the core and lets a source verify the loaded result.
+   */
+  readonly externalRevision?: ExternalRevision;
+  /**
+   * An opaque source-provided pin for this load. A source must load this exact
+   * version rather than resolving a mutable branch, tag, or latest resource.
+   */
+  readonly loadToken?: VersionedOpaqueValue;
 }
 
 export interface LoadCaseRequest extends OperationContext {

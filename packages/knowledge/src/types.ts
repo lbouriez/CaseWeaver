@@ -3,14 +3,18 @@ import type { EmbeddingResult } from "@caseweaver/ai-sdk";
 import type {
   ExternalFingerprint,
   ExternalReference,
+  ExternalRevision,
   KnowledgeDocument,
+  KnowledgeProvenance,
   KnowledgeSource,
+  SourceAnchor,
   VersionedOpaqueValue,
 } from "@caseweaver/connector-sdk";
 
 export type {
   ExternalFingerprint,
   ExternalReference,
+  ExternalRevision,
   KnowledgeDocument,
   KnowledgeSource,
   VersionedOpaqueValue,
@@ -67,6 +71,8 @@ export interface KnowledgeSourceConfiguration {
 
 export interface NormalizedKnowledgeDocument {
   readonly normalizedText: string;
+  /** The connector-opaque revision used to load this exact source version. */
+  readonly externalRevision?: ExternalRevision;
   /**
    * Attachment identity is supplied by a normalizer when attachments contribute to
    * searchable content. Cosmetic source metadata deliberately does not affect this.
@@ -74,6 +80,10 @@ export interface NormalizedKnowledgeDocument {
   readonly attachmentIdentity?: string;
   readonly title?: string;
   readonly sourceUrl?: string;
+  /** Source-neutral evidence retained from the loaded document. */
+  readonly provenance?: KnowledgeProvenance;
+  /** Source-defined locations available to heading-aware chunking profiles. */
+  readonly sourceAnchors?: readonly SourceAnchor[];
   readonly metadata?: Readonly<
     Record<string, string | number | boolean | null>
   >;
