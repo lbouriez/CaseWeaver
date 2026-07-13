@@ -39,6 +39,24 @@ Only dispatch work that has exclusive file ownership and no unresolved dependenc
 - Agents return changed files, contracts used, tests, and unresolved integration needs.
 - Integrate dependency layers before dependents.
 
+## Three-role module pipeline
+
+Every independently dispatched module proceeds sequentially:
+
+1. **Architect:** read-only review producing bullet-point scope, interfaces, invariants,
+   risks, owned paths, integration points, test needs, and acceptance checklist.
+2. **Senior developer:** implements the approved handoff, adds focused package-local unit
+   tests, and runs targeted build/type/test checks.
+3. **Automation developer:** independently adds the minimum missing contract,
+   integration, or critical E2E validation in the repository test solution.
+
+The automation developer does not duplicate unit coverage or modify production behavior
+to satisfy an incorrect test. Defects return to the senior developer, then automation
+validation runs again.
+
+Different modules may move concurrently only with exclusive paths. The three roles for
+one module never run concurrently.
+
 ## Delivery waves
 
 - Foundation and shared contracts are completed before parallel adapters.
