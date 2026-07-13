@@ -12,3 +12,9 @@ Discovery explicitly declares `snapshot` or `delta` semantics. Snapshot scans us
 scan epochs and reconcile missing items only after every page succeeds. Delta feeds
 delete only through explicit tombstones. Activation, eligible deletions, and cursor
 advancement commit atomically; failed scans do none of them.
+
+`KnowledgeIngestionService` accepts a PBI-006 `KnowledgeSource`, normalization/chunk
+ports, a persistence port, and an injected `AiExecutionGateway`. It never imports a
+connector implementation or provider SDK. Embedding cache identity includes normalized
+chunk hash, immutable binding version, embedding profile, vector dimensions, and
+normalization profile. Attachment preparation is an optional port owned by PBI-008.

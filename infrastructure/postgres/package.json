@@ -21,6 +21,8 @@
     "@caseweaver/ai-execution": "workspace:*",
     "@caseweaver/application": "workspace:*",
     "@caseweaver/domain": "workspace:*",
+    "@caseweaver/knowledge": "workspace:*",
+    "@caseweaver/scheduling": "workspace:*",
     "@caseweaver/security": "workspace:*",
     "@prisma/adapter-pg": "7.8.0",
     "@prisma/client": "7.8.0",

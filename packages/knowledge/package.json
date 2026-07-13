@@ -1,19 +1,23 @@
 {
-  "name": "@caseweaver/worker",
+  "name": "@caseweaver/knowledge",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "bin": {
-    "caseweaver-worker": "./dist/main.js"
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
   },
   "scripts": {
     "build": "tsc --project tsconfig.json",
-    "start": "node dist/main.js health",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "test": "vitest run"
   },
   "dependencies": {
-    "@caseweaver/domain": "workspace:*"
+    "@caseweaver/ai-execution": "workspace:*",
+    "@caseweaver/ai-sdk": "workspace:*",
+    "@caseweaver/connector-sdk": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "22.19.7",

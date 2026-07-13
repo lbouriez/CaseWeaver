@@ -24,7 +24,9 @@ export type EnvelopeKind = "command" | "domainEvent";
 export type EnvelopeType =
   | "analysis.execute.v1"
   | "publication.execute.v1"
-  | "analysis.completed.v1";
+  | "analysis.completed.v1"
+  | "knowledge.synchronize.v1"
+  | "knowledge.full-rescan.v1";
 
 export interface AnalysisExecutePayload {
   readonly analysisJobId: AnalysisJobId;
@@ -40,10 +42,20 @@ export interface AnalysisCompletedPayload {
   readonly analysisResultId: AnalysisResultId;
 }
 
+export interface KnowledgeSynchronizePayload {
+  readonly sourceId: string;
+}
+
+export interface KnowledgeFullRescanPayload {
+  readonly sourceId: string;
+}
+
 export type EnvelopePayloadByType = {
   readonly "analysis.execute.v1": AnalysisExecutePayload;
   readonly "publication.execute.v1": PublicationExecutePayload;
   readonly "analysis.completed.v1": AnalysisCompletedPayload;
+  readonly "knowledge.synchronize.v1": KnowledgeSynchronizePayload;
+  readonly "knowledge.full-rescan.v1": KnowledgeFullRescanPayload;
 };
 
 export type EnvelopeFor<Type extends EnvelopeType = EnvelopeType> =
@@ -82,6 +94,14 @@ function requireString(value: unknown, field: string): string {
   return value;
 }
 
+function requireNonEmptyString(value: unknown, field: string): string {
+  const string = requireString(value, field);
+  if (string.length === 0) {
+    throw new DomainValidationError("Envelope is invalid.", { field });
+  }
+  return string;
+}
+
 function parsePayload(
   type: EnvelopeType,
   payload: unknown,
@@ -115,6 +135,14 @@ function parsePayload(
           requireString(payload.analysisResultId, "analysisResultId"),
         ),
       });
+    case "knowledge.synchronize.v1":
+      return Object.freeze({
+        sourceId: requireNonEmptyString(payload.sourceId, "sourceId"),
+      });
+    case "knowledge.full-rescan.v1":
+      return Object.freeze({
+        sourceId: requireNonEmptyString(payload.sourceId, "sourceId"),
+      });
   }
 }
 
@@ -130,6 +158,8 @@ function parseEnvelope(value: unknown): Envelope {
       "analysis.execute.v1",
       "publication.execute.v1",
       "analysis.completed.v1",
+      "knowledge.synchronize.v1",
+      "knowledge.full-rescan.v1",
     ].includes(type)
   ) {
     throw new DomainValidationError("Envelope type is unsupported.");

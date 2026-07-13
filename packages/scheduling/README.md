@@ -7,3 +7,7 @@ case polling, periodic full rescans, timezone handling, jitter, overlap, and det
 command keys.
 
 No timers, database calls, connector calls, or job execution; apps provide those ports.
+
+`KnowledgeScheduler` only finds due schedules, obtains a fencing lease, derives a
+deterministic occurrence key, and asks its store to atomically persist an occurrence,
+durable command handoff, and next-run state. It has no connector or AI dependency.

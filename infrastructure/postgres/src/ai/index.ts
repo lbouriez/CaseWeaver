@@ -296,6 +296,14 @@ export class PostgresAiLedgerBudgetRepository
         left.id.localeCompare(right.id),
     );
     for (const policy of orderedPolicies) {
+      await database.query(
+        `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+        [
+          `ai-budget-balance:${reservation.workspaceId}:${policy.id}:${policy.scope_key}`,
+        ],
+      );
+    }
+    for (const policy of orderedPolicies) {
       const id = balanceId(policy.id, policy.scope_key);
       await database.query(
         `INSERT INTO ai_budget_balances (

@@ -27,6 +27,18 @@ model Workspace {
   caseSnapshots         CaseSnapshot[]
   knowledgeItems        KnowledgeItem[]
   attachments           Attachment[]
+  knowledgeCollections  KnowledgeCollection[]
+  knowledgeSources      KnowledgeSource[]
+  knowledgeSourceStates KnowledgeSourceState[]
+  knowledgeDocuments    KnowledgeDocument[]
+  knowledgeRevisions    KnowledgeRevision[]
+  knowledgeChunks       KnowledgeChunk[]
+  knowledgeEmbeddingCacheEntries KnowledgeEmbeddingCacheEntry[]
+  knowledgeEmbeddingAllocations KnowledgeEmbeddingAllocation[]
+  knowledgeSchedules    KnowledgeSchedule[]
+  knowledgeScheduleLeases KnowledgeScheduleLease[]
+  knowledgeScheduleOccurrences KnowledgeScheduleOccurrence[]
+  knowledgeScheduleCommands KnowledgeScheduleCommand[]
   analysisProfiles      AnalysisProfile[]
   analysisProfileVersions AnalysisProfileVersion[]
   analysisIdentities    AnalysisIdentity[]
@@ -91,6 +103,7 @@ model ConnectorRegistration {
   workspace    Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   capabilities ConnectorCapability[]
   references   ExternalReference[]
+  knowledgeSources KnowledgeSource[] @relation("KnowledgeSourceConnector")
 
   @@unique([workspaceId, id])
   @@map("connector_registrations")
@@ -120,6 +133,7 @@ model ExternalReference {
   connector               ConnectorRegistration @relation(fields: [workspaceId, connectorRegistrationId], references: [workspaceId, id], onDelete: Restrict)
   caseSnapshots           CaseSnapshot[]
   knowledgeItems          KnowledgeItem[]
+  knowledgeDocuments      KnowledgeDocument[]
   attachments             Attachment[]
 
   @@unique([workspaceId, connectorRegistrationId, kind, externalId])
@@ -158,6 +172,242 @@ model KnowledgeItem {
 
   @@unique([workspaceId, externalReferenceId, version])
   @@map("knowledge_items")
+}
+
+model KnowledgeCollection {
+  id                      String   @id
+  workspaceId             String   @map("workspace_id")
+  embeddingBindingVersionId String @map("embedding_binding_version_id")
+  embeddingProfileVersion String   @map("embedding_profile_version")
+  dimensions              Int
+  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace               Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  sources                 KnowledgeSource[]
+
+  @@unique([workspaceId, id])
+  @@map("knowledge_collections")
+}
+
+model KnowledgeSource {
+  id                          String   @id
+  workspaceId                 String   @map("workspace_id")
+  connectorRegistrationId     String   @map("connector_registration_id")
+  knowledgeCollectionId       String   @map("knowledge_collection_id")
+  lifecycle                   String
+  configurationVersion        String   @map("configuration_version")
+  normalizationProfileVersion String   @map("normalization_profile_version")
+  chunkingProfileVersion      String   @map("chunking_profile_version")
+  synchronizationPolicy       Json     @map("synchronization_policy")
+  deletionBehavior            String   @map("deletion_behavior")
+  createdAt                   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace                   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  connector                   ConnectorRegistration @relation("KnowledgeSourceConnector", fields: [workspaceId, connectorRegistrationId], references: [workspaceId, id], onDelete: Restrict)
+  collection                  KnowledgeCollection @relation(fields: [workspaceId, knowledgeCollectionId], references: [workspaceId, id], onDelete: Restrict)
+  state                       KnowledgeSourceState?
+  documents                   KnowledgeDocument[]
+  schedules                   KnowledgeSchedule[]
+
+  @@unique([workspaceId, id])
+  @@map("knowledge_sources")
+}
+
+model KnowledgeSourceState {
+  workspaceId          String   @map("workspace_id")
+  knowledgeSourceId    String   @map("knowledge_source_id")
+  cursorVersion        String?  @map("cursor_version")
+  cursorValue          String?  @map("cursor_value")
+  lastCompletedAt      DateTime? @map("last_completed_at") @db.Timestamptz(6)
+  lastScanEpochVersion String?  @map("last_scan_epoch_version")
+  lastScanEpochValue   String?  @map("last_scan_epoch_value")
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace            Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  source               KnowledgeSource @relation(fields: [workspaceId, knowledgeSourceId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@id([workspaceId, knowledgeSourceId])
+  @@map("knowledge_source_states")
+}
+
+model KnowledgeDocument {
+  id                    String   @id
+  workspaceId           String   @map("workspace_id")
+  knowledgeSourceId     String   @map("knowledge_source_id")
+  externalReferenceId   String   @map("external_reference_id")
+  lifecycle             String
+  activeRevisionId      String?  @map("active_revision_id")
+  lastFingerprintVersion String? @map("last_fingerprint_version")
+  lastFingerprintValue  String?  @map("last_fingerprint_value")
+  lastSeenEpochVersion  String?  @map("last_seen_epoch_version")
+  lastSeenEpochValue    String?  @map("last_seen_epoch_value")
+  observedAt            DateTime @map("observed_at") @db.Timestamptz(6)
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace             Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  source                KnowledgeSource @relation(fields: [workspaceId, knowledgeSourceId], references: [workspaceId, id], onDelete: Restrict)
+  externalReference     ExternalReference @relation(fields: [workspaceId, externalReferenceId], references: [workspaceId, id], onDelete: Restrict)
+  revisions             KnowledgeRevision[] @relation("DocumentRevisions")
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, knowledgeSourceId, externalReferenceId])
+  @@map("knowledge_documents")
+}
+
+model KnowledgeRevision {
+  id                          String   @id
+  workspaceId                 String   @map("workspace_id")
+  knowledgeDocumentId         String   @map("knowledge_document_id")
+  revisionOrdinal             Int      @map("revision_ordinal")
+  state                       String
+  contentHash                 String   @map("content_hash")
+  normalizationProfileVersion String   @map("normalization_profile_version")
+  chunkingProfileVersion      String   @map("chunking_profile_version")
+  embeddingBindingVersionId   String   @map("embedding_binding_version_id")
+  embeddingProfileVersion     String   @map("embedding_profile_version")
+  embeddingDimensions         Int      @map("embedding_dimensions")
+  normalizedContent           String?  @map("normalized_content")
+  title                       String?
+  sourceUrl                   String?  @map("source_url")
+  metadata                    Json     @default("{}")
+  diagnostic                  Json?
+  createdAt                   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  activatedAt                 DateTime? @map("activated_at") @db.Timestamptz(6)
+  workspace                   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  document                    KnowledgeDocument @relation("DocumentRevisions", fields: [workspaceId, knowledgeDocumentId], references: [workspaceId, id], onDelete: Restrict)
+  chunks                      KnowledgeChunk[]
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, knowledgeDocumentId, revisionOrdinal])
+  @@map("knowledge_revisions")
+}
+
+model KnowledgeEmbeddingCacheEntry {
+  id                          String   @id
+  workspaceId                 String   @map("workspace_id")
+  chunkHash                   String   @map("chunk_hash")
+  embeddingBindingVersionId   String   @map("embedding_binding_version_id")
+  embeddingProfileVersion     String   @map("embedding_profile_version")
+  dimensions                  Int
+  normalizationProfileVersion String   @map("normalization_profile_version")
+  embedding                   Unsupported("vector")
+  createdAt                   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace                   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  chunks                      KnowledgeChunk[]
+  allocations                 KnowledgeEmbeddingAllocation[]
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, chunkHash, embeddingBindingVersionId, embeddingProfileVersion, dimensions, normalizationProfileVersion])
+  @@map("knowledge_embedding_cache_entries")
+}
+
+model KnowledgeChunk {
+  id                    String   @id
+  workspaceId           String   @map("workspace_id")
+  knowledgeRevisionId   String   @map("knowledge_revision_id")
+  position              Int
+  contentHash           String   @map("content_hash")
+  content               String
+  sourceAnchor          String?  @map("source_anchor")
+  embeddingCacheEntryId String   @map("embedding_cache_entry_id")
+  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace             Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  revision              KnowledgeRevision @relation(fields: [workspaceId, knowledgeRevisionId], references: [workspaceId, id], onDelete: Restrict)
+  embeddingCacheEntry   KnowledgeEmbeddingCacheEntry @relation(fields: [workspaceId, embeddingCacheEntryId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, knowledgeRevisionId, position])
+  @@map("knowledge_chunks")
+}
+
+model KnowledgeEmbeddingAllocation {
+  id                      String   @id
+  workspaceId             String   @map("workspace_id")
+  embeddingCacheEntryId   String   @map("embedding_cache_entry_id")
+  aiOperationId           String   @map("ai_operation_id")
+  allocatedInputTokens    Int?     @map("allocated_input_tokens")
+  calculatedCostAmount    Decimal? @map("calculated_cost_amount") @db.Decimal(38, 18)
+  calculatedCostCurrency  String?  @map("calculated_cost_currency") @db.Char(3)
+  calculationStatus       String   @map("calculation_status")
+  weightNumerator         Int      @map("weight_numerator")
+  weightDenominator       Int      @map("weight_denominator")
+  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace               Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  embeddingCacheEntry     KnowledgeEmbeddingCacheEntry @relation(fields: [workspaceId, embeddingCacheEntryId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@unique([workspaceId, embeddingCacheEntryId, aiOperationId])
+  @@map("knowledge_embedding_allocations")
+}
+
+model KnowledgeSchedule {
+  id                   String   @id
+  workspaceId          String   @map("workspace_id")
+  knowledgeSourceId    String   @map("knowledge_source_id")
+  scheduleKind         String   @map("schedule_kind")
+  configurationVersion String   @map("configuration_version")
+  triggerKind          String   @map("trigger_kind")
+  cronExpression       String?  @map("cron_expression")
+  timezone             String?
+  intervalMs           BigInt?  @map("interval_ms")
+  jitterMs             BigInt?  @map("jitter_ms")
+  overlapPolicy        String   @map("overlap_policy")
+  enabled              Boolean  @default(true)
+  nextRunAt            DateTime @map("next_run_at") @db.Timestamptz(6)
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace            Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  source               KnowledgeSource @relation(fields: [workspaceId, knowledgeSourceId], references: [workspaceId, id], onDelete: Restrict)
+  lease                KnowledgeScheduleLease?
+  occurrences          KnowledgeScheduleOccurrence[]
+
+  @@index([enabled, nextRunAt])
+  @@unique([workspaceId, id])
+  @@map("knowledge_schedules")
+}
+
+model KnowledgeScheduleLease {
+  workspaceId         String   @map("workspace_id")
+  knowledgeScheduleId String   @map("knowledge_schedule_id")
+  fencingToken        BigInt   @map("fencing_token")
+  expiresAt           DateTime @map("expires_at") @db.Timestamptz(6)
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace           Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  schedule            KnowledgeSchedule @relation(fields: [workspaceId, knowledgeScheduleId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@id([workspaceId, knowledgeScheduleId])
+  @@map("knowledge_schedule_leases")
+}
+
+model KnowledgeScheduleOccurrence {
+  id                  String   @id
+  workspaceId         String   @map("workspace_id")
+  knowledgeScheduleId String   @map("knowledge_schedule_id")
+  occurrenceKey       String   @map("occurrence_key")
+  scheduledFor        DateTime @map("scheduled_for") @db.Timestamptz(6)
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace           Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  schedule            KnowledgeSchedule @relation(fields: [workspaceId, knowledgeScheduleId], references: [workspaceId, id], onDelete: Restrict)
+  commands            KnowledgeScheduleCommand[]
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, knowledgeScheduleId, occurrenceKey])
+  @@map("knowledge_schedule_occurrences")
+}
+
+model KnowledgeScheduleCommand {
+  id                           String   @id
+  workspaceId                  String   @map("workspace_id")
+  knowledgeScheduleOccurrenceId String  @map("knowledge_schedule_occurrence_id")
+  commandType                  String   @map("command_type")
+  idempotencyKey               String   @map("idempotency_key")
+  payload                      Json
+  createdAt                    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  deliveredAt                  DateTime? @map("delivered_at") @db.Timestamptz(6)
+  workspace                    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  occurrence                   KnowledgeScheduleOccurrence @relation(fields: [workspaceId, knowledgeScheduleOccurrenceId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@index([deliveredAt, createdAt])
+  @@unique([workspaceId, knowledgeScheduleOccurrenceId])
+  @@unique([workspaceId, idempotencyKey])
+  @@map("knowledge_schedule_commands")
 }
 
 model Attachment {
