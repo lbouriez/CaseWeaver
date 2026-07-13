@@ -1,0 +1,31 @@
+{
+  "name": "caseweaver",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.12.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "lint": "biome lint .",
+    "typecheck": "pnpm -r --if-present run typecheck",
+    "build": "pnpm -r --if-present run build",
+    "test": "pnpm -r --if-present run test",
+    "deps:check": "depcruise --config .dependency-cruiser.cjs apps packages connectors providers infrastructure --output-type err",
+    "ci": "pnpm format:check && pnpm lint && pnpm deps:check && pnpm typecheck && pnpm build && pnpm test",
+    "db:test:up": "docker compose -f deploy/docker/compose.test.yml up -d --wait",
+    "db:test:down": "docker compose -f deploy/docker/compose.test.yml down -v",
+    "db:test:reset": "pnpm db:test:down && pnpm db:test:up"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.8",
+    "@types/node": "22.19.7",
+    "dependency-cruiser": "17.3.6",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3",
+    "vitest": "4.0.18"
+  }
+}
