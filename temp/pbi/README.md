@@ -3,27 +3,34 @@
 These files divide CaseWeaver into independently reviewable delivery items. They are
 temporary source material for GitHub Issues and should be removed after issue migration.
 
-## Delivery order
+## Delivery order and state
 
-| PBI | Title | Depends on |
-|---|---|---|
-| 001 | Repository foundation | None |
-| 002 | Domain and persistence foundation | 001 |
-| 003 | AI providers, model catalog, and cost | 001, 002 |
-| 006 | Helpdesk-neutral connector contracts | 002 |
-| 004 | Incremental knowledge ingestion | 002, 003, 006 |
-| 005 | Git/Markdown and Docusaurus source | 004 |
-| 007 | Jitbit reference adapter | 004, 006 |
-| 008 | Secure attachment processing | 002, 003, 006 |
-| 009 | Hybrid retrieval | 003, 004, 005, 006 |
-| 010 | Repository-agent sandbox and Copilot BYOK adapter | 003 |
-| 011 | Case-analysis orchestration | 003, 008, 009 |
-| 012 | Destinations, triggers, and publication | 007, 011 |
-| 013 | Production operations | 012 |
-| 014 | MCP foundation | 013 |
-| 015 | Evidence-aware chat service | 003, 009, 014 |
-| 016 | React-Admin operator console | 013 |
-| 017 | Docker-first self-hosting and delivery | 013, 016 |
+| State | Meaning |
+|---|---|
+| Completed | All acceptance criteria in the PBI were delivered and validated. |
+| In progress | A delivery slice is complete, but the PBI's remaining acceptance criteria are documented in its file. |
+| Deferred | Intentionally postponed; do not start unless explicitly reprioritized. |
+| Pending | Not started. Dependencies or priority may still prevent implementation. |
+
+| PBI | Title | State | Depends on | Remaining work |
+|---|---|---|---|---|
+| 001 | Repository foundation | Completed | None | None |
+| 002 | Domain and persistence foundation | Completed | 001 | None |
+| 003 | AI providers, model catalog, and cost | Completed | 001, 002 | None |
+| 006 | Helpdesk-neutral connector contracts | Completed | 002 | None |
+| 004 | Incremental knowledge ingestion | Completed | 002, 003, 006 | None |
+| 005 | Git/Markdown and Docusaurus source | Completed | 004 | None |
+| 007 | Jitbit reference adapter | Completed | 004, 006 | None |
+| 008 | Secure attachment processing | Completed | 002, 003, 006 | None |
+| 009 | Hybrid retrieval | Completed | 003, 004, 005, 006 | None |
+| 010 | Repository-agent sandbox and Copilot BYOK adapter | Completed | 003 | None |
+| 011 | Case-analysis orchestration | Completed | 003, 008, 009 | None |
+| 012 | Destinations, triggers, and publication | Completed | 007, 011 | None |
+| 013 | Production operations | Completed | 012 | None |
+| 014 | MCP foundation | Deferred | 013 | Start only when MCP is reprioritized. |
+| 015 | Evidence-aware chat service | Deferred | 003, 009, 014 | Start only after PBI-014 is completed and chat is reprioritized. |
+| 016 | React-Admin operator console | In progress | 013 | Frontend is complete; OAuth/session, administration APIs, persistence, and end-to-end integration remain. See PBI-016. |
+| 017 | Docker-first self-hosting and delivery | Pending | 013, 016 | Blocked on PBI-016 backend/API completion. |
 
 PBIs should be implemented in order unless their declared dependencies are complete.
 Each PBI must satisfy `.features/11-engineering-standards.md`.

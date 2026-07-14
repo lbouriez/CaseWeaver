@@ -13,6 +13,39 @@ validation, policy, secret, idempotency, and audit boundary.
 
 PBI-014 MCP and PBI-015 chat remain deferred and are not prerequisites.
 
+## Current delivery state
+
+**In progress.** The frontend slice was delivered in commit `3f52bc6`:
+
+- `apps/admin` provides a Vite/React-Admin console with deployment-time
+  `runtime-config.json`, no browser secrets, and a self-hosting-safe static artifact.
+- Cookie-session API transport uses typed, allowlisted endpoints, UI action/correlation
+  IDs, CSRF/idempotency headers, cancellation, typed errors, and no local mock data.
+- The UI includes permission-aware navigation, generic descriptor-driven connector and
+  AI-provider draft forms, secret-reference redaction, operational resource views, and
+  server-preview-required confirmation for costly/destructive commands.
+- Focused frontend tests cover runtime configuration, authentication behavior, API
+  allowlisting, descriptor redaction, navigation permissions, and guarded actions.
+
+The console intentionally reports unavailable API states until the following backend
+work is delivered. This is the remaining work required to mark PBI-016 **Completed**:
+
+1. Implement `packages/administration`, PostgreSQL administration persistence, immutable
+   configuration/version history, descriptor registration, and cache invalidation.
+2. Implement standards-compliant OIDC Authorization Code with PKCE, API-managed secure
+   sessions, CSRF, identity mapping, workspace selection, and authorization middleware.
+3. Implement and compose the planned `/v1/auth/*` and `/v1/admin/*` resource, command,
+   descriptor, secret-reference, dashboard, audit, and configuration APIs.
+4. Extend server-side authorization permissions only where required, then enforce all
+   workspace/resource boundaries using server-resolved identity rather than UI state.
+5. Guarantee append-only, server-owned audit records for every UI action; make
+   configuration mutations and their audit events atomic, and sensitive reads fail
+   closed if audit persistence is unavailable.
+6. Add targeted contract, PostgreSQL integration, API integration, and critical browser
+   E2E coverage for the full login-to-operation journey.
+7. Complete PBI-017 afterward to package the accepted console and API into the
+   Docker-first self-hosted distribution.
+
 ## Existing implementation references
 
 Review these sources before implementation:
