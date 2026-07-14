@@ -29,15 +29,20 @@ import type { AuditRecord, WorkspaceRole } from "@caseweaver/security";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { type Prisma, PrismaClient } from "@prisma/client";
 
+import {
+  PostgresAnalysisExecutionStore,
+  PostgresCaseSnapshotTombstoneStore,
+} from "./analysis/index.js";
+
 export * from "./retrieval/index.js";
 
 type PrismaTransaction = Prisma.TransactionClient;
 
-interface TransactionLookup {
+export interface PostgresTransactionLookup {
   get(transaction: ApplicationTransaction): PrismaTransaction;
 }
 
-class PrismaUnitOfWork implements UnitOfWork, TransactionLookup {
+class PrismaUnitOfWork implements UnitOfWork, PostgresTransactionLookup {
   private readonly transactions = new WeakMap<
     ApplicationTransaction,
     PrismaTransaction
@@ -112,7 +117,9 @@ function toAnalysisJob(row: {
 }
 
 class PostgresBootstrapStore implements BootstrapWorkspaceStore {
-  public constructor(private readonly transactions: TransactionLookup) {}
+  public constructor(
+    private readonly transactions: PostgresTransactionLookup,
+  ) {}
 
   public async lockInstallation(
     transaction: ApplicationTransaction,
@@ -212,7 +219,9 @@ class PostgresBootstrapStore implements BootstrapWorkspaceStore {
 }
 
 class PostgresAuditStore implements AuditStore {
-  public constructor(private readonly transactions: TransactionLookup) {}
+  public constructor(
+    private readonly transactions: PostgresTransactionLookup,
+  ) {}
 
   public async append(
     transaction: ApplicationTransaction,
@@ -234,7 +243,9 @@ class PostgresAuditStore implements AuditStore {
 }
 
 class PostgresAnalysisRequestStore implements AnalysisRequestStore {
-  public constructor(private readonly transactions: TransactionLookup) {}
+  public constructor(
+    private readonly transactions: PostgresTransactionLookup,
+  ) {}
 
   public async lockIdempotencyKey(
     transaction: ApplicationTransaction,
@@ -461,7 +472,9 @@ interface OutboxRow {
 }
 
 class PostgresOutboxStore implements OutboxStore {
-  public constructor(private readonly transactions: TransactionLookup) {}
+  public constructor(
+    private readonly transactions: PostgresTransactionLookup,
+  ) {}
 
   public async append(
     transaction: ApplicationTransaction,
@@ -572,7 +585,9 @@ class PostgresOutboxStore implements OutboxStore {
 }
 
 class PostgresResourceLeaseStore implements ResourceLeaseStore {
-  public constructor(private readonly transactions: TransactionLookup) {}
+  public constructor(
+    private readonly transactions: PostgresTransactionLookup,
+  ) {}
 
   public async acquire(
     transaction: ApplicationTransaction,
@@ -631,6 +646,8 @@ export interface PostgresPersistence {
   readonly unitOfWork: UnitOfWork;
   readonly bootstrapWorkspaceStore: BootstrapWorkspaceStore;
   readonly analysisRequestStore: AnalysisRequestStore;
+  readonly analysisExecutionStore: PostgresAnalysisExecutionStore;
+  readonly caseSnapshotTombstoneStore: PostgresCaseSnapshotTombstoneStore;
   readonly auditStore: AuditStore;
   readonly outboxStore: OutboxStore;
   readonly resourceLeaseStore: ResourceLeaseStore;
@@ -653,6 +670,10 @@ export function createPostgresPersistence(
     unitOfWork,
     bootstrapWorkspaceStore: new PostgresBootstrapStore(unitOfWork),
     analysisRequestStore: new PostgresAnalysisRequestStore(unitOfWork),
+    analysisExecutionStore: new PostgresAnalysisExecutionStore(unitOfWork),
+    caseSnapshotTombstoneStore: new PostgresCaseSnapshotTombstoneStore(
+      unitOfWork,
+    ),
     auditStore: new PostgresAuditStore(unitOfWork),
     outboxStore: new PostgresOutboxStore(unitOfWork),
     resourceLeaseStore: new PostgresResourceLeaseStore(unitOfWork),
@@ -661,6 +682,7 @@ export function createPostgresPersistence(
 }
 
 export * from "./ai/index.js";
+export * from "./analysis/index.js";
 export * from "./attachments/index.js";
 export * from "./knowledge/index.js";
 export * from "./scheduling/index.js";

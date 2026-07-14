@@ -63,11 +63,12 @@ model Workspace {
 }
 
 model Principal {
-  id              String                    @id
-  workspaceId     String                    @map("workspace_id")
-  createdAt       DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
-  workspace       Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  roleAssignments WorkspaceRoleAssignment[]
+  id                       String                    @id
+  workspaceId              String                    @map("workspace_id")
+  createdAt                DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace                Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  roleAssignments          WorkspaceRoleAssignment[]
+  tombstonedCaseSnapshots  CaseSnapshot[]            @relation("CaseSnapshotTombstonedBy")
 
   @@unique([workspaceId, id])
   @@map("principals")
@@ -147,16 +148,21 @@ model ExternalReference {
 }
 
 model CaseSnapshot {
-  id                  String             @id
-  workspaceId         String             @map("workspace_id")
-  externalReferenceId String             @map("external_reference_id")
-  lifecycle           String
-  snapshotHash        String             @map("snapshot_hash")
-  observedAt          DateTime           @map("observed_at") @db.Timestamptz(6)
-  createdAt           DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
-  workspace           Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  externalReference   ExternalReference  @relation(fields: [workspaceId, externalReferenceId], references: [workspaceId, id], onDelete: Restrict)
-  analysisIdentities  AnalysisIdentity[]
+  id                       String             @id
+  workspaceId              String             @map("workspace_id")
+  externalReferenceId      String             @map("external_reference_id")
+  lifecycle                String
+  snapshotHash             String             @map("snapshot_hash")
+  snapshot                 Json               @default("{}")
+  observedAt               DateTime           @map("observed_at") @db.Timestamptz(6)
+  tombstonedByPrincipalId  String?            @map("tombstoned_by_principal_id")
+  tombstonedAt             DateTime?          @map("tombstoned_at") @db.Timestamptz(6)
+  tombstoneReason          String?            @map("tombstone_reason")
+  createdAt                DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace                Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  externalReference        ExternalReference  @relation(fields: [workspaceId, externalReferenceId], references: [workspaceId, id], onDelete: Restrict)
+  tombstonedByPrincipal    Principal?         @relation("CaseSnapshotTombstonedBy", fields: [workspaceId, tombstonedByPrincipalId], references: [workspaceId, id], onDelete: Restrict)
+  analysisIdentities       AnalysisIdentity[]
 
   @@unique([workspaceId, id])
   @@unique([workspaceId, externalReferenceId, snapshotHash])
@@ -594,6 +600,7 @@ model AnalysisProfileVersion {
   analysisProfileId String             @map("analysis_profile_id")
   version           Int
   definitionHash    String             @map("definition_hash")
+  definition        Json               @default("{}")
   createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
   workspace         Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   profile           AnalysisProfile    @relation(fields: [workspaceId, analysisProfileId], references: [workspaceId, id], onDelete: Restrict)
@@ -649,6 +656,8 @@ model AnalysisAttempt {
   startedAt   DateTime    @map("started_at") @db.Timestamptz(6)
   finishedAt  DateTime?   @map("finished_at") @db.Timestamptz(6)
   errorCode   String?     @map("error_code")
+  errorRetryable Boolean? @map("error_retryable")
+  stages      Json        @default("[]")
   workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   job         AnalysisJob @relation(fields: [workspaceId, analysisJobId], references: [workspaceId, id], onDelete: Restrict)
 
@@ -661,6 +670,7 @@ model AnalysisResult {
   workspaceId String      @map("workspace_id")
   analysisJobId String    @map("analysis_job_id")
   resultHash  String      @map("result_hash")
+  record      Json        @default("{}")
   createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
   workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   job         AnalysisJob @relation(fields: [workspaceId, analysisJobId], references: [workspaceId, id], onDelete: Restrict)
@@ -676,6 +686,7 @@ model Evidence {
   workspaceId      String         @map("workspace_id")
   analysisResultId String         @map("analysis_result_id")
   evidenceHash     String         @map("evidence_hash")
+  record           Json           @default("{}")
   createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   workspace        Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   analysisResult   AnalysisResult @relation(fields: [workspaceId, analysisResultId], references: [workspaceId, id], onDelete: Restrict)

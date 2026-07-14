@@ -13,11 +13,12 @@
     "build": "prisma generate && tsc --project tsconfig.json",
     "typecheck": "prisma generate && tsc --noEmit --project tsconfig.json",
     "test": "vitest run --passWithNoTests --exclude \"src/**/*.integration.test.ts\"",
-    "test:integration": "node --input-type=module -e \"if (!process.env.DATABASE_URL) throw new Error('PostgreSQL integration tests require DATABASE_URL.');\" && prisma migrate deploy --schema prisma/schema.prisma && vitest run --no-file-parallelism src/postgres.integration.test.ts src/ai/postgres-ai.integration.test.ts src/attachments/postgres-attachments.integration.test.ts src/retrieval/postgres-retrieval.integration.test.ts",
+    "test:integration": "node --input-type=module -e \"if (!process.env.DATABASE_URL) throw new Error('PostgreSQL integration tests require DATABASE_URL.');\" && prisma migrate deploy --schema prisma/schema.prisma && vitest run --no-file-parallelism src/postgres.integration.test.ts src/analysis/postgres-analysis.integration.test.ts src/ai/postgres-ai.integration.test.ts src/attachments/postgres-attachments.integration.test.ts src/retrieval/postgres-retrieval.integration.test.ts",
     "prisma:generate": "prisma generate --schema prisma/schema.prisma",
     "prisma:migrate:deploy": "prisma migrate deploy --schema prisma/schema.prisma"
   },
   "dependencies": {
+    "@caseweaver/analysis": "workspace:*",
     "@caseweaver/ai-execution": "workspace:*",
     "@caseweaver/application": "workspace:*",
     "@caseweaver/domain": "workspace:*",

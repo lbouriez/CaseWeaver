@@ -14,6 +14,16 @@ export interface KnowledgeCommandHandlers {
   readonly fullRescan: WorkerCommandHandler<KnowledgeFullRescanCommand>;
 }
 
+export type AnalysisExecuteCommand = EnvelopeFor<"analysis.execute.v1">;
+
+export interface AnalysisCommandHandlers {
+  readonly execute: WorkerCommandHandler<AnalysisExecuteCommand>;
+}
+
+export interface WorkerCommandHandlers extends KnowledgeCommandHandlers {
+  readonly analysis: AnalysisCommandHandlers;
+}
+
 export interface WorkerCommandDispatcher {
   dispatch(envelope: Envelope, signal: AbortSignal): Promise<void>;
 }
@@ -38,6 +48,28 @@ export function createKnowledgeCommandDispatcher(
   return Object.freeze({
     async dispatch(envelope: Envelope, signal: AbortSignal): Promise<void> {
       switch (envelope.type) {
+        case "knowledge.synchronize.v1":
+          await handlers.synchronize.handle(envelope, signal);
+          return;
+        case "knowledge.full-rescan.v1":
+          await handlers.fullRescan.handle(envelope, signal);
+          return;
+        default:
+          throw new UnsupportedWorkerEnvelopeError(envelope.type);
+      }
+    },
+  });
+}
+
+export function createWorkerCommandDispatcher(
+  handlers: WorkerCommandHandlers,
+): WorkerCommandDispatcher {
+  return Object.freeze({
+    async dispatch(envelope: Envelope, signal: AbortSignal): Promise<void> {
+      switch (envelope.type) {
+        case "analysis.execute.v1":
+          await handlers.analysis.execute.handle(envelope, signal);
+          return;
         case "knowledge.synchronize.v1":
           await handlers.synchronize.handle(envelope, signal);
           return;

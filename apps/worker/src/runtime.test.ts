@@ -1,6 +1,7 @@
 import {
   analysisIdentityId,
   analysisJobId,
+  analysisResultId,
   causationId,
   correlationId,
   createEnvelope,
@@ -12,6 +13,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   createKnowledgeCommandDispatcher,
+  createWorkerCommandDispatcher,
   createWorkerRuntime,
   type KnowledgeCommandHandlers,
 } from "./runtime.js";
@@ -28,6 +30,18 @@ const envelopeMetadata = {
 
 function createRuntime(handlers: KnowledgeCommandHandlers) {
   return createWorkerRuntime(createKnowledgeCommandDispatcher(handlers));
+}
+
+function createAnalysisRuntime(input: {
+  readonly knowledge: KnowledgeCommandHandlers;
+  readonly execute: ReturnType<typeof vi.fn>;
+}) {
+  return createWorkerRuntime(
+    createWorkerCommandDispatcher({
+      ...input.knowledge,
+      analysis: { execute: { handle: input.execute } },
+    }),
+  );
 }
 
 describe("worker command runtime", () => {
@@ -91,5 +105,44 @@ describe("worker command runtime", () => {
       code: "worker.unsupportedEnvelope",
       retryable: false,
     });
+  });
+
+  it("registers analysis execution without routing a completed event", async () => {
+    const execute = vi.fn(async () => {});
+    const runtime = createAnalysisRuntime({
+      knowledge: {
+        synchronize: { handle: async () => {} },
+        fullRescan: { handle: async () => {} },
+      },
+      execute,
+    });
+    const envelope = createEnvelope({
+      ...envelopeMetadata,
+      type: "analysis.execute.v1",
+      payload: {
+        analysisJobId: analysisJobId("analysis-job-1"),
+        analysisIdentityId: analysisIdentityId("analysis-identity-1"),
+      },
+    });
+    const signal = new AbortController().signal;
+
+    await runtime.consume(envelope, signal);
+
+    expect(execute).toHaveBeenCalledWith(envelope, signal);
+    await expect(
+      runtime.consume(
+        createEnvelope({
+          ...envelopeMetadata,
+          id: outboxEnvelopeId("outbox-completed-1"),
+          kind: "domainEvent",
+          type: "analysis.completed.v1",
+          payload: {
+            analysisJobId: analysisJobId("analysis-job-1"),
+            analysisResultId: analysisResultId("analysis-result-1"),
+          },
+        }),
+        signal,
+      ),
+    ).rejects.toMatchObject({ code: "worker.unsupportedEnvelope" });
   });
 });
