@@ -23,6 +23,7 @@ temporary source material for GitHub Issues and should be removed after issue mi
 | 014 | MCP foundation | 013 |
 | 015 | Evidence-aware chat service | 003, 009, 014 |
 | 016 | React-Admin operator console | 013 |
+| 017 | Docker-first self-hosting and delivery | 013, 016 |
 
 PBIs should be implemented in order unless their declared dependencies are complete.
 Each PBI must satisfy `.features/11-engineering-standards.md`.
@@ -47,6 +48,7 @@ Each PBI must satisfy `.features/11-engineering-standards.md`.
 | 014 | `apps/mcp` |
 | 015 | `packages/chat` |
 | 016 | `apps/admin`, `apps/api/src/modules/pbi-016`, `packages/administration`, `infrastructure/postgres/src/administration`, `tests/contract/administration`, `tests/integration`, `tests/e2e` |
+| 017 | `deploy/docker`, `.github/workflows`, `tests/e2e/deployment`, deployment/operator documentation; coordinated integration with `apps/admin`, `apps/api`, and `apps/standalone` |
 
 Agents may touch shared contracts only when their PBI owns the contract or after
 coordinating the change with the owning PBI.
@@ -65,5 +67,8 @@ Parallel agents own capability-specific subpaths rather than entire shared folde
 | Scheduler jobs | PBI 004 owns knowledge schedule modules; PBI 012 owns case-analysis schedule modules |
 | Composition roots | PBI 001 establishes registries; PBI 013 owns final distributed/standalone integration and production profiles |
 | Administration contracts | PBI 016 owns `packages/administration`; feature packages retain their domain policy and immutable configuration contracts |
+| Docker image and Compose contracts | PBI 017 owns `deploy/docker` release assets, Compose topology, operator configuration, and image verification; application owners retain process behavior and health semantics |
+| Admin artifact packaging | PBI 016 owns `apps/admin` and its typed runtime public-config contract; after PBI 016 acceptance, PBI 017 packages that artifact without adding browser secrets or authorization behavior |
+| CI and release delivery | PBI 017 owns delivery workflows and their supply-chain policy; PBI 001 retains root manifest/toolchain conventions and existing package checks |
 
 Subagents must not edit the same registry, migration, or bootstrap file concurrently.
