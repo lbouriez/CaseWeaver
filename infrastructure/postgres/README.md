@@ -10,6 +10,14 @@ Business ranking and state-transition policy remain in vendor-neutral packages.
 Owns inbox/outbox persistence and schedule/domain leases. It does not own queue-job
 leases or worker heartbeats.
 
+## PBI-012 publication and triggers
+
+The PBI-012 migration adds immutable publication profiles, durable publication intents
+and attempts, verified-webhook inbox records, and case-analysis schedules. Publication
+identity is unique per workspace, destination connector, and stable marker; execution
+uses a fenced resource lease. `PostgresVerifiedWebhookEventStore` persists accepted
+case-change commands in the same transaction as its inbox record.
+
 ## PBI-009 retrieval
 
 `createPostgresRetrievalPersistence` implements the retrieval search and immutable

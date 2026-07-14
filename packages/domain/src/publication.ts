@@ -1,5 +1,10 @@
 import { StateTransitionError } from "./errors.js";
-import type { PublicationIntentId, UtcInstant, WorkspaceId } from "./ids.js";
+import type {
+  AnalysisJobId,
+  PublicationIntentId,
+  UtcInstant,
+  WorkspaceId,
+} from "./ids.js";
 
 export type PublicationIntentState =
   | "pending"
@@ -13,6 +18,7 @@ export type PublicationIntentState =
 export interface PublicationIntent {
   readonly id: PublicationIntentId;
   readonly workspaceId: WorkspaceId;
+  readonly analysisJobId: AnalysisJobId;
   readonly state: PublicationIntentState;
   readonly createdAt: UtcInstant;
   readonly updatedAt: UtcInstant;
@@ -22,7 +28,7 @@ const publicationTransitions: Readonly<
   Record<PublicationIntentState, readonly PublicationIntentState[]>
 > = {
   pending: ["awaitingApproval", "publishing", "skipped"],
-  awaitingApproval: ["publishing", "skipped"],
+  awaitingApproval: ["pending", "publishing", "skipped"],
   publishing: ["published", "outcomeUnknown", "failed"],
   published: [],
   outcomeUnknown: ["published", "publishing", "failed"],

@@ -29,6 +29,15 @@ importers:
 
   apps/api:
     dependencies:
+      '@caseweaver/application':
+        specifier: workspace:*
+        version: link:../../packages/application
+      '@caseweaver/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@caseweaver/postgres':
+        specifier: workspace:*
+        version: link:../../infrastructure/postgres
       fastify:
         specifier: ^5.0.0
         version: 5.10.0
@@ -56,6 +65,16 @@ importers:
         version: 4.0.18(@types/node@22.19.7)(jiti@2.7.0)(tsx@4.21.0)
 
   apps/cli:
+    dependencies:
+      '@caseweaver/application':
+        specifier: workspace:*
+        version: link:../../packages/application
+      '@caseweaver/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      zod:
+        specifier: ^4.0.0
+        version: 4.4.3
     devDependencies:
       '@types/node':
         specifier: 22.19.7
@@ -72,6 +91,28 @@ importers:
       '@caseweaver/scheduling':
         specifier: workspace:*
         version: link:../../packages/scheduling
+    devDependencies:
+      '@types/node':
+        specifier: 22.19.7
+        version: 22.19.7
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.0.18
+        version: 4.0.18(@types/node@22.19.7)(jiti@2.7.0)(tsx@4.21.0)
+
+  apps/webhook:
+    dependencies:
+      '@caseweaver/webhooks':
+        specifier: workspace:*
+        version: link:../../packages/webhooks
+      fastify:
+        specifier: ^5.0.0
+        version: 5.10.0
+      zod:
+        specifier: ^4.0.0
+        version: 4.4.3
     devDependencies:
       '@types/node':
         specifier: 22.19.7
@@ -180,6 +221,12 @@ importers:
       '@caseweaver/knowledge':
         specifier: workspace:*
         version: link:../../packages/knowledge
+      '@caseweaver/prompts':
+        specifier: workspace:*
+        version: link:../../packages/prompts
+      '@caseweaver/publication':
+        specifier: workspace:*
+        version: link:../../packages/publication
       '@caseweaver/retrieval':
         specifier: workspace:*
         version: link:../../packages/retrieval
@@ -189,6 +236,9 @@ importers:
       '@caseweaver/security':
         specifier: workspace:*
         version: link:../../packages/security
+      '@caseweaver/webhooks':
+        specifier: workspace:*
+        version: link:../../packages/webhooks
       '@prisma/adapter-pg':
         specifier: 7.8.0
         version: 7.8.0
@@ -444,6 +494,34 @@ importers:
         specifier: 4.0.18
         version: 4.0.18(@types/node@22.19.7)(jiti@2.7.0)(tsx@4.21.0)
 
+  packages/publication:
+    dependencies:
+      '@caseweaver/application':
+        specifier: workspace:*
+        version: link:../application
+      '@caseweaver/connector-sdk':
+        specifier: workspace:*
+        version: link:../connector-sdk
+      '@caseweaver/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@caseweaver/prompts':
+        specifier: workspace:*
+        version: link:../prompts
+      zod:
+        specifier: ^4.0.0
+        version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: 22.19.7
+        version: 22.19.7
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.0.18
+        version: 4.0.18(@types/node@22.19.7)(jiti@2.7.0)(tsx@4.21.0)
+
   packages/retrieval:
     dependencies:
       '@caseweaver/ai-execution':
@@ -481,6 +559,22 @@ importers:
         specifier: workspace:*
         version: link:../domain
     devDependencies:
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.0.18
+        version: 4.0.18(@types/node@22.19.7)(jiti@2.7.0)(tsx@4.21.0)
+
+  packages/webhooks:
+    dependencies:
+      '@caseweaver/connector-sdk':
+        specifier: workspace:*
+        version: link:../connector-sdk
+    devDependencies:
+      '@types/node':
+        specifier: 22.19.7
+        version: 22.19.7
       typescript:
         specifier: 5.9.3
         version: 5.9.3

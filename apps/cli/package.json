@@ -12,6 +12,11 @@
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "test": "vitest run"
   },
+  "dependencies": {
+    "@caseweaver/application": "workspace:*",
+    "@caseweaver/domain": "workspace:*",
+    "zod": "^4.0.0"
+  },
   "devDependencies": {
     "@types/node": "22.19.7",
     "typescript": "5.9.3",

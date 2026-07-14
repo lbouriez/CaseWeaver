@@ -2,6 +2,7 @@ import { z } from "zod";
 
 const nodeEnvironments = ["development", "test", "production"] as const;
 const maximumReadinessTimeoutMs = 60_000;
+const identifier = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u);
 
 const databaseUrlSchema = z.url().refine(
   (value) => {
@@ -21,6 +22,8 @@ const apiConfigSchema = z
     HOST: z.string().trim().min(1).default("0.0.0.0"),
     PORT: z.coerce.number().int().min(1).max(65_535),
     DATABASE_URL: databaseUrlSchema,
+    API_WORKSPACE_ID: identifier,
+    API_PRINCIPAL_ID: identifier,
     DATABASE_READINESS_TIMEOUT_MS: z.coerce
       .number()
       .int()
@@ -34,6 +37,8 @@ export interface ApiConfig {
   readonly host: string;
   readonly port: number;
   readonly databaseUrl: string;
+  readonly workspaceId: string;
+  readonly principalId: string;
   readonly databaseReadinessTimeoutMs: number;
 }
 
@@ -56,6 +61,8 @@ export function parseApiConfig(env: NodeJS.ProcessEnv): ApiConfig {
     host: result.data.HOST,
     port: result.data.PORT,
     databaseUrl: result.data.DATABASE_URL,
+    workspaceId: result.data.API_WORKSPACE_ID,
+    principalId: result.data.API_PRINCIPAL_ID,
     databaseReadinessTimeoutMs: result.data.DATABASE_READINESS_TIMEOUT_MS,
   };
 }

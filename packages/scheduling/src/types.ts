@@ -78,3 +78,49 @@ export interface SchedulerRunResult {
   readonly enqueued: number;
   readonly duplicate: number;
 }
+
+export interface CaseAnalysisSchedule {
+  readonly id: string;
+  readonly workspaceId: string;
+  /** Server-owned configuration resolved by the worker, not schedule payload. */
+  readonly triggerId: string;
+  readonly configurationVersion: string;
+  readonly cadence: ScheduleCadence;
+  readonly enabled: boolean;
+  readonly nextRunAt: string;
+}
+
+export interface CaseAnalysisTriggerCommand {
+  readonly type: "analysis.trigger.v1";
+  readonly workspaceId: string;
+  readonly triggerId: string;
+  readonly configurationVersion: string;
+  readonly occurrenceKey: string;
+  readonly scheduledFor: string;
+}
+
+export interface CaseAnalysisScheduleStore {
+  findDue(input: {
+    readonly now: string;
+    readonly limit: number;
+  }): Promise<readonly CaseAnalysisSchedule[]>;
+  acquireLease(input: {
+    readonly schedule: CaseAnalysisSchedule;
+    readonly now: string;
+    readonly leaseMs: number;
+  }): Promise<ScheduleLease | undefined>;
+  enqueueOccurrence(input: {
+    readonly schedule: CaseAnalysisSchedule;
+    readonly lease: ScheduleLease;
+    readonly occurrenceKey: string;
+    readonly command: CaseAnalysisTriggerCommand;
+    readonly nextRunAt: string;
+    readonly now: string;
+  }): Promise<"enqueued" | "duplicate">;
+}
+
+export interface CaseAnalysisSchedulerDependencies {
+  readonly store: CaseAnalysisScheduleStore;
+  readonly clock: SchedulerClock;
+  readonly leaseMs: number;
+}

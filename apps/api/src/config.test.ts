@@ -6,6 +6,8 @@ import { describe, expect, it } from "vitest";
 import { ApiConfigurationError, parseApiConfig } from "./config.js";
 
 const validEnvironment = {
+  API_PRINCIPAL_ID: "principal-test",
+  API_WORKSPACE_ID: "workspace-test",
   DATABASE_READINESS_TIMEOUT_MS: "500",
   DATABASE_URL: "postgresql://caseweaver:password@localhost:5432/caseweaver",
   PORT: "3000",
@@ -26,6 +28,8 @@ describe("parseApiConfig", () => {
       host: "127.0.0.1",
       nodeEnv: "test",
       port: 3000,
+      principalId: "principal-test",
+      workspaceId: "workspace-test",
     });
   });
 

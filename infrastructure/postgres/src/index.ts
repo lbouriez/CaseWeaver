@@ -4,10 +4,13 @@ import type {
   AnalysisRequestStore,
   ApplicationTransaction,
   AuditStore,
+  AuthorizationGuard,
   BootstrapInstallation,
   BootstrapWorkspaceStore,
   ClaimedOutboxEnvelope,
+  ExecutionContext,
   OutboxStore,
+  PublicationIntentStore,
   ResourceLeaseStore,
   UnitOfWork,
 } from "@caseweaver/application";
@@ -25,7 +28,12 @@ import {
   utcInstant,
   workspaceId,
 } from "@caseweaver/domain";
-import type { AuditRecord, WorkspaceRole } from "@caseweaver/security";
+import {
+  isWorkspaceRole,
+  requirePermission,
+  type AuditRecord,
+  type WorkspaceRole,
+} from "@caseweaver/security";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { type Prisma, PrismaClient } from "@prisma/client";
 
@@ -33,6 +41,11 @@ import {
   PostgresAnalysisExecutionStore,
   PostgresCaseSnapshotTombstoneStore,
 } from "./analysis/index.js";
+import {
+  PostgresPublicationExecutionStore,
+  PostgresPublicationIntentStore,
+  PostgresVerifiedWebhookEventStore,
+} from "./publication/index.js";
 
 export * from "./retrieval/index.js";
 
@@ -238,6 +251,47 @@ class PostgresAuditStore implements AuditStore {
         afterHash: record.afterHash,
         occurredAt: asDate(record.occurredAt),
       },
+    });
+  }
+}
+
+class PostgresAuthorizationGuard implements AuthorizationGuard {
+  public constructor(
+    private readonly unitOfWork: UnitOfWork & PostgresTransactionLookup,
+  ) {}
+
+  public async require(
+    context: ExecutionContext,
+    permission: Parameters<AuthorizationGuard["require"]>[1],
+  ): Promise<void> {
+    await this.unitOfWork.transaction(async (transaction) => {
+      const assignments = await this.unitOfWork
+        .get(transaction)
+        .workspaceRoleAssignment.findMany({
+          where: {
+            workspaceId: context.workspaceId,
+            principalId: context.principalId,
+          },
+          select: { role: true },
+        });
+      const roles = assignments.map((assignment) => {
+        if (!isWorkspaceRole(assignment.role)) {
+          throw new DomainValidationError(
+            "Persisted workspace role is invalid.",
+          );
+        }
+        return {
+          workspaceId: context.workspaceId,
+          principalId: context.principalId,
+          role: assignment.role,
+        };
+      });
+      requirePermission(
+        roles,
+        context.workspaceId,
+        context.principalId,
+        permission,
+      );
     });
   }
 }
@@ -646,9 +700,13 @@ export interface PostgresPersistence {
   readonly unitOfWork: UnitOfWork;
   readonly bootstrapWorkspaceStore: BootstrapWorkspaceStore;
   readonly analysisRequestStore: AnalysisRequestStore;
+  readonly publicationIntentStore: PublicationIntentStore;
   readonly analysisExecutionStore: PostgresAnalysisExecutionStore;
+  readonly publicationExecutionStore: PostgresPublicationExecutionStore;
   readonly caseSnapshotTombstoneStore: PostgresCaseSnapshotTombstoneStore;
+  readonly verifiedWebhookEventStore: PostgresVerifiedWebhookEventStore;
   readonly auditStore: AuditStore;
+  readonly authorizationGuard: AuthorizationGuard;
   readonly outboxStore: OutboxStore;
   readonly resourceLeaseStore: ResourceLeaseStore;
   close(): Promise<void>;
@@ -670,11 +728,19 @@ export function createPostgresPersistence(
     unitOfWork,
     bootstrapWorkspaceStore: new PostgresBootstrapStore(unitOfWork),
     analysisRequestStore: new PostgresAnalysisRequestStore(unitOfWork),
+    publicationIntentStore: new PostgresPublicationIntentStore(unitOfWork),
     analysisExecutionStore: new PostgresAnalysisExecutionStore(unitOfWork),
+    publicationExecutionStore: new PostgresPublicationExecutionStore(
+      unitOfWork,
+    ),
     caseSnapshotTombstoneStore: new PostgresCaseSnapshotTombstoneStore(
       unitOfWork,
     ),
+    verifiedWebhookEventStore: new PostgresVerifiedWebhookEventStore(
+      unitOfWork,
+    ),
     auditStore: new PostgresAuditStore(unitOfWork),
+    authorizationGuard: new PostgresAuthorizationGuard(unitOfWork),
     outboxStore: new PostgresOutboxStore(unitOfWork),
     resourceLeaseStore: new PostgresResourceLeaseStore(unitOfWork),
     close: async () => client.$disconnect(),
@@ -685,4 +751,5 @@ export * from "./ai/index.js";
 export * from "./analysis/index.js";
 export * from "./attachments/index.js";
 export * from "./knowledge/index.js";
+export * from "./publication/index.js";
 export * from "./scheduling/index.js";

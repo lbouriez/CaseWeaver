@@ -1,0 +1,122 @@
+import {
+  type WebhookEndpoint,
+  type WebhookIngress,
+  WebhookTranslationError,
+  WebhookVerificationError,
+} from "@caseweaver/webhooks";
+import Fastify, { type FastifyInstance } from "fastify";
+import { z } from "zod";
+
+const endpointParametersSchema = z
+  .object({
+    endpointId: z
+      .string()
+      .min(1)
+      .max(200)
+      .regex(/^[A-Za-z0-9_-]+$/u),
+  })
+  .strict();
+
+export interface WebhookEndpointResolver {
+  resolve(endpointId: string): Promise<WebhookEndpoint | undefined>;
+}
+
+export interface BuildWebhookAppDependencies {
+  readonly ingress: WebhookIngress;
+  readonly endpointResolver: WebhookEndpointResolver;
+  readonly maximumBodyBytes: number;
+}
+
+function normalizeHeaders(
+  headers: Record<string, string | string[] | undefined>,
+): Readonly<Record<string, readonly string[]>> {
+  const normalized: Record<string, readonly string[]> = {};
+  for (const [name, value] of Object.entries(headers)) {
+    if (value === undefined) continue;
+    normalized[name] =
+      typeof value === "string"
+        ? Object.freeze([value])
+        : Object.freeze([...value]);
+  }
+  return Object.freeze(normalized);
+}
+
+function requestAbortSignal(request: {
+  readonly raw: {
+    once(event: "aborted", listener: () => void): unknown;
+  };
+}): AbortSignal {
+  const controller = new AbortController();
+  request.raw.once("aborted", () => {
+    controller.abort(new Error("Webhook client disconnected."));
+  });
+  return controller.signal;
+}
+
+/**
+ * Public transport only: it captures a Buffer without JSON parsing and delegates the
+ * opaque endpoint, raw bytes, and headers to the verified-event boundary.
+ */
+export function buildWebhookApp({
+  ingress,
+  endpointResolver,
+  maximumBodyBytes,
+}: BuildWebhookAppDependencies): FastifyInstance {
+  if (!Number.isInteger(maximumBodyBytes) || maximumBodyBytes < 1) {
+    throw new RangeError(
+      "Webhook maximum body size must be a positive integer.",
+    );
+  }
+
+  const app = Fastify({ bodyLimit: maximumBodyBytes, logger: false });
+  app.removeContentTypeParser("application/json");
+  app.removeContentTypeParser("text/plain");
+  const parseRawBody = (
+    _request: unknown,
+    body: Buffer,
+    done: (error: Error | null, value?: Buffer) => void,
+  ): void => done(null, body);
+  app.addContentTypeParser(
+    "application/json",
+    { parseAs: "buffer" },
+    parseRawBody,
+  );
+  app.addContentTypeParser("text/plain", { parseAs: "buffer" }, parseRawBody);
+  app.addContentTypeParser("*", { parseAs: "buffer" }, parseRawBody);
+
+  app.post("/webhooks/:endpointId", async (request, reply) => {
+    const parameters = endpointParametersSchema.safeParse(request.params);
+    if (!parameters.success) {
+      return reply.status(404).send({ status: "not_found" });
+    }
+
+    const endpoint = await endpointResolver.resolve(parameters.data.endpointId);
+    if (endpoint === undefined || endpoint.id !== parameters.data.endpointId) {
+      return reply.status(404).send({ status: "not_found" });
+    }
+
+    try {
+      const acceptance = await ingress.accept(endpoint, {
+        method: request.method,
+        headers: normalizeHeaders(request.raw.headers),
+        body: request.body as Uint8Array,
+        signal: requestAbortSignal(request),
+      });
+
+      if (acceptance.status === "idempotencyConflict") {
+        return reply.status(409).send({ status: "conflict" });
+      }
+      return reply.status(202).send({ status: acceptance.status });
+    } catch (error) {
+      if (error instanceof WebhookVerificationError) {
+        return reply.status(401).send({ status: "unauthorized" });
+      }
+      if (error instanceof WebhookTranslationError) {
+        return reply.status(422).send({ status: "unprocessable" });
+      }
+      throw error;
+    }
+  });
+
+  return app;
+}

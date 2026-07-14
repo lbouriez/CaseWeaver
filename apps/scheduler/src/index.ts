@@ -1,4 +1,6 @@
 import {
+  CaseAnalysisScheduler,
+  type CaseAnalysisScheduleStore,
   KnowledgeScheduler,
   type KnowledgeScheduleStore,
   type SchedulerClock,
@@ -23,6 +25,25 @@ export function createSchedulerRuntime(
   dependencies: SchedulerRuntimeDependencies,
 ): SchedulerRuntime {
   const scheduler = new KnowledgeScheduler(dependencies);
+  return Object.freeze({
+    runOnce: (limit?: number) => scheduler.runOnce(limit),
+  });
+}
+
+export interface CaseAnalysisSchedulerRuntimeDependencies {
+  readonly store: CaseAnalysisScheduleStore;
+  readonly clock: SchedulerClock;
+  readonly leaseMs: number;
+}
+
+/**
+ * PBI-012 scheduling composition only persists `analysis.trigger.v1` work.
+ * It deliberately has no connector, renderer, or worker dependency.
+ */
+export function createCaseAnalysisSchedulerRuntime(
+  dependencies: CaseAnalysisSchedulerRuntimeDependencies,
+): SchedulerRuntime {
+  const scheduler = new CaseAnalysisScheduler(dependencies);
   return Object.freeze({
     runOnce: (limit?: number) => scheduler.runOnce(limit),
   });

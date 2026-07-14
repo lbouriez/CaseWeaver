@@ -1,6 +1,13 @@
 import { createHash } from "node:crypto";
 
-import type { KnowledgeSchedule, ScheduleCadence } from "./types.js";
+import type { ScheduleCadence } from "./types.js";
+
+interface TimedSchedule {
+  readonly id: string;
+  readonly cadence: ScheduleCadence;
+  readonly enabled: boolean;
+  readonly nextRunAt: string;
+}
 
 interface CronFields {
   readonly minute: ReadonlySet<number>;
@@ -205,7 +212,7 @@ function nextCronOccurrence(
   throw new RangeError("Cron schedule has no occurrence within two years.");
 }
 
-export function nextRunAt(schedule: KnowledgeSchedule, after: string): string {
+export function nextRunAt(schedule: TimedSchedule, after: string): string {
   const afterDate = validDate(after, "reference time");
   if (schedule.cadence.kind === "cron") {
     return nextCronOccurrence(
@@ -225,7 +232,7 @@ export function nextRunAt(schedule: KnowledgeSchedule, after: string): string {
   ).toISOString();
 }
 
-export function isDue(schedule: KnowledgeSchedule, now: string): boolean {
+export function isDue(schedule: TimedSchedule, now: string): boolean {
   if (!schedule.enabled) return false;
   return (
     validDate(schedule.nextRunAt, "next run").getTime() <=

@@ -53,6 +53,12 @@ model Workspace {
   evidence              Evidence[]
   publicationIntents    PublicationIntent[]
   publicationAttempts   PublicationAttempt[]
+  publicationProfiles   PublicationProfile[]
+  publicationProfileVersions PublicationProfileVersion[]
+  webhookInboxes        WebhookInbox[]
+  caseAnalysisSchedules CaseAnalysisSchedule[]
+  caseAnalysisScheduleLeases CaseAnalysisScheduleLease[]
+  caseAnalysisScheduleOccurrences CaseAnalysisScheduleOccurrence[]
   auditEvents           AuditEvent[]
   idempotencyRecords    IdempotencyRecord[]
   inboxMessages         InboxMessage[]
@@ -701,6 +707,16 @@ model PublicationIntent {
   analysisJobId String       @map("analysis_job_id")
   state         String
   intentHash    String       @map("intent_hash")
+  publicationProfileVersionId String? @map("publication_profile_version_id")
+  targetConnectorInstanceId String? @map("target_connector_instance_id")
+  targetResourceType String? @map("target_resource_type")
+  targetExternalId String? @map("target_external_id")
+  destinationConnectorInstanceId String? @map("destination_connector_instance_id")
+  publicationMarker String? @map("publication_marker")
+  identityHash String? @map("identity_hash")
+  analysisResultId String? @map("analysis_result_id")
+  approvedByPrincipalId String? @map("approved_by_principal_id")
+  approvedAt DateTime? @map("approved_at") @db.Timestamptz(6)
   createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
   workspace     Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
@@ -717,6 +733,11 @@ model PublicationAttempt {
   publicationIntentId String            @map("publication_intent_id")
   attemptOrdinal      Int               @map("attempt_ordinal")
   state               String
+  identityHash        String?          @map("identity_hash")
+  publicationMarker   String?          @map("publication_marker")
+  receipt             Json?
+  errorCode           String?          @map("error_code")
+  errorRetryable      Boolean?         @map("error_retryable")
   createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   finishedAt          DateTime?         @map("finished_at") @db.Timestamptz(6)
   workspace           Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
@@ -724,6 +745,101 @@ model PublicationAttempt {
 
   @@unique([publicationIntentId, attemptOrdinal])
   @@map("publication_attempts")
+}
+
+model PublicationProfile {
+  id          String                      @id
+  workspaceId String                      @map("workspace_id")
+  lifecycle   String
+  createdAt   DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace   Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  versions    PublicationProfileVersion[]
+
+  @@unique([workspaceId, id])
+  @@map("publication_profiles")
+}
+
+model PublicationProfileVersion {
+  id                   String             @id
+  workspaceId          String             @map("workspace_id")
+  publicationProfileId String             @map("publication_profile_id")
+  version              String
+  definitionHash       String             @map("definition_hash")
+  definition           Json               @default("{}")
+  createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace            Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  profile              PublicationProfile @relation(fields: [workspaceId, publicationProfileId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, publicationProfileId, version])
+  @@map("publication_profile_versions")
+}
+
+model WebhookInbox {
+  id                  String    @id
+  workspaceId         String    @map("workspace_id")
+  endpointId          String    @map("endpoint_id")
+  connectorInstanceId String    @map("connector_instance_id")
+  analysisTriggerId   String?   @map("analysis_trigger_id")
+  deliveryKey         String    @map("delivery_key")
+  rawBodyDigest       String    @map("raw_body_digest")
+  verification        Json
+  signals             Json
+  receivedAt          DateTime  @map("received_at") @db.Timestamptz(6)
+  workspace           Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@unique([endpointId, deliveryKey])
+  @@map("webhook_inbox")
+}
+
+model CaseAnalysisSchedule {
+  id                   String                           @id
+  workspaceId          String                           @map("workspace_id")
+  triggerId            String                           @map("trigger_id")
+  configurationVersion String                           @map("configuration_version")
+  triggerKind          String                           @map("trigger_kind")
+  cronExpression       String?                          @map("cron_expression")
+  timezone             String?
+  intervalMs           BigInt?                          @map("interval_ms")
+  jitterMs             BigInt?                          @map("jitter_ms")
+  enabled              Boolean                          @default(true)
+  nextRunAt            DateTime                         @map("next_run_at") @db.Timestamptz(6)
+  createdAt            DateTime                         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime                         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace            Workspace                        @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  lease                CaseAnalysisScheduleLease?
+  occurrences          CaseAnalysisScheduleOccurrence[]
+
+  @@unique([workspaceId, id])
+  @@index([enabled, nextRunAt])
+  @@map("case_analysis_schedules")
+}
+
+model CaseAnalysisScheduleLease {
+  workspaceId            String               @map("workspace_id")
+  caseAnalysisScheduleId String               @map("case_analysis_schedule_id")
+  fencingToken           BigInt               @map("fencing_token")
+  expiresAt              DateTime             @map("expires_at") @db.Timestamptz(6)
+  updatedAt              DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace              Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  schedule               CaseAnalysisSchedule @relation(fields: [workspaceId, caseAnalysisScheduleId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@id([workspaceId, caseAnalysisScheduleId])
+  @@map("case_analysis_schedule_leases")
+}
+
+model CaseAnalysisScheduleOccurrence {
+  id                   String               @id
+  workspaceId          String               @map("workspace_id")
+  caseAnalysisScheduleId String             @map("case_analysis_schedule_id")
+  occurrenceKey        String               @map("occurrence_key")
+  scheduledFor         DateTime             @map("scheduled_for") @db.Timestamptz(6)
+  createdAt            DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace            Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  schedule             CaseAnalysisSchedule @relation(fields: [workspaceId, caseAnalysisScheduleId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@unique([workspaceId, caseAnalysisScheduleId, occurrenceKey])
+  @@map("case_analysis_schedule_occurrences")
 }
 
 model AuditEvent {

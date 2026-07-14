@@ -8,6 +8,8 @@ import type {
 } from "@caseweaver/scheduling";
 import type { Pool, QueryResultRow } from "pg";
 
+export * from "./case-analysis.js";
+
 interface ScheduleRow extends QueryResultRow {
   readonly id: string;
   readonly workspace_id: string;

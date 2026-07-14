@@ -3,9 +3,11 @@ import type {
   AnalysisJob,
   AnalysisJobId,
   AnalysisProfileVersionId,
+  AnalysisResultId,
   CaseSnapshotId,
   CorrelationId,
   Envelope,
+  PublicationIntentId,
   PrincipalId,
   RequestId,
   Sha256Digest,
@@ -38,6 +40,8 @@ export type IdentifierKind =
   | "auditEvent"
   | "analysisIdentity"
   | "analysisJob"
+  | "publicationIntent"
+  | "publicationAttempt"
   | "outboxEnvelope";
 
 export interface IdGenerator {
@@ -197,6 +201,102 @@ export interface AnalysisRequestStore {
   updateJobState(
     transaction: ApplicationTransaction,
     job: AnalysisJob,
+  ): Promise<void>;
+}
+
+export interface PublicationTarget {
+  readonly connectorInstanceId: string;
+  readonly resourceType: string;
+  readonly externalId: string;
+}
+
+export interface StoredPublicationProfile {
+  readonly id: string;
+  readonly version: string;
+  readonly destinationConnectorInstanceId: string;
+  readonly policy: {
+    readonly mode: "previewOnly" | "approvalRequired" | "autoPublishInternal";
+    readonly visibility: "internal";
+  };
+}
+
+/**
+ * Intent creation and ready-command handoff share a transaction with analysis
+ * resolution. `enqueuePublication` is idempotent by the envelope ID.
+ */
+export interface PublicationIntentStore {
+  findProfile(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly workspaceId: WorkspaceId;
+      readonly profileId: string;
+      readonly profileVersion: string;
+    },
+  ): Promise<StoredPublicationProfile | undefined>;
+  createOrFindIntent(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly id: PublicationIntentId;
+      readonly workspaceId: WorkspaceId;
+      readonly analysisJobId: AnalysisJobId;
+      readonly profile: StoredPublicationProfile;
+      readonly target: PublicationTarget;
+      readonly intentHash: Sha256Digest;
+      readonly state:
+        | "pending"
+        | "awaitingApproval"
+        | "publishing"
+        | "published"
+        | "outcomeUnknown"
+        | "failed"
+        | "skipped";
+      readonly occurredAt: UtcInstant;
+    },
+  ): Promise<import("@caseweaver/domain").PublicationIntent>;
+  findIntent(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly workspaceId: WorkspaceId;
+      readonly publicationIntentId: PublicationIntentId;
+    },
+  ): Promise<import("@caseweaver/domain").PublicationIntent | undefined>;
+  updateIntent(
+    transaction: ApplicationTransaction,
+    intent: import("@caseweaver/domain").PublicationIntent,
+  ): Promise<void>;
+  approveIntent(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly workspaceId: WorkspaceId;
+      readonly publicationIntentId: PublicationIntentId;
+      readonly actorPrincipalId: PrincipalId;
+      readonly occurredAt: UtcInstant;
+    },
+  ): Promise<
+    | Readonly<{
+        readonly outcome: "approved" | "alreadyApproved";
+        readonly intent: import("@caseweaver/domain").PublicationIntent;
+      }>
+    | Readonly<{ readonly outcome: "notApprovable" }>
+  >;
+  bindAnalysisResult(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly workspaceId: WorkspaceId;
+      readonly analysisJobId: AnalysisJobId;
+      readonly analysisResultId: AnalysisResultId;
+    },
+  ): Promise<void>;
+  findReadyIntentIds(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly workspaceId: WorkspaceId;
+      readonly analysisJobId: AnalysisJobId;
+    },
+  ): Promise<readonly PublicationIntentId[]>;
+  enqueuePublication(
+    transaction: ApplicationTransaction,
+    envelope: Envelope,
   ): Promise<void>;
 }
 

@@ -15,13 +15,30 @@ export interface KnowledgeCommandHandlers {
 }
 
 export type AnalysisExecuteCommand = EnvelopeFor<"analysis.execute.v1">;
+export type AnalysisTriggerCommand = EnvelopeFor<"analysis.trigger.v1">;
+export type PublicationExecuteCommand = EnvelopeFor<"publication.execute.v1">;
+export type PublicationReconcileCommand =
+  EnvelopeFor<"publication.reconcile.v1">;
+export type AnalysisCompletedEvent = EnvelopeFor<"analysis.completed.v1">;
 
 export interface AnalysisCommandHandlers {
   readonly execute: WorkerCommandHandler<AnalysisExecuteCommand>;
 }
 
+export interface PublicationCommandHandlers {
+  readonly execute: WorkerCommandHandler<PublicationExecuteCommand>;
+  readonly reconcile: WorkerCommandHandler<PublicationReconcileCommand>;
+}
+
+export interface Pbi012CommandHandlers {
+  readonly trigger: WorkerCommandHandler<AnalysisTriggerCommand>;
+  readonly publication: PublicationCommandHandlers;
+  readonly analysisCompleted: WorkerCommandHandler<AnalysisCompletedEvent>;
+}
+
 export interface WorkerCommandHandlers extends KnowledgeCommandHandlers {
   readonly analysis: AnalysisCommandHandlers;
+  readonly pbi012?: Pbi012CommandHandlers;
 }
 
 export interface WorkerCommandDispatcher {
@@ -70,14 +87,36 @@ export function createWorkerCommandDispatcher(
         case "analysis.execute.v1":
           await handlers.analysis.execute.handle(envelope, signal);
           return;
+        case "analysis.trigger.v1":
+          if (handlers.pbi012 === undefined) {
+            throw new UnsupportedWorkerEnvelopeError(envelope.type);
+          }
+          await handlers.pbi012.trigger.handle(envelope, signal);
+          return;
+        case "publication.execute.v1":
+          if (handlers.pbi012 === undefined) {
+            throw new UnsupportedWorkerEnvelopeError(envelope.type);
+          }
+          await handlers.pbi012.publication.execute.handle(envelope, signal);
+          return;
+        case "publication.reconcile.v1":
+          if (handlers.pbi012 === undefined) {
+            throw new UnsupportedWorkerEnvelopeError(envelope.type);
+          }
+          await handlers.pbi012.publication.reconcile.handle(envelope, signal);
+          return;
+        case "analysis.completed.v1":
+          if (handlers.pbi012 === undefined) {
+            throw new UnsupportedWorkerEnvelopeError(envelope.type);
+          }
+          await handlers.pbi012.analysisCompleted.handle(envelope, signal);
+          return;
         case "knowledge.synchronize.v1":
           await handlers.synchronize.handle(envelope, signal);
           return;
         case "knowledge.full-rescan.v1":
           await handlers.fullRescan.handle(envelope, signal);
           return;
-        default:
-          throw new UnsupportedWorkerEnvelopeError(envelope.type);
       }
     },
   });

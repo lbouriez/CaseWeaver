@@ -23,7 +23,9 @@ import {
 export type EnvelopeKind = "command" | "domainEvent";
 export type EnvelopeType =
   | "analysis.execute.v1"
+  | "analysis.trigger.v1"
   | "publication.execute.v1"
+  | "publication.reconcile.v1"
   | "analysis.completed.v1"
   | "knowledge.synchronize.v1"
   | "knowledge.full-rescan.v1";
@@ -35,6 +37,21 @@ export interface AnalysisExecutePayload {
 
 export interface PublicationExecutePayload {
   readonly publicationIntentId: PublicationIntentId;
+}
+
+export interface PublicationReconcilePayload {
+  readonly publicationIntentId: PublicationIntentId;
+}
+
+export interface AnalysisTriggerPayload {
+  readonly triggerId: string;
+  readonly source: "manual" | "schedule" | "webhook";
+  readonly occurrenceKey?: string;
+  readonly target?: Readonly<{
+    connectorInstanceId: string;
+    resourceType: string;
+    externalId: string;
+  }>;
 }
 
 export interface AnalysisCompletedPayload {
@@ -52,7 +69,9 @@ export interface KnowledgeFullRescanPayload {
 
 export type EnvelopePayloadByType = {
   readonly "analysis.execute.v1": AnalysisExecutePayload;
+  readonly "analysis.trigger.v1": AnalysisTriggerPayload;
   readonly "publication.execute.v1": PublicationExecutePayload;
+  readonly "publication.reconcile.v1": PublicationReconcilePayload;
   readonly "analysis.completed.v1": AnalysisCompletedPayload;
   readonly "knowledge.synchronize.v1": KnowledgeSynchronizePayload;
   readonly "knowledge.full-rescan.v1": KnowledgeFullRescanPayload;
@@ -120,7 +139,61 @@ function parsePayload(
           requireString(payload.analysisIdentityId, "analysisIdentityId"),
         ),
       });
+    case "analysis.trigger.v1": {
+      const source = requireString(payload.source, "source");
+      if (
+        source !== "manual" &&
+        source !== "schedule" &&
+        source !== "webhook"
+      ) {
+        throw new DomainValidationError("Envelope payload is invalid.", {
+          field: "source",
+        });
+      }
+      const target = payload.target;
+      if (target !== undefined && !isRecord(target)) {
+        throw new DomainValidationError("Envelope payload is invalid.", {
+          field: "target",
+        });
+      }
+      return Object.freeze({
+        triggerId: requireNonEmptyString(payload.triggerId, "triggerId"),
+        source,
+        ...(payload.occurrenceKey === undefined
+          ? {}
+          : {
+              occurrenceKey: requireNonEmptyString(
+                payload.occurrenceKey,
+                "occurrenceKey",
+              ),
+            }),
+        ...(target === undefined
+          ? {}
+          : {
+              target: Object.freeze({
+                connectorInstanceId: requireNonEmptyString(
+                  target.connectorInstanceId,
+                  "target.connectorInstanceId",
+                ),
+                resourceType: requireNonEmptyString(
+                  target.resourceType,
+                  "target.resourceType",
+                ),
+                externalId: requireNonEmptyString(
+                  target.externalId,
+                  "target.externalId",
+                ),
+              }),
+            }),
+      });
+    }
     case "publication.execute.v1":
+      return Object.freeze({
+        publicationIntentId: publicationIntentId(
+          requireString(payload.publicationIntentId, "publicationIntentId"),
+        ),
+      });
+    case "publication.reconcile.v1":
       return Object.freeze({
         publicationIntentId: publicationIntentId(
           requireString(payload.publicationIntentId, "publicationIntentId"),
@@ -156,7 +229,9 @@ function parseEnvelope(value: unknown): Envelope {
   if (
     ![
       "analysis.execute.v1",
+      "analysis.trigger.v1",
       "publication.execute.v1",
+      "publication.reconcile.v1",
       "analysis.completed.v1",
       "knowledge.synchronize.v1",
       "knowledge.full-rescan.v1",

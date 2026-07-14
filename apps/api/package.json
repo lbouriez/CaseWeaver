@@ -10,6 +10,9 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@caseweaver/application": "workspace:*",
+    "@caseweaver/domain": "workspace:*",
+    "@caseweaver/postgres": "workspace:*",
     "fastify": "^5.0.0",
     "pg": "^8.0.0",
     "pino": "^9.0.0",
