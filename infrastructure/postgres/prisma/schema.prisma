@@ -42,6 +42,8 @@ model Workspace {
   knowledgeScheduleLeases KnowledgeScheduleLease[]
   knowledgeScheduleOccurrences KnowledgeScheduleOccurrence[]
   knowledgeScheduleCommands KnowledgeScheduleCommand[]
+  retrievalSnapshots    RetrievalSnapshot[]
+  retrievalSnapshotEvidence RetrievalSnapshotEvidence[]
   analysisProfiles      AnalysisProfile[]
   analysisProfileVersions AnalysisProfileVersion[]
   analysisIdentities    AnalysisIdentity[]
@@ -338,6 +340,50 @@ model KnowledgeEmbeddingAllocation {
 
   @@unique([workspaceId, embeddingCacheEntryId, aiOperationId])
   @@map("knowledge_embedding_allocations")
+}
+
+model RetrievalSnapshot {
+  id                         String
+  workspaceId                String                      @map("workspace_id")
+  analysisId                 String?                     @map("analysis_id")
+  capturedAt                 DateTime                    @map("captured_at") @db.Timestamptz(6)
+  query                      String
+  profileId                  String                      @map("profile_id")
+  profileVersion             String                      @map("profile_version")
+  queryEmbeddingOperationIds Json                        @map("query_embedding_operation_ids")
+  rerankerOperationId        String?                     @map("reranker_operation_id")
+  createdAt                  DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace                  Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  evidence                   RetrievalSnapshotEvidence[]
+
+  @@id([workspaceId, id])
+  @@map("retrieval_snapshots")
+}
+
+model RetrievalSnapshotEvidence {
+  workspaceId         String            @map("workspace_id")
+  retrievalSnapshotId String            @map("retrieval_snapshot_id")
+  ordinal             Int
+  collectionId        String            @map("collection_id")
+  sourceId            String            @map("source_id")
+  sourceRevisionId    String            @map("source_revision_id")
+  chunkId             String            @map("chunk_id")
+  location            String
+  sourceUrl           String?           @map("source_url")
+  content             String
+  accessMetadata      Json              @map("access_metadata")
+  fusedRrf            Float             @map("fused_rrf")
+  lexicalRrf          Float             @map("lexical_rrf")
+  vectorRrf           Float             @map("vector_rrf")
+  rerankerScore       Float?            @map("reranker_score")
+  characterCount      Int               @map("character_count")
+  tokenCount          Int               @map("token_count")
+  createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace           Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  snapshot            RetrievalSnapshot @relation(fields: [workspaceId, retrievalSnapshotId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@id([workspaceId, retrievalSnapshotId, ordinal])
+  @@map("retrieval_snapshot_evidence")
 }
 
 model KnowledgeSchedule {
@@ -944,6 +990,7 @@ model AiBudgetBalance {
 
 model AiOperation {
   id                        String   @id
+  parentOperationId         String?  @map("parent_operation_id")
   workspaceId               String   @map("workspace_id")
   role                      String
   operationKind             String   @map("operation_kind")
@@ -963,6 +1010,7 @@ model AiOperation {
   finishedAt                DateTime? @map("finished_at") @db.Timestamptz(6)
 
   @@unique([workspaceId, id])
+  @@index([workspaceId, parentOperationId, startedAt])
   @@map("ai_operations")
 }
 

@@ -29,6 +29,8 @@ import type { AuditRecord, WorkspaceRole } from "@caseweaver/security";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { type Prisma, PrismaClient } from "@prisma/client";
 
+export * from "./retrieval/index.js";
+
 type PrismaTransaction = Prisma.TransactionClient;
 
 interface TransactionLookup {

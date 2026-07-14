@@ -18,6 +18,7 @@ import {
   AiHardBudgetError,
   type AiOperationKind,
   type AiProviderDispatcher,
+  AiProviderError,
   type AiRole,
   AiTimeoutError,
   type EmbeddingRequest,
@@ -25,7 +26,9 @@ import {
   type NormalizedUsage,
   type ProviderReportedCost,
   type ProviderResult,
+  type RepositoryAgentMetering,
   type RepositoryAgentRequest,
+  type RepositoryAgentTurn,
   type RerankerRequest,
   type SecretResolver,
   type VisionRequest,
@@ -38,8 +41,10 @@ import type {
   AiOperationIdGenerator,
   AiOperationLedgerPort,
   AiOperationStatus,
-  BudgetReservationScope,
   BudgetReconciliationStatus,
+  BudgetReservationScope,
+  OperationFinalization,
+  OperationStart,
 } from "./ports.js";
 
 interface MeteredRequestBase {
@@ -173,6 +178,8 @@ function expectedRole(kind: AiOperationKind, role: AiRole): boolean {
       return role === "reranker";
     case "repositoryAgent":
       return role === "repositoryAgent";
+    case "repositoryAgentTurn":
+      return role === "repositoryAgent";
   }
 }
 
@@ -191,6 +198,9 @@ function requestedCapabilities(
   if (request.kind === "vision") {
     return [...(request.requiredCapabilities ?? []), "vision"];
   }
+  if (request.kind === "repositoryAgent") {
+    return [...(request.requiredCapabilities ?? []), "repositoryAgent"];
+  }
   return request.requiredCapabilities ?? [];
 }
 
@@ -204,6 +214,266 @@ function actualUsage(
     cacheCreation: usage.cacheCreationInputTokens ?? 0,
     image: usage.imageUnits ?? 0,
     audio: usage.audioUnits ?? 0,
+  };
+}
+
+interface RepositoryAgentTokenBounds {
+  readonly maximumTurns: number;
+  readonly maximumInputTokensPerTurn: number;
+  readonly maximumOutputTokensPerTurn: number;
+  readonly maximumInputTokens: number;
+  readonly maximumOutputTokens: number;
+}
+
+interface RepositoryAgentAccounting {
+  readonly metering: RepositoryAgentMetering["mode"];
+  readonly usage?: NormalizedUsage;
+  readonly turns: readonly RepositoryAgentTurn[];
+}
+
+interface ObservableChildOperation {
+  readonly start: OperationStart;
+  readonly finalization: OperationFinalization;
+}
+
+const usageFields = [
+  "inputTokens",
+  "outputTokens",
+  "cacheReadInputTokens",
+  "cacheCreationInputTokens",
+  "reasoningTokens",
+  "imageUnits",
+  "audioUnits",
+] as const;
+
+function isPositiveInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) > 0;
+}
+
+function repositoryAgentTokenBounds(
+  request: RepositoryAgentRequest,
+  hardBudget: boolean,
+): RepositoryAgentTokenBounds {
+  if (
+    !isPositiveInteger(request.maximumTurns) ||
+    !isPositiveInteger(request.maximumInputTokensPerTurn) ||
+    !isPositiveInteger(request.maximumOutputTokensPerTurn)
+  ) {
+    if (hardBudget) {
+      throw new AiHardBudgetError(
+        "A hard-budget repository agent requires safe per-turn token limits.",
+      );
+    }
+    throw new AiConfigurationError(
+      "Repository agents require safe per-turn token limits.",
+    );
+  }
+  const maximumInputTokens =
+    request.maximumTurns * request.maximumInputTokensPerTurn;
+  const maximumOutputTokens =
+    request.maximumTurns * request.maximumOutputTokensPerTurn;
+  if (
+    !Number.isSafeInteger(maximumInputTokens) ||
+    !Number.isSafeInteger(maximumOutputTokens)
+  ) {
+    if (hardBudget) {
+      throw new AiHardBudgetError(
+        "A hard-budget repository agent requires safe aggregate token limits.",
+      );
+    }
+    throw new AiConfigurationError(
+      "Repository-agent aggregate token limits exceed the safe integer range.",
+    );
+  }
+  return {
+    maximumTurns: request.maximumTurns,
+    maximumInputTokensPerTurn: request.maximumInputTokensPerTurn,
+    maximumOutputTokensPerTurn: request.maximumOutputTokensPerTurn,
+    maximumInputTokens,
+    maximumOutputTokens,
+  };
+}
+
+function requireRepositoryAgentTokenBounds(
+  bounds: RepositoryAgentTokenBounds | undefined,
+): RepositoryAgentTokenBounds {
+  if (bounds === undefined) {
+    throw new AiConfigurationError(
+      "Repository-agent token bounds were not initialized.",
+    );
+  }
+  return bounds;
+}
+
+function assertValidUsage(usage: NormalizedUsage): void {
+  for (const field of usageFields) {
+    const value = usage[field];
+    if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) {
+      throw new AiProviderError("Repository agent returned invalid usage.", {
+        provider: "repository-agent",
+      });
+    }
+  }
+}
+
+function sumRepositoryAgentUsage(
+  turns: readonly RepositoryAgentTurn[],
+): NormalizedUsage {
+  const totals: Record<(typeof usageFields)[number], number> = {
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadInputTokens: 0,
+    cacheCreationInputTokens: 0,
+    reasoningTokens: 0,
+    imageUnits: 0,
+    audioUnits: 0,
+  };
+  for (const turn of turns) {
+    assertValidUsage(turn.usage);
+    for (const field of usageFields) {
+      const total = totals[field] + (turn.usage[field] ?? 0);
+      if (!Number.isSafeInteger(total)) {
+        throw new AiProviderError(
+          "Repository agent usage exceeds the safe integer range.",
+          { provider: "repository-agent" },
+        );
+      }
+      totals[field] = total;
+    }
+  }
+  return Object.freeze(totals);
+}
+
+function sameUsage(left: NormalizedUsage, right: NormalizedUsage): boolean {
+  return usageFields.every(
+    (field) => (left[field] ?? 0) === (right[field] ?? 0),
+  );
+}
+
+function assertUsageWithinRepositoryAgentBounds(
+  usage: NormalizedUsage,
+  bounds: RepositoryAgentTokenBounds,
+): void {
+  assertValidUsage(usage);
+  if (
+    (usage.inputTokens ?? 0) > bounds.maximumInputTokens ||
+    (usage.outputTokens ?? 0) > bounds.maximumOutputTokens ||
+    (usage.cacheReadInputTokens ?? 0) > bounds.maximumInputTokens ||
+    (usage.cacheCreationInputTokens ?? 0) > bounds.maximumInputTokens ||
+    (usage.reasoningTokens ?? 0) > bounds.maximumOutputTokens
+  ) {
+    throw new AiProviderError(
+      "Repository agent exceeded its reserved aggregate token limit.",
+      { provider: "repository-agent" },
+    );
+  }
+}
+
+function repositoryAgentAccounting(
+  result: ProviderResult<unknown>,
+  bounds: RepositoryAgentTokenBounds,
+): RepositoryAgentAccounting {
+  if (typeof result.value !== "object" || result.value === null) {
+    throw new AiProviderError("Repository agent returned an invalid result.", {
+      provider: "repository-agent",
+    });
+  }
+  const value = result.value as {
+    readonly metering?: RepositoryAgentMetering;
+  };
+  const metering = value.metering;
+  if (metering === undefined || typeof metering !== "object") {
+    throw new AiProviderError("Repository agent omitted metering metadata.", {
+      provider: "repository-agent",
+    });
+  }
+  if (metering.mode === "aggregate") {
+    if (result.usage !== undefined) {
+      assertUsageWithinRepositoryAgentBounds(result.usage, bounds);
+    }
+    return { metering: "aggregate", usage: result.usage, turns: [] };
+  }
+  if (metering.mode !== "observableTurns" || !Array.isArray(metering.turns)) {
+    throw new AiProviderError("Repository agent metering is invalid.", {
+      provider: "repository-agent",
+    });
+  }
+  if (
+    metering.turns.length === 0 ||
+    metering.turns.length > bounds.maximumTurns
+  ) {
+    throw new AiProviderError(
+      "Repository agent reported an invalid number of observable turns.",
+      { provider: "repository-agent" },
+    );
+  }
+  const seenTurns = new Set<number>();
+  for (const candidate of metering.turns) {
+    if (
+      typeof candidate !== "object" ||
+      candidate === null ||
+      !("turn" in candidate) ||
+      !("usage" in candidate) ||
+      typeof candidate.usage !== "object" ||
+      candidate.usage === null
+    ) {
+      throw new AiProviderError("Repository agent turn metadata is invalid.", {
+        provider: "repository-agent",
+      });
+    }
+    const turn = candidate as RepositoryAgentTurn;
+    if (
+      !Number.isSafeInteger(turn.turn) ||
+      turn.turn < 1 ||
+      turn.turn > bounds.maximumTurns ||
+      seenTurns.has(turn.turn)
+    ) {
+      throw new AiProviderError("Repository agent turn metadata is invalid.", {
+        provider: "repository-agent",
+      });
+    }
+    seenTurns.add(turn.turn);
+  }
+  const usage = sumRepositoryAgentUsage(metering.turns);
+  assertUsageWithinRepositoryAgentBounds(usage, bounds);
+  if (result.usage !== undefined && !sameUsage(result.usage, usage)) {
+    throw new AiProviderError(
+      "Repository agent aggregate usage disagrees with its observable turns.",
+      { provider: "repository-agent" },
+    );
+  }
+  return {
+    metering: "observableTurns",
+    usage,
+    turns: Object.freeze([...metering.turns]),
+  };
+}
+
+function repositoryAgentMetadata(
+  metadata: ProviderResult<unknown>["metadata"],
+  accounting: RepositoryAgentAccounting | undefined,
+): ProviderResult<unknown>["metadata"] {
+  if (accounting === undefined) return metadata;
+  return {
+    ...metadata,
+    rawRedacted: {
+      ...(metadata.rawRedacted ?? {}),
+      repositoryAgentMetering: accounting.metering,
+      observableTurnCount: accounting.turns.length,
+    },
+  };
+}
+
+function repositoryAgentTurnMetadata(
+  metadata: RepositoryAgentTurn["metadata"],
+  turn: number,
+): ProviderResult<unknown>["metadata"] {
+  return {
+    ...(metadata ?? { retryCount: 0 }),
+    rawRedacted: {
+      ...(metadata?.rawRedacted ?? {}),
+      repositoryAgentTurn: turn,
+    },
   };
 }
 
@@ -250,21 +520,33 @@ export class DefaultAiExecutionGateway implements AiExecutionGateway {
         "AI request kind does not match the selected role.",
       );
     }
+    const repositoryBounds =
+      request.kind === "repositoryAgent"
+        ? repositoryAgentTokenBounds(request.request, request.budget.hard)
+        : undefined;
     const startedAt = this.dependencies.clock.now();
     const binding = await this.dependencies.bindingResolver.resolve({
       workspaceId: context.workspaceId,
       role: request.role,
       bindingVersionId: request.bindingVersionId,
       requiredCapabilities: requestedCapabilities(request),
-      inputTokens: request.maximumInputTokens,
-      outputTokens: request.maximumOutputTokens,
+      inputTokens:
+        repositoryBounds?.maximumInputTokensPerTurn ??
+        request.maximumInputTokens,
+      outputTokens:
+        repositoryBounds?.maximumOutputTokensPerTurn ??
+        request.maximumOutputTokens,
     });
     const maximumInputTokens =
-      request.maximumInputTokens ?? binding.maximumInputTokens;
+      repositoryBounds?.maximumInputTokens ??
+      request.maximumInputTokens ??
+      binding.maximumInputTokens;
     const maximumOutputTokens =
-      request.kind === "embedding" || request.kind === "reranker"
-        ? 0
-        : (request.maximumOutputTokens ?? binding.maximumOutputTokens);
+      request.kind === "repositoryAgent"
+        ? repositoryBounds?.maximumOutputTokens
+        : request.kind === "embedding" || request.kind === "reranker"
+          ? 0
+          : (request.maximumOutputTokens ?? binding.maximumOutputTokens);
     if (
       maximumInputTokens === undefined ||
       (request.kind !== "embedding" &&
@@ -357,35 +639,79 @@ export class DefaultAiExecutionGateway implements AiExecutionGateway {
         signal: composed.signal,
       });
       const finishedAt = this.dependencies.clock.now();
+      const accounting =
+        request.kind === "repositoryAgent"
+          ? repositoryAgentAccounting(
+              providerResult,
+              requireRepositoryAgentTokenBounds(repositoryBounds),
+            )
+          : undefined;
+      const usage = accounting?.usage ?? providerResult.usage;
       const calculatedCost =
-        providerResult.usage === undefined
+        usage === undefined
           ? ({ status: "unknown", components: [] } satisfies CostCalculation)
-          : calculateCost(pricing, actualUsage(providerResult.usage));
+          : calculateCost(pricing, actualUsage(usage));
       const reconciliation = this.successReconciliation(
         reservation,
         calculatedCost,
         providerResult.providerCost,
-        providerResult.usage,
+        usage,
         request.budget.currency,
       );
+      const children =
+        accounting === undefined
+          ? []
+          : accounting.turns.map((turn) => {
+              const childCalculatedCost = calculateCost(
+                pricing,
+                actualUsage(turn.usage),
+              );
+              const childOperationId = this.dependencies.operationIds.next();
+              return {
+                start: {
+                  operationId: childOperationId,
+                  parentOperationId: operationId,
+                  workspaceId: context.workspaceId,
+                  role: request.role,
+                  operationKind: "repositoryAgentTurn",
+                  bindingVersionId: binding.bindingVersionId,
+                  providerInstanceVersionId: binding.providerInstanceVersionId,
+                  catalogSnapshotId: binding.catalogSnapshotId,
+                  configuredModel: binding.canonicalModel,
+                  startedAt,
+                  pricing,
+                  reservation: childCalculatedCost,
+                },
+                finalization: {
+                  operationId: childOperationId,
+                  workspaceId: context.workspaceId,
+                  status: "succeeded",
+                  finishedAt,
+                  usage: turn.usage,
+                  metadata: repositoryAgentTurnMetadata(
+                    turn.metadata,
+                    turn.turn,
+                  ),
+                  calculatedCost: childCalculatedCost,
+                },
+              } satisfies ObservableChildOperation;
+            });
       await this.finalize({
         operationId,
         workspaceId: context.workspaceId,
-        status:
-          providerResult.usage === undefined
-            ? "succeededUsageUnknown"
-            : "succeeded",
+        status: usage === undefined ? "succeededUsageUnknown" : "succeeded",
         finishedAt,
-        usage: providerResult.usage,
-        metadata: providerResult.metadata,
+        usage,
+        metadata: repositoryAgentMetadata(providerResult.metadata, accounting),
         calculatedCost,
         providerCost: providerResult.providerCost,
         reconciliation,
+        children,
       });
       return {
         operationId,
         value: providerResult.value as TResult,
-        usage: providerResult.usage,
+        usage,
         providerCost: providerResult.providerCost,
         calculatedCost,
       };
@@ -514,8 +840,16 @@ export class DefaultAiExecutionGateway implements AiExecutionGateway {
       readonly actualAmount?: CostCalculation["amount"];
       readonly providerCost?: ProviderReportedCost;
     };
+    readonly children?: readonly ObservableChildOperation[];
   }): Promise<void> {
     await this.dependencies.unitOfWork.transaction(async (transaction) => {
+      for (const child of input.children ?? []) {
+        await this.dependencies.ledger.start(transaction, child.start);
+        await this.dependencies.ledger.finalize(
+          transaction,
+          child.finalization,
+        );
+      }
       await this.dependencies.ledger.finalize(transaction, {
         operationId: input.operationId,
         workspaceId: input.workspaceId,

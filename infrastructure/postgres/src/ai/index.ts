@@ -1,4 +1,3 @@
-import { Pool, type PoolClient, type QueryResultRow } from "pg";
 import type {
   AiBudgetPort,
   AiExecutionTransaction,
@@ -9,6 +8,7 @@ import type {
   OperationFinalization,
   OperationStart,
 } from "@caseweaver/ai-execution";
+import { Pool, type PoolClient, type QueryResultRow } from "pg";
 
 export type PostgresAiTransaction = AiExecutionTransaction;
 export type PostgresAiUnitOfWork = AiExecutionUnitOfWork;
@@ -130,12 +130,13 @@ export class PostgresAiLedgerBudgetRepository
   ): Promise<void> {
     await this.unitOfWork.get(transaction).query(
       `INSERT INTO ai_operations (
-        id, workspace_id, role, operation_kind, model_binding_version_id,
+        id, parent_operation_id, workspace_id, role, operation_kind, model_binding_version_id,
         provider_instance_version_id, catalog_snapshot_id, configured_model,
         status, started_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'started', $9)`,
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'started', $10)`,
       [
         operation.operationId,
+        operation.parentOperationId ?? null,
         operation.workspaceId,
         operation.role,
         operation.operationKind,

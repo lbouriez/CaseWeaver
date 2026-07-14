@@ -69,6 +69,36 @@ function binding(
   });
 }
 
+function repositoryAgentBinding() {
+  const model: CatalogModel = {
+    id: "repository-agent-model",
+    snapshotId: "snapshot-1",
+    canonicalModel: "repository-agent-model",
+    provider: "fake",
+    supportedRoles: new Set(["repositoryAgent"]),
+    capabilities: new Set(["repositoryAgent"]),
+    maximumInputTokens: 10,
+    maximumOutputTokens: 5,
+    priceComponents: [input, output],
+    rawEntry: {},
+  };
+  return createImmutableBinding({
+    workspaceId: "workspace-1",
+    bindingId: "repository-agent-binding",
+    version: 1,
+    role: "repositoryAgent",
+    providerInstanceVersionId: "provider-version-1",
+    providerType: "fake",
+    endpoint: "https://fake.invalid",
+    canonicalModel: "repository-agent-model",
+    wireApi: "custom",
+    secretReference: "vault:fake",
+    catalogModel: model,
+    maximumInputTokens: 10,
+    maximumOutputTokens: 5,
+  });
+}
+
 function harness(
   provider: DeterministicAiProviderDispatcher,
   model = binding(),
@@ -323,5 +353,163 @@ describe("DefaultAiExecutionGateway", () => {
         providerCost: { amount: "1", currency: "EUR" },
       },
     ]);
+  });
+
+  it("reserves a whole-run parent and records observable repository-agent turns", async () => {
+    const provider = new DeterministicAiProviderDispatcher({
+      runRepositoryAgent: async () => ({
+        value: {
+          summary: "The configured source handles the error.",
+          metering: {
+            mode: "observableTurns",
+            turns: [
+              { turn: 1, usage: { inputTokens: 3, outputTokens: 1 } },
+              { turn: 2, usage: { inputTokens: 2, outputTokens: 2 } },
+            ],
+          },
+        },
+        metadata: { retryCount: 0 },
+      }),
+    });
+    const test = harness(provider, repositoryAgentBinding());
+
+    await expect(
+      test.gateway.execute(
+        {
+          kind: "repositoryAgent",
+          role: "repositoryAgent",
+          request: {
+            instruction: "Inspect only the configured pinned repository.",
+            maximumTurns: 2,
+            maximumInputTokensPerTurn: 10,
+            maximumOutputTokensPerTurn: 5,
+          },
+          budget: { currency: "USD", hard: true },
+        },
+        {
+          workspaceId: "workspace-1",
+          signal: new AbortController().signal,
+        },
+      ),
+    ).resolves.toMatchObject({
+      operationId: "operation-1",
+      usage: { inputTokens: 5, outputTokens: 3 },
+      calculatedCost: { status: "known", amount: "0.011" },
+    });
+
+    expect(test.starts).toMatchObject([
+      {
+        operationId: "operation-1",
+        operationKind: "repositoryAgent",
+      },
+      {
+        operationId: "operation-2",
+        parentOperationId: "operation-1",
+        operationKind: "repositoryAgentTurn",
+      },
+      {
+        operationId: "operation-3",
+        parentOperationId: "operation-1",
+        operationKind: "repositoryAgentTurn",
+      },
+    ]);
+    expect(test.reservations).toMatchObject([
+      { operationId: "operation-1", estimatedAmount: "0.04" },
+    ]);
+    expect(test.reservations).toHaveLength(1);
+    expect(test.finalizations).toMatchObject([
+      { operationId: "operation-2", status: "succeeded" },
+      { operationId: "operation-3", status: "succeeded" },
+      { operationId: "operation-1", status: "succeeded" },
+    ]);
+    expect(test.reconciliations).toMatchObject([
+      {
+        operationId: "operation-1",
+        status: "reconciled",
+        actualAmount: "0.011",
+      },
+    ]);
+  });
+
+  it("reconciles hidden repository-agent turns from aggregate usage", async () => {
+    const provider = new DeterministicAiProviderDispatcher({
+      runRepositoryAgent: async () => ({
+        value: {
+          summary: "The configured source handles the error.",
+          metering: { mode: "aggregate" },
+        },
+        usage: { inputTokens: 4, outputTokens: 2 },
+        metadata: { retryCount: 0 },
+      }),
+    });
+    const test = harness(provider, repositoryAgentBinding());
+
+    await test.gateway.execute(
+      {
+        kind: "repositoryAgent",
+        role: "repositoryAgent",
+        request: {
+          instruction: "Inspect only the configured pinned repository.",
+          maximumTurns: 2,
+          maximumInputTokensPerTurn: 10,
+          maximumOutputTokensPerTurn: 5,
+        },
+        budget: { currency: "USD", hard: true },
+      },
+      {
+        workspaceId: "workspace-1",
+        signal: new AbortController().signal,
+      },
+    );
+
+    expect(test.starts).toHaveLength(1);
+    expect(test.finalizations).toMatchObject([
+      {
+        operationId: "operation-1",
+        status: "succeeded",
+        metadata: {
+          rawRedacted: {
+            repositoryAgentMetering: "aggregate",
+            observableTurnCount: 0,
+          },
+        },
+      },
+    ]);
+    expect(test.reconciliations).toMatchObject([
+      {
+        operationId: "operation-1",
+        status: "reconciled",
+        actualAmount: "0.008",
+      },
+    ]);
+  });
+
+  it("rejects hard-budget repository-agent execution without safe token bounds", async () => {
+    const provider = new DeterministicAiProviderDispatcher({
+      runRepositoryAgent: async () => {
+        throw new Error("must not run");
+      },
+    });
+    const test = harness(provider, repositoryAgentBinding());
+
+    await expect(
+      test.gateway.execute(
+        {
+          kind: "repositoryAgent",
+          role: "repositoryAgent",
+          request: {
+            instruction: "Inspect.",
+            maximumTurns: 2,
+          } as never,
+          budget: { currency: "USD", hard: true },
+        },
+        {
+          workspaceId: "workspace-1",
+          signal: new AbortController().signal,
+        },
+      ),
+    ).rejects.toBeInstanceOf(AiHardBudgetError);
+    expect(provider.calls).toHaveLength(0);
+    expect(test.starts).toHaveLength(0);
   });
 });

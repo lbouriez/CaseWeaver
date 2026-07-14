@@ -185,7 +185,7 @@ async function reconcile(
   );
 }
 
-function gatewayBinding() {
+function gatewayBinding(role: "analysis" | "repositoryAgent" = "analysis") {
   const input: PriceComponent = {
     id: "gateway-input",
     kind: "input",
@@ -200,7 +200,7 @@ function gatewayBinding() {
     workspaceId: "ai-workspace-a",
     bindingId: "ai-binding",
     version: 1,
-    role: "analysis",
+    role,
     providerInstanceVersionId: "ai-provider-version",
     providerType: "fake",
     endpoint: "https://fake.example",
@@ -214,8 +214,9 @@ function gatewayBinding() {
       snapshotId: "ai-snapshot",
       canonicalModel: "model-1",
       provider: "fake",
-      supportedRoles: new Set(["analysis"]),
-      capabilities: new Set(),
+      supportedRoles: new Set([role]),
+      capabilities:
+        role === "repositoryAgent" ? new Set(["repositoryAgent"]) : new Set(),
       maximumInputTokens: 10,
       maximumOutputTokens: 5,
       priceComponents: [
@@ -252,6 +253,138 @@ describe("PBI-003 PostgreSQL AI ledger and budget repository", () => {
       "ai_catalog_snapshots",
       "ai_model_binding_versions",
       "ai_operations",
+    ]);
+  });
+
+  it("persists observable repository-agent turns under one parent budget operation", async () => {
+    await seedConfiguration();
+    await pool.query(
+      `INSERT INTO ai_budget_policies (
+        id, workspace_id, scope, scope_key, limit_amount, currency, hard
+      ) VALUES (
+        'repository-agent-policy', 'ai-workspace-a', 'workspace', 'all', 10, 'USD', true
+      )`,
+    );
+    const operationIds = [
+      "repository-agent-parent",
+      "repository-agent-turn-1",
+      "repository-agent-turn-2",
+    ];
+    const gateway = new DefaultAiExecutionGateway({
+      bindingResolver: {
+        resolve: async () => gatewayBinding("repositoryAgent"),
+      },
+      providerDispatcher: new DeterministicAiProviderDispatcher({
+        runRepositoryAgent: async () => ({
+          value: {
+            summary: "The configured source handles the error.",
+            metering: {
+              mode: "observableTurns",
+              turns: [
+                { turn: 1, usage: { inputTokens: 2, outputTokens: 1 } },
+                { turn: 2, usage: { inputTokens: 3, outputTokens: 1 } },
+              ],
+            },
+          },
+          metadata: { retryCount: 0 },
+        }),
+      }),
+      secretResolver: { resolve: async () => ({ value: "secret" }) },
+      unitOfWork: persistence.unitOfWork,
+      ledger: persistence.ledger,
+      budget: persistence.budget,
+      operationIds: {
+        next: () => {
+          const operationId = operationIds.shift();
+          if (operationId === undefined)
+            throw new Error("Unexpected operation");
+          return operationId;
+        },
+      },
+      clock: { now: () => "2026-07-13T19:00:00.000Z" },
+    });
+
+    await expect(
+      gateway.execute(
+        {
+          kind: "repositoryAgent",
+          role: "repositoryAgent",
+          request: {
+            instruction: "Inspect the configured pinned repository.",
+            maximumTurns: 2,
+            maximumInputTokensPerTurn: 10,
+            maximumOutputTokensPerTurn: 5,
+          },
+          budget: { currency: "USD", hard: true },
+        },
+        {
+          workspaceId: "ai-workspace-a",
+          signal: new AbortController().signal,
+        },
+      ),
+    ).resolves.toMatchObject({
+      operationId: "repository-agent-parent",
+      calculatedCost: { status: "known", amount: "0.009", currency: "USD" },
+    });
+
+    const operations = await pool.query<{
+      id: string;
+      parent_operation_id: string | null;
+      operation_kind: string;
+      status: string;
+    }>(
+      `SELECT id, parent_operation_id, operation_kind, status
+       FROM ai_operations
+       WHERE id LIKE 'repository-agent-%'
+       ORDER BY id`,
+    );
+    expect(operations.rows).toEqual([
+      {
+        id: "repository-agent-parent",
+        parent_operation_id: null,
+        operation_kind: "repositoryAgent",
+        status: "succeeded",
+      },
+      {
+        id: "repository-agent-turn-1",
+        parent_operation_id: "repository-agent-parent",
+        operation_kind: "repositoryAgentTurn",
+        status: "succeeded",
+      },
+      {
+        id: "repository-agent-turn-2",
+        parent_operation_id: "repository-agent-parent",
+        operation_kind: "repositoryAgentTurn",
+        status: "succeeded",
+      },
+    ]);
+    const reservations = await pool.query<{
+      operation_id: string;
+      status: string;
+    }>(
+      `SELECT operation_id, status FROM ai_budget_reservations
+       WHERE operation_id LIKE 'repository-agent-%'`,
+    );
+    expect(reservations.rows).toEqual([
+      { operation_id: "repository-agent-parent", status: "reconciled" },
+    ]);
+    const childCosts = await pool.query<{
+      operation_id: string;
+      calculated_amount: string;
+    }>(
+      `SELECT operation_id, calculated_amount FROM ai_operation_costs
+       WHERE operation_id LIKE 'repository-agent-turn-%'
+       ORDER BY operation_id`,
+    );
+    expect(childCosts.rows).toEqual([
+      {
+        operation_id: "repository-agent-turn-1",
+        calculated_amount: "0.004000000000000000",
+      },
+      {
+        operation_id: "repository-agent-turn-2",
+        calculated_amount: "0.005000000000000000",
+      },
     ]);
   });
 

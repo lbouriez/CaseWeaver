@@ -39,6 +39,11 @@ export type AiOperationStatus =
 
 export interface OperationStart {
   readonly operationId: string;
+  /**
+   * Observable repository-agent turns are children of the one operation that
+   * reserved the whole-run budget. Child operations never reserve again.
+   */
+  readonly parentOperationId?: string;
   readonly workspaceId: string;
   readonly role: AiRole;
   readonly operationKind: AiOperationKind;

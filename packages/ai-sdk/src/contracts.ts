@@ -12,7 +12,8 @@ export type AiOperationKind =
   | "vision"
   | "generation"
   | "reranker"
-  | "repositoryAgent";
+  | "repositoryAgent"
+  | "repositoryAgentTurn";
 
 export type AiCapability =
   | "vision"
@@ -140,10 +141,32 @@ export interface RerankerResult {
 export interface RepositoryAgentRequest {
   readonly instruction: string;
   readonly maximumTurns: number;
+  /**
+   * Limits one model turn. The execution gateway reserves the product of these
+   * limits and `maximumTurns` before an agent is allowed to run.
+   */
+  readonly maximumInputTokensPerTurn: number;
+  readonly maximumOutputTokensPerTurn: number;
 }
+
+export interface RepositoryAgentTurn {
+  readonly turn: number;
+  readonly usage: NormalizedUsage;
+  readonly metadata?: ProviderResponseMetadata;
+}
+
+export type RepositoryAgentMetering =
+  | {
+      readonly mode: "aggregate";
+    }
+  | {
+      readonly mode: "observableTurns";
+      readonly turns: readonly RepositoryAgentTurn[];
+    };
 
 export interface RepositoryAgentResult {
   readonly summary: string;
+  readonly metering: RepositoryAgentMetering;
 }
 
 export interface EmbeddingProvider {

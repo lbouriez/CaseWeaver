@@ -177,6 +177,9 @@ importers:
       '@caseweaver/knowledge':
         specifier: workspace:*
         version: link:../../packages/knowledge
+      '@caseweaver/retrieval':
+        specifier: workspace:*
+        version: link:../../packages/retrieval
       '@caseweaver/scheduling':
         specifier: workspace:*
         version: link:../../packages/scheduling
@@ -226,6 +229,22 @@ importers:
       pg-boss:
         specifier: 12.26.0
         version: 12.26.0
+    devDependencies:
+      '@types/node':
+        specifier: 22.19.7
+        version: 22.19.7
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.0.18
+        version: 4.0.18(@types/node@22.19.7)(jiti@2.7.0)(tsx@4.21.0)
+
+  infrastructure/repository-runtime:
+    dependencies:
+      '@caseweaver/ai-sdk':
+        specifier: workspace:*
+        version: link:../../packages/ai-sdk
     devDependencies:
       '@types/node':
         specifier: 22.19.7
@@ -378,6 +397,25 @@ importers:
         specifier: 4.0.18
         version: 4.0.18(@types/node@22.19.7)(jiti@2.7.0)(tsx@4.21.0)
 
+  packages/retrieval:
+    dependencies:
+      '@caseweaver/ai-execution':
+        specifier: workspace:*
+        version: link:../ai-execution
+      '@caseweaver/ai-sdk':
+        specifier: workspace:*
+        version: link:../ai-sdk
+    devDependencies:
+      '@types/node':
+        specifier: 22.19.7
+        version: 22.19.7
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.0.18
+        version: 4.0.18(@types/node@22.19.7)(jiti@2.7.0)(tsx@4.21.0)
+
   packages/scheduling:
     devDependencies:
       '@types/node':
@@ -396,6 +434,22 @@ importers:
         specifier: workspace:*
         version: link:../domain
     devDependencies:
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.0.18
+        version: 4.0.18(@types/node@22.19.7)(jiti@2.7.0)(tsx@4.21.0)
+
+  providers/copilot-sdk-agent:
+    dependencies:
+      '@caseweaver/ai-sdk':
+        specifier: workspace:*
+        version: link:../../packages/ai-sdk
+    devDependencies:
+      '@types/node':
+        specifier: 22.19.7
+        version: 22.19.7
       typescript:
         specifier: 5.9.3
         version: 5.9.3

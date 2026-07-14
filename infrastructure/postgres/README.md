@@ -10,6 +10,15 @@ Business ranking and state-transition policy remain in vendor-neutral packages.
 Owns inbox/outbox persistence and schedule/domain leases. It does not own queue-job
 leases or worker heartbeats.
 
+## PBI-009 retrieval
+
+`createPostgresRetrievalPersistence` implements the retrieval search and immutable
+snapshot ports. Search applies workspace, selected-collection, authorized-source,
+active-document/revision, and source-lifecycle predicates in both parameterized
+full-text and vector queries. The migration provisions finite indexed dimensions `3`
+(deterministic tests) and `1536`; callers may configure a subset but unsupported
+dimensions are rejected rather than falling back to a corpus scan.
+
 Implements `OutboxStore` with multi-replica-safe claiming, retry metadata, and envelopes
 for both commands and domain events. It does not publish them directly.
 
