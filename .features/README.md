@@ -6,7 +6,7 @@ must preserve. It is written for both maintainers and coding agents.
 ## Reading order
 
 Read files `01` through `12` for product and architecture context. Files `13` through
-`23` are implementation guides for coding agents. For a focused change, read the target
+`25` are implementation guides for coding agents. For a focused change, read the target
 guide, its package README, and its PBI.
 
 ## Normative language
@@ -44,3 +44,4 @@ authoritative after the PBIs are moved to an issue tracker.
 - `22-testing-strategy.md`
 - `23-implementation-workflow.md`
 - `24-legacy-reference-implementations.md`
+- `25-admin-console-guide.md`

@@ -46,7 +46,7 @@ Each PBI must satisfy `.features/11-engineering-standards.md`.
 | 013 | `packages/observability`, `apps/standalone`, `deploy/docker`, `tests/integration`, `tests/e2e` |
 | 014 | `apps/mcp` |
 | 015 | `packages/chat` |
-| 016 | `apps/admin`, `apps/api` |
+| 016 | `apps/admin`, `apps/api/src/modules/pbi-016`, `packages/administration`, `infrastructure/postgres/src/administration`, `tests/contract/administration`, `tests/integration`, `tests/e2e` |
 
 Agents may touch shared contracts only when their PBI owns the contract or after
 coordinating the change with the owning PBI.
@@ -64,5 +64,6 @@ Parallel agents own capability-specific subpaths rather than entire shared folde
 | API routes | Feature PBI owns `apps/api/src/modules/pbi-<id>`; PBI 001 owns transport/bootstrap conventions |
 | Scheduler jobs | PBI 004 owns knowledge schedule modules; PBI 012 owns case-analysis schedule modules |
 | Composition roots | PBI 001 establishes registries; PBI 013 owns final distributed/standalone integration and production profiles |
+| Administration contracts | PBI 016 owns `packages/administration`; feature packages retain their domain policy and immutable configuration contracts |
 
 Subagents must not edit the same registry, migration, or bootstrap file concurrently.
