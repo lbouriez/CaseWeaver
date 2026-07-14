@@ -7,6 +7,7 @@ import {
   requestId,
   workspaceId,
 } from "@caseweaver/domain";
+import { captureOpenTelemetryTraceContext } from "@caseweaver/observability";
 
 import type { ApiConfig } from "./config.js";
 import type { ApiExecutionContextResolver } from "./modules/pbi-012/routes.js";
@@ -28,11 +29,13 @@ export class ConfiguredApiExecutionContextResolver
 
   public async resolve(_request: unknown): Promise<ExecutionContext> {
     const id = randomUUID();
+    const traceContext = captureOpenTelemetryTraceContext();
     return Object.freeze({
       requestId: requestId(`api-request:${id}`),
       workspaceId: this.workspaceId,
       principalId: this.principalId,
       correlationId: correlationId(`api-correlation:${id}`),
+      ...(traceContext === undefined ? {} : { traceContext }),
       signal: new AbortController().signal,
     });
   }

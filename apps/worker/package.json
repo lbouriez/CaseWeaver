@@ -13,7 +13,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@caseweaver/domain": "workspace:*"
+    "@caseweaver/domain": "workspace:*",
+    "@caseweaver/observability": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "22.19.7",

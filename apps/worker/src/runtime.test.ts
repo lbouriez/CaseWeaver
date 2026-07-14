@@ -145,4 +145,31 @@ describe("worker command runtime", () => {
       ),
     ).rejects.toMatchObject({ code: "worker.unsupportedEnvelope" });
   });
+
+  it("routes retention purge through the PBI-013 durable handler", async () => {
+    const purge = vi.fn(async () => {});
+    const runtime = createWorkerRuntime(
+      createWorkerCommandDispatcher({
+        synchronize: { handle: async () => {} },
+        fullRescan: { handle: async () => {} },
+        analysis: { execute: { handle: async () => {} } },
+        pbi013: {
+          retention: {
+            reap: { handle: async () => {} },
+            purge: { handle: purge },
+          },
+        },
+      }),
+    );
+    const envelope = createEnvelope({
+      ...envelopeMetadata,
+      type: "retention.purge.v1",
+      payload: { workItemId: "retention-work-1" },
+    });
+    const signal = new AbortController().signal;
+
+    await runtime.consume(envelope, signal);
+
+    expect(purge).toHaveBeenCalledWith(envelope, signal);
+  });
 });

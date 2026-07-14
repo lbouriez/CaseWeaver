@@ -68,3 +68,11 @@ The adapter exposes application ports only. Its outbox claim/ack and resource-le
 operations use parameterized PostgreSQL SQL with database time, `SKIP LOCKED`, and
 fencing tokens. `test:integration` requires a disposable `DATABASE_URL` whose database
 name includes `test`.
+
+## PBI-013 operations
+
+`20260714140000_pbi_013_operations` adds queryable immutable AI-operation attribution,
+fenced expired-attempt recovery, privacy tombstones, and durable retention work items.
+Privacy purge replaces governed snapshot/result/evidence content with tombstones and
+queues object deletion; retention workers complete the object deletion through a
+fencing token before metadata is marked deleted.

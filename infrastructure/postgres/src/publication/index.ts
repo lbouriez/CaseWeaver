@@ -7,32 +7,30 @@ import type {
   UnitOfWork,
 } from "@caseweaver/application";
 import {
-  IdempotencyConflictError,
+  causationId,
+  correlationId,
+  createEnvelope,
   type Envelope,
+  IdempotencyConflictError,
+  outboxEnvelopeId,
   type PublicationIntent,
   publicationIntentId,
   utcInstant,
   workspaceId,
 } from "@caseweaver/domain";
+import { caseAnalysisOutputSchema } from "@caseweaver/prompts";
 import {
   createPublicationIdentity,
   type PublicationAttempt,
   type PublicationCandidate,
-  publicationProfileSchema,
   type PublicationExecutionStore,
+  publicationProfileSchema,
 } from "@caseweaver/publication";
-import { caseAnalysisOutputSchema } from "@caseweaver/prompts";
 import type {
   VerifiedWebhookEvent,
   VerifiedWebhookEventStore,
   VerifiedWebhookStoreResult,
 } from "@caseweaver/webhooks";
-import {
-  createEnvelope,
-  causationId,
-  correlationId,
-  outboxEnvelopeId,
-} from "@caseweaver/domain";
 import type { Prisma } from "@prisma/client";
 
 import type { PostgresTransactionLookup } from "../index.js";
@@ -609,11 +607,16 @@ export class PostgresPublicationIntentStore implements PublicationIntentStore {
     await this.unitOfWork.get(transaction).$executeRaw`
       INSERT INTO outbox_envelopes (
         id, workspace_id, kind, type, schema_version, occurred_at,
-        correlation_id, causation_id, payload, available_at
+        correlation_id, causation_id, trace_context, payload, available_at
       ) VALUES (
         ${envelope.id}, ${envelope.workspaceId}, ${envelope.kind},
         ${envelope.type}, ${envelope.schemaVersion}, ${new Date(envelope.occurredAt)},
         ${envelope.correlationId}, ${envelope.causationId},
+        ${
+          envelope.traceContext === undefined
+            ? null
+            : JSON.stringify(envelope.traceContext)
+        }::jsonb,
         ${JSON.stringify(envelope.payload)}::jsonb, ${new Date(envelope.occurredAt)}
       )
       ON CONFLICT (id) DO NOTHING

@@ -660,6 +660,8 @@ model AnalysisAttempt {
   attemptOrdinal Int      @map("attempt_ordinal")
   state       String
   startedAt   DateTime    @map("started_at") @db.Timestamptz(6)
+  leaseExpiresAt DateTime @map("lease_expires_at") @db.Timestamptz(6)
+  recoveryFencingToken BigInt @default(0) @map("recovery_fencing_token")
   finishedAt  DateTime?   @map("finished_at") @db.Timestamptz(6)
   errorCode   String?     @map("error_code")
   errorRetryable Boolean? @map("error_retryable")
@@ -889,6 +891,7 @@ model OutboxEnvelope {
   occurredAt     DateTime @map("occurred_at") @db.Timestamptz(6)
   correlationId  String   @map("correlation_id")
   causationId    String   @map("causation_id")
+  traceContext   Json?    @map("trace_context")
   payload        Json
   availableAt    DateTime @default(now()) @map("available_at") @db.Timestamptz(6)
   claimToken     String?  @map("claim_token")
@@ -1119,6 +1122,9 @@ model AiOperation {
   id                        String   @id
   parentOperationId         String?  @map("parent_operation_id")
   workspaceId               String   @map("workspace_id")
+  analysisJobId             String?  @map("analysis_job_id")
+  connectorInstanceId       String?  @map("connector_instance_id")
+  sourceId                  String?  @map("source_id")
   role                      String
   operationKind             String   @map("operation_kind")
   modelBindingVersionId     String   @map("model_binding_version_id")
@@ -1138,6 +1144,7 @@ model AiOperation {
 
   @@unique([workspaceId, id])
   @@index([workspaceId, parentOperationId, startedAt])
+  @@index([workspaceId, analysisJobId, connectorInstanceId, role, startedAt, id])
   @@map("ai_operations")
 }
 

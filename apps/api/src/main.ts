@@ -3,21 +3,32 @@ import { pathToFileURL } from "node:url";
 
 import {
   ApprovePublication,
-  RequestAnalysisWithPublication,
+  CancelOperationalJob,
   type Clock,
   type IdGenerator,
+  InspectDeadLetters,
+  PurgeCaseSnapshot,
+  QueryCostAttribution,
+  QueueExpiredRetention,
+  RecoverExpiredJob,
+  RequestAnalysisWithPublication,
+  RetryDeadLetter,
 } from "@caseweaver/application";
+import { utcInstant } from "@caseweaver/domain";
+import {
+  resolveOpenTelemetryConfig,
+  startOpenTelemetry,
+} from "@caseweaver/observability";
+import { createPostgresPersistence } from "@caseweaver/postgres";
 import { buildApi } from "./app.js";
 import { parseApiConfig } from "./config.js";
 import { createDatabaseReadiness } from "./database-readiness.js";
-import { utcInstant } from "@caseweaver/domain";
 import { ConfiguredApiExecutionContextResolver } from "./execution-context.js";
 import { createLogger } from "./logger.js";
-import { createPostgresPersistence } from "@caseweaver/postgres";
 
 function createIds(): IdGenerator {
   return {
-    next: (kind) => `${kind}:${randomUUID()}`,
+    next: () => randomUUID(),
   };
 }
 
@@ -34,6 +45,9 @@ export async function startApi(
   const persistence = createPostgresPersistence({
     databaseUrl: config.databaseUrl,
   });
+  const telemetry = await startOpenTelemetry(
+    resolveOpenTelemetryConfig(env, "caseweaver-api"),
+  );
   const ids = createIds();
   const requestAnalysis = new RequestAnalysisWithPublication(
     persistence.unitOfWork,
@@ -53,6 +67,61 @@ export async function startApi(
     ids,
     clock,
   );
+  const inspectDeadLetters = new InspectDeadLetters(
+    persistence.unitOfWork,
+    persistence.operationsStore,
+    persistence.authorizationGuard,
+  );
+  const retryDeadLetter = new RetryDeadLetter(
+    persistence.unitOfWork,
+    persistence.operationsStore,
+    persistence.outboxStore,
+    persistence.auditStore,
+    persistence.authorizationGuard,
+    ids,
+    clock,
+  );
+  const cancelJob = new CancelOperationalJob(
+    persistence.unitOfWork,
+    persistence.operationsStore,
+    persistence.auditStore,
+    persistence.authorizationGuard,
+    ids,
+    clock,
+  );
+  const recoverExpiredJob = new RecoverExpiredJob(
+    persistence.unitOfWork,
+    persistence.operationsStore,
+    persistence.resourceLeaseStore,
+    persistence.outboxStore,
+    persistence.auditStore,
+    persistence.authorizationGuard,
+    ids,
+    clock,
+  );
+  const queryCosts = new QueryCostAttribution(
+    persistence.unitOfWork,
+    persistence.operationsStore,
+    persistence.authorizationGuard,
+  );
+  const purgeCaseSnapshot = new PurgeCaseSnapshot(
+    persistence.unitOfWork,
+    persistence.operationsStore,
+    persistence.outboxStore,
+    persistence.auditStore,
+    persistence.authorizationGuard,
+    ids,
+    clock,
+  );
+  const queueRetention = new QueueExpiredRetention(
+    persistence.unitOfWork,
+    persistence.operationsStore,
+    persistence.outboxStore,
+    persistence.auditStore,
+    persistence.authorizationGuard,
+    ids,
+    clock,
+  );
   const app = buildApi({
     config,
     logger,
@@ -66,11 +135,30 @@ export async function startApi(
           approvePublication.execute(intentId, context),
       },
     },
+    pbi013: {
+      context: new ConfiguredApiExecutionContextResolver(config),
+      operations: {
+        inspectDeadLetters: (limit, context) =>
+          inspectDeadLetters.execute(limit, context),
+        retryDeadLetter: (jobId, mutation, context) =>
+          retryDeadLetter.execute(jobId, mutation, context),
+        cancelJob: (jobId, mutation, context) =>
+          cancelJob.execute(jobId, mutation, context),
+        recoverExpiredJob: (jobId, mutation, context) =>
+          recoverExpiredJob.execute(jobId, mutation, context),
+        queryCosts: (query, context) => queryCosts.execute(query, context),
+        purgeCaseSnapshot: (snapshotId, reason, mutation, context) =>
+          purgeCaseSnapshot.execute(snapshotId, reason, mutation, context),
+        queueRetention: (mutation, context, limit) =>
+          queueRetention.execute(mutation, context, limit),
+      },
+    },
   });
 
   app.addHook("onClose", async () => {
     await persistence.close();
     await databaseReadiness.close();
+    await telemetry?.shutdown();
   });
 
   try {

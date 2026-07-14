@@ -1,4 +1,5 @@
 import type { Envelope, EnvelopeFor } from "@caseweaver/domain";
+import { withOpenTelemetrySpan } from "@caseweaver/observability";
 
 export type KnowledgeSynchronizeCommand =
   EnvelopeFor<"knowledge.synchronize.v1">;
@@ -20,6 +21,8 @@ export type PublicationExecuteCommand = EnvelopeFor<"publication.execute.v1">;
 export type PublicationReconcileCommand =
   EnvelopeFor<"publication.reconcile.v1">;
 export type AnalysisCompletedEvent = EnvelopeFor<"analysis.completed.v1">;
+export type RetentionReapCommand = EnvelopeFor<"retention.reap.v1">;
+export type RetentionPurgeCommand = EnvelopeFor<"retention.purge.v1">;
 
 export interface AnalysisCommandHandlers {
   readonly execute: WorkerCommandHandler<AnalysisExecuteCommand>;
@@ -36,9 +39,17 @@ export interface Pbi012CommandHandlers {
   readonly analysisCompleted: WorkerCommandHandler<AnalysisCompletedEvent>;
 }
 
+export interface Pbi013CommandHandlers {
+  readonly retention: {
+    readonly reap: WorkerCommandHandler<RetentionReapCommand>;
+    readonly purge: WorkerCommandHandler<RetentionPurgeCommand>;
+  };
+}
+
 export interface WorkerCommandHandlers extends KnowledgeCommandHandlers {
   readonly analysis: AnalysisCommandHandlers;
   readonly pbi012?: Pbi012CommandHandlers;
+  readonly pbi013?: Pbi013CommandHandlers;
 }
 
 export interface WorkerCommandDispatcher {
@@ -111,6 +122,18 @@ export function createWorkerCommandDispatcher(
           }
           await handlers.pbi012.analysisCompleted.handle(envelope, signal);
           return;
+        case "retention.reap.v1":
+          if (handlers.pbi013 === undefined) {
+            throw new UnsupportedWorkerEnvelopeError(envelope.type);
+          }
+          await handlers.pbi013.retention.reap.handle(envelope, signal);
+          return;
+        case "retention.purge.v1":
+          if (handlers.pbi013 === undefined) {
+            throw new UnsupportedWorkerEnvelopeError(envelope.type);
+          }
+          await handlers.pbi013.retention.purge.handle(envelope, signal);
+          return;
         case "knowledge.synchronize.v1":
           await handlers.synchronize.handle(envelope, signal);
           return;
@@ -127,6 +150,16 @@ export function createWorkerRuntime(
 ): WorkerRuntime {
   return Object.freeze({
     consume: (envelope: Envelope, signal: AbortSignal) =>
-      dispatcher.dispatch(envelope, signal),
+      withOpenTelemetrySpan(
+        "caseweaver.worker.consume",
+        {
+          traceContext: envelope.traceContext,
+          attributes: {
+            "caseweaver.envelope_type": envelope.type,
+            "caseweaver.workspace_id": envelope.workspaceId,
+          },
+        },
+        () => dispatcher.dispatch(envelope, signal),
+      ),
   });
 }

@@ -12,6 +12,7 @@
   "dependencies": {
     "@caseweaver/application": "workspace:*",
     "@caseweaver/domain": "workspace:*",
+    "@caseweaver/observability": "workspace:*",
     "@caseweaver/postgres": "workspace:*",
     "fastify": "^5.0.0",
     "pg": "^8.0.0",

@@ -21,6 +21,11 @@ import {
 } from "./ids.js";
 
 export type EnvelopeKind = "command" | "domainEvent";
+export interface TraceContext {
+  readonly traceparent: string;
+  readonly tracestate?: string;
+}
+
 export type EnvelopeType =
   | "analysis.execute.v1"
   | "analysis.trigger.v1"
@@ -28,7 +33,9 @@ export type EnvelopeType =
   | "publication.reconcile.v1"
   | "analysis.completed.v1"
   | "knowledge.synchronize.v1"
-  | "knowledge.full-rescan.v1";
+  | "knowledge.full-rescan.v1"
+  | "retention.reap.v1"
+  | "retention.purge.v1";
 
 export interface AnalysisExecutePayload {
   readonly analysisJobId: AnalysisJobId;
@@ -67,6 +74,14 @@ export interface KnowledgeFullRescanPayload {
   readonly sourceId: string;
 }
 
+export interface RetentionReapPayload {
+  readonly reason: "scheduled" | "operator";
+}
+
+export interface RetentionPurgePayload {
+  readonly workItemId: string;
+}
+
 export type EnvelopePayloadByType = {
   readonly "analysis.execute.v1": AnalysisExecutePayload;
   readonly "analysis.trigger.v1": AnalysisTriggerPayload;
@@ -75,6 +90,8 @@ export type EnvelopePayloadByType = {
   readonly "analysis.completed.v1": AnalysisCompletedPayload;
   readonly "knowledge.synchronize.v1": KnowledgeSynchronizePayload;
   readonly "knowledge.full-rescan.v1": KnowledgeFullRescanPayload;
+  readonly "retention.reap.v1": RetentionReapPayload;
+  readonly "retention.purge.v1": RetentionPurgePayload;
 };
 
 export type EnvelopeFor<Type extends EnvelopeType = EnvelopeType> =
@@ -88,6 +105,7 @@ export type EnvelopeFor<Type extends EnvelopeType = EnvelopeType> =
         occurredAt: UtcInstant;
         correlationId: CorrelationId;
         causationId: CausationId;
+        traceContext?: TraceContext;
         payload: Readonly<EnvelopePayloadByType[Type]>;
       }>
     : never;
@@ -216,7 +234,48 @@ function parsePayload(
       return Object.freeze({
         sourceId: requireNonEmptyString(payload.sourceId, "sourceId"),
       });
+    case "retention.reap.v1": {
+      const reason = requireString(payload.reason, "reason");
+      if (reason !== "scheduled" && reason !== "operator") {
+        throw new DomainValidationError("Envelope payload is invalid.", {
+          field: "reason",
+        });
+      }
+      return Object.freeze({ reason });
+    }
+    case "retention.purge.v1":
+      return Object.freeze({
+        workItemId: requireNonEmptyString(payload.workItemId, "workItemId"),
+      });
   }
+}
+
+function parseTraceContext(value: unknown): TraceContext | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) {
+    throw new DomainValidationError("Envelope trace context is invalid.");
+  }
+  const traceparent = requireString(
+    value.traceparent,
+    "traceContext.traceparent",
+  );
+  if (!/^00-[0-9a-f]{32}-[0-9a-f]{16}-0[01]$/iu.test(traceparent)) {
+    throw new DomainValidationError("Envelope trace context is invalid.");
+  }
+  const tracestate =
+    value.tracestate === undefined
+      ? undefined
+      : requireString(value.tracestate, "traceContext.tracestate");
+  if (
+    tracestate !== undefined &&
+    (tracestate.length === 0 || tracestate.length > 512)
+  ) {
+    throw new DomainValidationError("Envelope trace context is invalid.");
+  }
+  return Object.freeze({
+    traceparent: traceparent.toLowerCase(),
+    ...(tracestate === undefined ? {} : { tracestate }),
+  });
 }
 
 function parseEnvelope(value: unknown): Envelope {
@@ -235,6 +294,8 @@ function parseEnvelope(value: unknown): Envelope {
       "analysis.completed.v1",
       "knowledge.synchronize.v1",
       "knowledge.full-rescan.v1",
+      "retention.reap.v1",
+      "retention.purge.v1",
     ].includes(type)
   ) {
     throw new DomainValidationError("Envelope type is unsupported.");
@@ -245,6 +306,7 @@ function parseEnvelope(value: unknown): Envelope {
     throw new DomainValidationError("Envelope metadata is invalid.");
   }
 
+  const traceContext = parseTraceContext(value.traceContext);
   const envelope = {
     id: outboxEnvelopeId(requireString(value.id, "id")),
     kind: requiredKind,
@@ -256,6 +318,7 @@ function parseEnvelope(value: unknown): Envelope {
       requireString(value.correlationId, "correlationId"),
     ),
     causationId: causationId(requireString(value.causationId, "causationId")),
+    ...(traceContext === undefined ? {} : { traceContext }),
     payload: parsePayload(type, value.payload),
   };
 

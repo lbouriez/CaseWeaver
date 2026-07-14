@@ -1,15 +1,17 @@
+import { createHash } from "node:crypto";
+
 import {
+  type AnalysisJob,
   analysisIdentityId,
   analysisJobId,
   auditEventId,
   causationId,
   createEnvelope,
+  type EnvelopeFor,
   IdempotencyConflictError,
   outboxEnvelopeId,
-  publicationIntentId,
-  type AnalysisJob,
-  type EnvelopeFor,
   type PublicationIntent,
+  publicationIntentId,
   type Sha256Digest,
 } from "@caseweaver/domain";
 
@@ -52,13 +54,23 @@ function initialPublicationState(
   }
 }
 
+function stableOutboxEnvelopeId(value: string) {
+  const bytes = createHash("sha256").update(value, "utf8").digest();
+  bytes.writeUInt8((bytes.readUInt8(6) & 0x0f) | 0x50, 6);
+  bytes.writeUInt8((bytes.readUInt8(8) & 0x3f) | 0x80, 8);
+  const hex = bytes.subarray(0, 16).toString("hex");
+  return outboxEnvelopeId(
+    `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`,
+  );
+}
+
 function publicationEnvelope(
   intent: PublicationIntent,
   context: ExecutionContext,
   occurredAt: ReturnType<Clock["now"]>,
 ) {
   return createEnvelope({
-    id: outboxEnvelopeId(`publication-command:${intent.id}`),
+    id: stableOutboxEnvelopeId(`publication-command:${intent.id}`),
     kind: "command",
     type: "publication.execute.v1",
     schemaVersion: 1,
@@ -66,6 +78,9 @@ function publicationEnvelope(
     occurredAt,
     correlationId: context.correlationId,
     causationId: causationId(context.requestId),
+    ...(context.traceContext === undefined
+      ? {}
+      : { traceContext: context.traceContext }),
     payload: { publicationIntentId: intent.id },
   });
 }
@@ -217,6 +232,9 @@ export class RequestAnalysisWithPublication {
             occurredAt,
             correlationId: context.correlationId,
             causationId: causationId(context.requestId),
+            ...(context.traceContext === undefined
+              ? {}
+              : { traceContext: context.traceContext }),
             payload: {
               analysisJobId: job.id,
               analysisIdentityId: job.analysisIdentityId,
@@ -350,7 +368,7 @@ export class SchedulePublicationForCompletedAnalysis {
         await this.publications.enqueuePublication(
           transaction,
           createEnvelope({
-            id: outboxEnvelopeId(`publication-command:${intent.id}`),
+            id: stableOutboxEnvelopeId(`publication-command:${intent.id}`),
             kind: "command",
             type: "publication.execute.v1",
             schemaVersion: 1,
@@ -358,6 +376,9 @@ export class SchedulePublicationForCompletedAnalysis {
             occurredAt,
             correlationId: event.correlationId,
             causationId: causationId(event.id),
+            ...(event.traceContext === undefined
+              ? {}
+              : { traceContext: event.traceContext }),
             payload: { publicationIntentId: intent.id },
           }),
         );

@@ -282,6 +282,7 @@ export class PostgresAnalysisExecutionStore implements AnalysisExecutionStore {
         );
       }
       const now = new Date();
+      const leaseExpiresAt = new Date(now.getTime() + 15 * 60 * 1_000);
       const id = attemptId(row.analysis_job_id, nextOrdinal);
       const updated = await database.analysisJob.updateMany({
         where: {
@@ -300,6 +301,8 @@ export class PostgresAnalysisExecutionStore implements AnalysisExecutionStore {
           attemptOrdinal: nextOrdinal,
           state: "running",
           startedAt: now,
+          leaseExpiresAt,
+          recoveryFencingToken: 0n,
           stages: [],
         },
       });

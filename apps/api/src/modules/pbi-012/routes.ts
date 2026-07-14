@@ -8,6 +8,7 @@ import {
   publicationIntentId,
   sha256Digest,
 } from "@caseweaver/domain";
+import { withOpenTelemetrySpan } from "@caseweaver/observability";
 import { z } from "zod";
 
 import type { ApiInstance } from "../../app.js";
@@ -80,24 +81,30 @@ export function registerPbi012Routes(
     if (!body.success) {
       return reply.status(400).send({ code: "request.invalid" });
     }
-    const context = await dependencies.context.resolve(request);
-    const result = await dependencies.operations.requestAnalysis(
-      {
-        idempotencyKeyDigest: sha256Digest(body.data.idempotencyKeyDigest),
-        requestDigest: sha256Digest(body.data.requestDigest),
-        identityHash: sha256Digest(body.data.identityHash),
-        analysisProfileVersionId: analysisProfileVersionId(
-          body.data.analysisProfileVersionId,
-        ),
-        caseSnapshotId: caseSnapshotId(body.data.caseSnapshotId),
-        publication: {
-          ...body.data.publication,
-          intentHash: sha256Digest(body.data.publication.intentHash),
-        },
+    return withOpenTelemetrySpan(
+      "caseweaver.api.analysis_publication",
+      {},
+      async () => {
+        const context = await dependencies.context.resolve(request);
+        const result = await dependencies.operations.requestAnalysis(
+          {
+            idempotencyKeyDigest: sha256Digest(body.data.idempotencyKeyDigest),
+            requestDigest: sha256Digest(body.data.requestDigest),
+            identityHash: sha256Digest(body.data.identityHash),
+            analysisProfileVersionId: analysisProfileVersionId(
+              body.data.analysisProfileVersionId,
+            ),
+            caseSnapshotId: caseSnapshotId(body.data.caseSnapshotId),
+            publication: {
+              ...body.data.publication,
+              intentHash: sha256Digest(body.data.publication.intentHash),
+            },
+          },
+          context,
+        );
+        return reply.status(202).send(result);
       },
-      context,
     );
-    return reply.status(202).send(result);
   });
 
   app.post(
@@ -107,12 +114,18 @@ export function registerPbi012Routes(
       if (!parameters.success) {
         return reply.status(404).send({ code: "publication.notFound" });
       }
-      const context = await dependencies.context.resolve(request);
-      const result = await dependencies.operations.approvePublication(
-        publicationIntentId(parameters.data.publicationIntentId),
-        context,
+      return withOpenTelemetrySpan(
+        "caseweaver.api.publication_approval",
+        {},
+        async () => {
+          const context = await dependencies.context.resolve(request);
+          const result = await dependencies.operations.approvePublication(
+            publicationIntentId(parameters.data.publicationIntentId),
+            context,
+          );
+          return reply.status(result.approved ? 202 : 404).send(result);
+        },
       );
-      return reply.status(result.approved ? 202 : 404).send(result);
     },
   );
 }

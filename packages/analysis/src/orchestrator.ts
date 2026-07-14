@@ -552,6 +552,7 @@ export class AnalysisOrchestrator {
         role: "analysis",
         bindingVersionId: profile.analysisBindingVersionId,
         analysisId: execution.analysisIdentityId,
+        attribution: { analysisJobId: execution.analysisJobId },
         requiredCapabilities: ["structuredOutput"],
         maximumInputTokens: profile.generation.maximumInputTokens,
         maximumOutputTokens: profile.generation.maximumOutputTokens,

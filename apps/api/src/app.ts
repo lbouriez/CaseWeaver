@@ -11,10 +11,14 @@ import type { DatabaseReadinessProbe } from "./database-readiness.js";
 import { registerHealthRoutes } from "./health.routes.js";
 import type { AppLogger } from "./logger.js";
 import {
-  registerPbi012Routes,
   type ApiExecutionContextResolver,
   type Pbi012ApiOperations,
+  registerPbi012Routes,
 } from "./modules/pbi-012/routes.js";
+import {
+  type Pbi013ApiOperations,
+  registerPbi013Routes,
+} from "./modules/pbi-013/routes.js";
 
 export interface BuildApiDependencies {
   readonly config: ApiConfig;
@@ -23,6 +27,10 @@ export interface BuildApiDependencies {
   readonly pbi012?: {
     readonly context: ApiExecutionContextResolver;
     readonly operations: Pbi012ApiOperations;
+  };
+  readonly pbi013?: {
+    readonly context: ApiExecutionContextResolver;
+    readonly operations: Pbi013ApiOperations;
   };
 }
 
@@ -38,6 +46,7 @@ export function buildApi({
   logger,
   readinessProbe,
   pbi012,
+  pbi013,
 }: BuildApiDependencies): ApiInstance {
   const app = Fastify({
     loggerInstance: logger,
@@ -49,6 +58,9 @@ export function buildApi({
   registerHealthRoutes(app, readinessProbe, logger);
   if (pbi012 !== undefined) {
     registerPbi012Routes(app, pbi012);
+  }
+  if (pbi013 !== undefined) {
+    registerPbi013Routes(app, pbi013);
   }
   return app;
 }

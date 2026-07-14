@@ -9,3 +9,7 @@ The worker owns retries and heartbeats but delegates policy to reusable packages
 
 Hosts the application-layer outbox relay in distributed mode. Multiple replicas safely
 claim envelopes without duplicate effects.
+
+PBI-013 registers durable retention-purge envelopes only. The injected service claims a
+fenced work item before idempotently deleting the referenced object and marking its
+metadata deleted.

@@ -132,8 +132,8 @@ export class PostgresAiLedgerBudgetRepository
       `INSERT INTO ai_operations (
         id, parent_operation_id, workspace_id, role, operation_kind, model_binding_version_id,
         provider_instance_version_id, catalog_snapshot_id, configured_model,
-        status, started_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'started', $10)`,
+        analysis_job_id, connector_instance_id, source_id, status, started_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'started', $13)`,
       [
         operation.operationId,
         operation.parentOperationId ?? null,
@@ -144,6 +144,9 @@ export class PostgresAiLedgerBudgetRepository
         operation.providerInstanceVersionId,
         operation.catalogSnapshotId,
         operation.configuredModel,
+        operation.attribution?.analysisJobId ?? null,
+        operation.attribution?.connectorInstanceId ?? null,
+        operation.attribution?.sourceId ?? null,
         operation.startedAt,
       ],
     );

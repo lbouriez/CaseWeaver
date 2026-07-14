@@ -51,6 +51,16 @@ export interface OperationStart {
   readonly providerInstanceVersionId: string;
   readonly catalogSnapshotId: string;
   readonly configuredModel: string;
+  /**
+   * Immutable ownership captured at invocation time. These IDs are optional
+   * only for installation-level calls; when present they are queryable without
+   * parsing prompts, payloads, or diagnostic data.
+   */
+  readonly attribution?: {
+    readonly analysisJobId?: string;
+    readonly connectorInstanceId?: string;
+    readonly sourceId?: string;
+  };
   readonly startedAt: string;
   readonly pricing: PriceResolution;
   readonly reservation: CostCalculation;

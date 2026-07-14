@@ -29,6 +29,12 @@ export const permissions = [
   "publication.publish",
   "configuration.manage",
   "audit.read",
+  "operations.inspect",
+  "operations.retry",
+  "operations.recover",
+  "cost.read",
+  "privacy.delete",
+  "retention.run",
 ] as const;
 
 export type Permission = (typeof permissions)[number];
@@ -47,6 +53,11 @@ const rolePermissions: Readonly<Record<WorkspaceRole, readonly Permission[]>> =
       "publication.approve",
       "publication.publish",
       "audit.read",
+      "operations.inspect",
+      "operations.retry",
+      "operations.recover",
+      "cost.read",
+      "retention.run",
     ],
     analyst: ["analysis.request", "analysis.read", "evidence.read"],
     viewer: ["analysis.read", "evidence.read"],

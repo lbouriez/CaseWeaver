@@ -201,6 +201,9 @@ export class RequestAnalysis {
             occurredAt,
             correlationId: context.correlationId,
             causationId: causationId(context.requestId),
+            ...(context.traceContext === undefined
+              ? {}
+              : { traceContext: context.traceContext }),
             payload: {
               analysisJobId: job.id,
               analysisIdentityId: identity.id,
@@ -283,6 +286,9 @@ export class ForceRerunAnalysis {
           occurredAt,
           correlationId: context.correlationId,
           causationId: causationId(context.requestId),
+          ...(context.traceContext === undefined
+            ? {}
+            : { traceContext: context.traceContext }),
           payload: {
             analysisJobId: job.id,
             analysisIdentityId: identity.id,

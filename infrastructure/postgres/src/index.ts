@@ -9,6 +9,7 @@ import type {
   BootstrapWorkspaceStore,
   ClaimedOutboxEnvelope,
   ExecutionContext,
+  OperationsStore,
   OutboxStore,
   PublicationIntentStore,
   ResourceLeaseStore,
@@ -29,9 +30,9 @@ import {
   workspaceId,
 } from "@caseweaver/domain";
 import {
+  type AuditRecord,
   isWorkspaceRole,
   requirePermission,
-  type AuditRecord,
   type WorkspaceRole,
 } from "@caseweaver/security";
 import { PrismaPg } from "@prisma/adapter-pg";
@@ -41,6 +42,7 @@ import {
   PostgresAnalysisExecutionStore,
   PostgresCaseSnapshotTombstoneStore,
 } from "./analysis/index.js";
+import { PostgresOperationsStore } from "./operations/index.js";
 import {
   PostgresPublicationExecutionStore,
   PostgresPublicationIntentStore,
@@ -522,6 +524,7 @@ interface OutboxRow {
   readonly occurred_at: Date;
   readonly correlation_id: string;
   readonly causation_id: string;
+  readonly trace_context: Prisma.JsonValue | null;
   readonly payload: unknown;
 }
 
@@ -544,6 +547,15 @@ class PostgresOutboxStore implements OutboxStore {
         occurredAt: asDate(envelope.occurredAt),
         correlationId: envelope.correlationId,
         causationId: envelope.causationId,
+        traceContext:
+          envelope.traceContext === undefined
+            ? undefined
+            : {
+                traceparent: envelope.traceContext.traceparent,
+                ...(envelope.traceContext.tracestate === undefined
+                  ? {}
+                  : { tracestate: envelope.traceContext.tracestate }),
+              },
         payload: envelope.payload as Prisma.InputJsonValue,
         availableAt: asDate(envelope.occurredAt),
       },
@@ -594,6 +606,7 @@ class PostgresOutboxStore implements OutboxStore {
         envelope.occurred_at,
         envelope.correlation_id,
         envelope.causation_id,
+        envelope.trace_context,
         envelope.payload
     `;
     return Object.freeze(
@@ -609,6 +622,9 @@ class PostgresOutboxStore implements OutboxStore {
             occurredAt: row.occurred_at.toISOString(),
             correlationId: row.correlation_id,
             causationId: row.causation_id,
+            ...(row.trace_context === null
+              ? {}
+              : { traceContext: row.trace_context }),
             payload: row.payload,
           }),
         }),
@@ -709,6 +725,7 @@ export interface PostgresPersistence {
   readonly authorizationGuard: AuthorizationGuard;
   readonly outboxStore: OutboxStore;
   readonly resourceLeaseStore: ResourceLeaseStore;
+  readonly operationsStore: OperationsStore;
   close(): Promise<void>;
 }
 
@@ -743,6 +760,7 @@ export function createPostgresPersistence(
     authorizationGuard: new PostgresAuthorizationGuard(unitOfWork),
     outboxStore: new PostgresOutboxStore(unitOfWork),
     resourceLeaseStore: new PostgresResourceLeaseStore(unitOfWork),
+    operationsStore: new PostgresOperationsStore(unitOfWork),
     close: async () => client.$disconnect(),
   });
 }
@@ -751,5 +769,6 @@ export * from "./ai/index.js";
 export * from "./analysis/index.js";
 export * from "./attachments/index.js";
 export * from "./knowledge/index.js";
+export * from "./operations/index.js";
 export * from "./publication/index.js";
 export * from "./scheduling/index.js";

@@ -7,8 +7,8 @@ import type {
   CaseSnapshotId,
   CorrelationId,
   Envelope,
-  PublicationIntentId,
   PrincipalId,
+  PublicationIntentId,
   RequestId,
   Sha256Digest,
   UtcInstant,
@@ -42,7 +42,8 @@ export type IdentifierKind =
   | "analysisJob"
   | "publicationIntent"
   | "publicationAttempt"
-  | "outboxEnvelope";
+  | "outboxEnvelope"
+  | "retentionWorkItem";
 
 export interface IdGenerator {
   next(kind: IdentifierKind): string;
@@ -53,6 +54,7 @@ export interface ExecutionContext {
   readonly workspaceId: WorkspaceId;
   readonly principalId: PrincipalId;
   readonly correlationId: CorrelationId;
+  readonly traceContext?: import("@caseweaver/domain").TraceContext;
   readonly signal: AbortSignal;
 }
 
@@ -353,6 +355,177 @@ export interface ResourceLeaseStore {
       readonly fencingToken: bigint;
     },
   ): Promise<boolean>;
+}
+
+export type OperationalAction =
+  | "operations.cancel"
+  | "operations.retry"
+  | "operations.recover"
+  | "privacy.purge"
+  | "retention.reap";
+
+export interface StoredOperationalAction {
+  readonly requestDigest: Sha256Digest;
+  readonly resourceId: string;
+}
+
+export interface DeadLetterRecord {
+  readonly jobId: AnalysisJobId;
+  readonly analysisIdentityId: AnalysisIdentityId;
+  readonly failedAt: UtcInstant;
+  readonly failureCode: string;
+  readonly retryable: boolean;
+  readonly attemptOrdinal: number;
+}
+
+export interface CostAttributionRecord {
+  readonly operationId: string;
+  readonly parentOperationId?: string;
+  readonly analysisJobId?: AnalysisJobId;
+  readonly connectorInstanceId?: string;
+  readonly sourceId?: string;
+  readonly role: string;
+  readonly configuredModel: string;
+  readonly startedAt: UtcInstant;
+  readonly finishedAt?: UtcInstant;
+  readonly status: string;
+  readonly calculatedAmount?: string;
+  readonly currency?: string;
+  readonly providerReportedAmount?: string;
+  readonly calculationStatus: string;
+}
+
+export interface CostAttributionQuery {
+  readonly analysisJobId?: AnalysisJobId;
+  readonly connectorInstanceId?: string;
+  readonly role?: string;
+  readonly startedAfter?: UtcInstant;
+  readonly startedBefore?: UtcInstant;
+  readonly limit: number;
+}
+
+export interface RetentionWorkItem {
+  readonly id: string;
+  readonly workspaceId: WorkspaceId;
+  readonly storageKey?: string;
+}
+
+export interface ClaimedRetentionWorkItem extends RetentionWorkItem {
+  readonly fencingToken: bigint;
+}
+
+/**
+ * Operational records remain workspace-scoped. Mutation methods are invoked
+ * inside the caller's transaction together with their audit and outbox writes.
+ */
+export interface OperationsStore {
+  lockAction(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly workspaceId: WorkspaceId;
+      readonly action: OperationalAction;
+      readonly keyDigest: Sha256Digest;
+    },
+  ): Promise<void>;
+  findAction(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly workspaceId: WorkspaceId;
+      readonly action: OperationalAction;
+      readonly keyDigest: Sha256Digest;
+    },
+  ): Promise<StoredOperationalAction | undefined>;
+  recordAction(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly workspaceId: WorkspaceId;
+      readonly action: OperationalAction;
+      readonly keyDigest: Sha256Digest;
+      readonly requestDigest: Sha256Digest;
+      readonly resourceId: string;
+      readonly occurredAt: UtcInstant;
+    },
+  ): Promise<void>;
+  inspectDeadLetters(
+    transaction: ApplicationTransaction,
+    input: { readonly workspaceId: WorkspaceId; readonly limit: number },
+  ): Promise<readonly DeadLetterRecord[]>;
+  retryDeadLetter(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly workspaceId: WorkspaceId;
+      readonly failedJobId: AnalysisJobId;
+      readonly replacementJobId: AnalysisJobId;
+      readonly occurredAt: UtcInstant;
+    },
+  ): Promise<AnalysisJob | undefined>;
+  cancelJob(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly workspaceId: WorkspaceId;
+      readonly analysisJobId: AnalysisJobId;
+      readonly occurredAt: UtcInstant;
+    },
+  ): Promise<AnalysisJob | undefined>;
+  recoverExpiredJob(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly workspaceId: WorkspaceId;
+      readonly analysisJobId: AnalysisJobId;
+      readonly fencingToken: bigint;
+      readonly occurredAt: UtcInstant;
+    },
+  ): Promise<AnalysisJob | undefined>;
+  queryCostAttribution(
+    transaction: ApplicationTransaction,
+    query: CostAttributionQuery & { readonly workspaceId: WorkspaceId },
+  ): Promise<readonly CostAttributionRecord[]>;
+  purgeCaseSnapshot(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly workspaceId: WorkspaceId;
+      readonly caseSnapshotId: CaseSnapshotId;
+      readonly actorPrincipalId: PrincipalId;
+      readonly reason: string;
+      readonly occurredAt: UtcInstant;
+    },
+  ): Promise<
+    | { readonly kind: "notFound" }
+    | {
+        readonly kind: "purged" | "alreadyPurged";
+        readonly workItems: readonly RetentionWorkItem[];
+      }
+  >;
+  queueExpiredRetention(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly workspaceId: WorkspaceId;
+      readonly limit: number;
+      readonly occurredAt: UtcInstant;
+    },
+  ): Promise<readonly RetentionWorkItem[]>;
+  claimRetentionWork(
+    transaction: ApplicationTransaction,
+    input: { readonly workspaceId: WorkspaceId; readonly workItemId: string },
+  ): Promise<ClaimedRetentionWorkItem | undefined>;
+  completeRetentionWork(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly workspaceId: WorkspaceId;
+      readonly workItemId: string;
+      readonly fencingToken: bigint;
+      readonly occurredAt: UtcInstant;
+    },
+  ): Promise<boolean>;
+  releaseRetentionWork(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly workspaceId: WorkspaceId;
+      readonly workItemId: string;
+      readonly fencingToken: bigint;
+      readonly occurredAt: UtcInstant;
+    },
+  ): Promise<void>;
 }
 
 export type AuditRecordInput = Omit<AuditRecord, "id">;

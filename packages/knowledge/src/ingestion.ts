@@ -643,6 +643,10 @@ export class KnowledgeIngestionService {
           role: "embedding",
           bindingVersionId:
             request.configuration.collection.embeddingBindingVersionId,
+          attribution: {
+            connectorInstanceId: request.configuration.connectorInstanceId,
+            sourceId: request.configuration.id,
+          },
           request: {
             input: batch.map(([key]) => contents.get(key) ?? ""),
             dimensions: request.configuration.collection.dimensions,

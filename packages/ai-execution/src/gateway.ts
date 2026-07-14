@@ -51,6 +51,11 @@ interface MeteredRequestBase {
   readonly role: AiRole;
   readonly bindingVersionId?: string;
   readonly analysisId?: string;
+  readonly attribution?: {
+    readonly analysisJobId?: string;
+    readonly connectorInstanceId?: string;
+    readonly sourceId?: string;
+  };
   readonly requiredCapabilities?: readonly AiCapability[];
   readonly maximumInputTokens?: number;
   readonly maximumOutputTokens?: number;
@@ -605,6 +610,9 @@ export class DefaultAiExecutionGateway implements AiExecutionGateway {
         providerInstanceVersionId: binding.providerInstanceVersionId,
         catalogSnapshotId: binding.catalogSnapshotId,
         configuredModel: binding.canonicalModel,
+        ...(request.attribution === undefined
+          ? {}
+          : { attribution: request.attribution }),
         startedAt,
         pricing,
         reservation,
@@ -678,6 +686,9 @@ export class DefaultAiExecutionGateway implements AiExecutionGateway {
                   providerInstanceVersionId: binding.providerInstanceVersionId,
                   catalogSnapshotId: binding.catalogSnapshotId,
                   configuredModel: binding.canonicalModel,
+                  ...(request.attribution === undefined
+                    ? {}
+                    : { attribution: request.attribution }),
                   startedAt,
                   pricing,
                   reservation: childCalculatedCost,

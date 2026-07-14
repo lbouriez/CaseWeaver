@@ -2,15 +2,50 @@
 
 **PBIs:** 001, 013
 
-Development and production Compose definitions for PostgreSQL, API, webhook, scheduler,
-worker, MCP when enabled, and optional object storage/repository runtime.
+`compose.production.yml` is a production Compose example with two mutually exclusive
+runtime profiles:
 
-Health checks, migrations, least-privilege networks, volumes, and example configuration
-belong here.
+- `standalone`: API, webhook, scheduler, relay, and worker lifecycle co-located in one
+  service.
+- `distributed`: separate API, webhook, scheduler, and worker services.
 
-Provide mutually exclusive profiles for distributed services and one standalone service.
-Both profiles use PostgreSQL-backed queueing and the same persistent schema; switching
-profiles must not change behavior or lose queued work.
+Both use the same PostgreSQL volume, Prisma schema, pg-boss schema, queue name, durable
+outbox envelopes, and worker handlers. Never start both profiles against one deployment.
+To move modes, stop the old profile, retain `caseweaver_postgres_data`, then start the
+other profile after a successful migration. Do not delete the volume; queued envelopes
+and leases are durable state.
+
+## Production startup
+
+Set an immutable `CASEWEAVER_IMAGE` and create two local files containing only the
+database URL and PostgreSQL password. The Compose process reads them as Docker secrets;
+do not put either value in an environment file or command line.
+
+```powershell
+$env:CASEWEAVER_IMAGE = "registry.example/caseweaver@sha256:replace-me"
+$env:CASEWEAVER_DATABASE_URL_FILE = "C:\secrets\caseweaver-database-url.txt"
+$env:CASEWEAVER_POSTGRES_PASSWORD_FILE = "C:\secrets\caseweaver-postgres-password.txt"
+docker compose -f deploy\docker\compose.production.yml --profile migrate run --rm migrate
+docker compose -f deploy\docker\compose.production.yml --profile standalone up -d
+```
+
+For distributed mode, replace the final command with:
+
+```powershell
+docker compose -f deploy\docker\compose.production.yml --profile distributed up -d
+```
+
+The release image must provide `caseweaver-migrate`, `caseweaver-standalone`,
+`caseweaver-api`, `caseweaver-webhook`, `caseweaver-scheduler`, and
+`caseweaver-worker` commands. `caseweaver-migrate` runs Prisma migrations followed by
+the pinned pg-boss migration before runtime services start; runtime roles must not have
+DDL permissions. `entrypoint.sh` reads the database URL secret only inside the
+container, exports it for the selected process, and never prints it.
+
+Set `OTEL_EXPORTER_OTLP_ENDPOINT` only when an OTLP collector is available. Applications
+then use real OTLP/HTTP trace and metric exporters; leaving it empty produces no SDK or
+fake telemetry. The database is isolated on an internal Docker network. Runtime
+services have a separate egress network for the collector and configured providers.
 
 ## Disposable test PostgreSQL
 

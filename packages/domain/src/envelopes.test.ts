@@ -68,4 +68,27 @@ describe("knowledge command envelopes", () => {
       }),
     ).toThrow("Envelope is invalid");
   });
+
+  it("preserves only validated W3C trace context on a durable retention command", () => {
+    const envelope = createEnvelope({
+      ...envelopeMetadata,
+      type: "retention.purge.v1",
+      traceContext: {
+        traceparent: "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01",
+      },
+      payload: { workItemId: "retention-work-1" },
+    });
+
+    expect(envelope.traceContext).toEqual({
+      traceparent: "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01",
+    });
+    expect(() =>
+      deserializeEnvelope({
+        ...envelopeMetadata,
+        type: "retention.purge.v1",
+        traceContext: { traceparent: "not-a-traceparent" },
+        payload: { workItemId: "retention-work-1" },
+      }),
+    ).toThrow("trace context");
+  });
 });

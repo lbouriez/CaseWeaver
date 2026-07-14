@@ -1,0 +1,125 @@
+name: caseweaver
+
+x-runtime-environment: &runtime-environment
+  NODE_ENV: production
+  DATABASE_URL_FILE: /run/secrets/database-url
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+  OTEL_METRIC_EXPORT_INTERVAL_MS: ${OTEL_METRIC_EXPORT_INTERVAL_MS:-30000}
+  OTEL_SERVICE_VERSION: ${CASEWEAVER_RELEASE_VERSION:-unknown}
+
+x-runtime: &runtime
+  image: ${CASEWEAVER_IMAGE:?Set CASEWEAVER_IMAGE to an immutable CaseWeaver release image.}
+  restart: unless-stopped
+  entrypoint: ["/bin/sh", "/caseweaver-entrypoint.sh"]
+  environment: *runtime-environment
+  secrets:
+    - database-url
+  volumes:
+    - ./entrypoint.sh:/caseweaver-entrypoint.sh:ro
+  networks:
+    - caseweaver-data
+    - caseweaver-egress
+  depends_on:
+    postgres:
+      condition: service_healthy
+      required: true
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-caseweaver}
+      POSTGRES_USER: ${POSTGRES_USER:-caseweaver}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" &&
+          psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -v ON_ERROR_STOP=1
+          -c "SELECT 1 / COUNT(*) FROM pg_extension WHERE extname = 'vector';"
+          > /dev/null
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    secrets:
+      - postgres-password
+    volumes:
+      - caseweaver_postgres_data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - caseweaver-data
+
+  migrate:
+    <<: *runtime
+    profiles: ["migrate"]
+    restart: "no"
+    command: ["caseweaver-migrate"]
+    environment:
+      <<: *runtime-environment
+      OTEL_SDK_DISABLED: "true"
+
+  standalone:
+    <<: *runtime
+    profiles: ["standalone"]
+    command: ["caseweaver-standalone"]
+    environment:
+      <<: *runtime-environment
+      OTEL_SERVICE_NAME: caseweaver-standalone
+      PORT: "3000"
+    ports:
+      - "127.0.0.1:${CASEWEAVER_STANDALONE_PORT:-8080}:3000"
+
+  api:
+    <<: *runtime
+    profiles: ["distributed"]
+    command: ["caseweaver-api"]
+    environment:
+      <<: *runtime-environment
+      OTEL_SERVICE_NAME: caseweaver-api
+      PORT: "3000"
+    ports:
+      - "127.0.0.1:${CASEWEAVER_API_PORT:-8080}:3000"
+
+  webhook:
+    <<: *runtime
+    profiles: ["distributed"]
+    command: ["caseweaver-webhook"]
+    environment:
+      <<: *runtime-environment
+      OTEL_SERVICE_NAME: caseweaver-webhook
+      PORT: "3001"
+    ports:
+      - "127.0.0.1:${CASEWEAVER_WEBHOOK_PORT:-8081}:3001"
+
+  scheduler:
+    <<: *runtime
+    profiles: ["distributed"]
+    command: ["caseweaver-scheduler"]
+    environment:
+      <<: *runtime-environment
+      OTEL_SERVICE_NAME: caseweaver-scheduler
+
+  worker:
+    <<: *runtime
+    profiles: ["distributed"]
+    command: ["caseweaver-worker"]
+    environment:
+      <<: *runtime-environment
+      OTEL_SERVICE_NAME: caseweaver-worker
+
+secrets:
+  database-url:
+    file: ${CASEWEAVER_DATABASE_URL_FILE:?Set CASEWEAVER_DATABASE_URL_FILE to a DATABASE_URL secret file.}
+  postgres-password:
+    file: ${CASEWEAVER_POSTGRES_PASSWORD_FILE:?Set CASEWEAVER_POSTGRES_PASSWORD_FILE to a PostgreSQL password secret file.}
+
+volumes:
+  caseweaver_postgres_data:
+
+networks:
+  caseweaver-data:
+    internal: true
+  caseweaver-egress:
