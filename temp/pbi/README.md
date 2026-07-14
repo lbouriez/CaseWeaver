@@ -22,6 +22,7 @@ temporary source material for GitHub Issues and should be removed after issue mi
 | 013 | Production operations | 012 |
 | 014 | MCP foundation | 013 |
 | 015 | Evidence-aware chat service | 003, 009, 014 |
+| 016 | React-Admin operator console | 013 |
 
 PBIs should be implemented in order unless their declared dependencies are complete.
 Each PBI must satisfy `.features/11-engineering-standards.md`.
@@ -45,6 +46,7 @@ Each PBI must satisfy `.features/11-engineering-standards.md`.
 | 013 | `packages/observability`, `apps/standalone`, `deploy/docker`, `tests/integration`, `tests/e2e` |
 | 014 | `apps/mcp` |
 | 015 | `packages/chat` |
+| 016 | `apps/admin`, `apps/api` |
 
 Agents may touch shared contracts only when their PBI owns the contract or after
 coordinating the change with the owning PBI.
