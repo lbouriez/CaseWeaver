@@ -27,3 +27,7 @@ not claim one.
 Publishing scopes marker lookup to the target case before a form-encoded
 `forTechsOnly=true` write. A network or timeout failure after the write begins returns
 `outcome_unknown`; callers must reconcile rather than blindly retry.
+
+The exported administration descriptor supplies safe discovery/form metadata only. API
+composition registers it dynamically, while this adapter remains authoritative for
+Jitbit settings and secret-reference validation.

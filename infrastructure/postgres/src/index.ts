@@ -1,5 +1,19 @@
 import { randomUUID } from "node:crypto";
 import type {
+  AuthAuditRecorder,
+  AuthSessionAuditMutationStore,
+  AuthSessionStore,
+  DescriptorRegistry,
+  DiagnosticExportArtifactStore,
+  DiagnosticExportRequestMutationStore,
+  DiagnosticExportRequestStore,
+  DiagnosticExportSource,
+  OidcIdentityMappingStore,
+  PlatformLinkConfigurationPolicy,
+  ProviderCapabilityTestConfigurationStore,
+  WorkspaceRoleAssignmentStore,
+} from "@caseweaver/administration";
+import type {
   AnalysisIdentityRecord,
   AnalysisRequestStore,
   ApplicationTransaction,
@@ -9,6 +23,7 @@ import type {
   BootstrapWorkspaceStore,
   ClaimedOutboxEnvelope,
   ExecutionContext,
+  KnowledgeSourceCommandStore,
   OperationsStore,
   OutboxStore,
   PublicationIntentStore,
@@ -37,11 +52,44 @@ import {
 } from "@caseweaver/security";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { type Prisma, PrismaClient } from "@prisma/client";
-
+import { PostgresAdministrationActionPreviewStore } from "./administration/action-preview-store.js";
+import {
+  PostgresAuthAuditRecorder,
+  PostgresAuthSessionAuditMutationStore,
+  PostgresAuthSessionStore,
+  PostgresOidcIdentityMappingStore,
+} from "./administration/auth.js";
+import { PostgresDescriptorRegistry } from "./administration/descriptor-registry.js";
+import {
+  PostgresDiagnosticExportArtifactStore,
+  PostgresDiagnosticExportSource,
+} from "./administration/diagnostic-export-artifact-store.js";
+import { PostgresDiagnosticExportDispatchStore } from "./administration/diagnostic-export-dispatch-store.js";
+import { PostgresDiagnosticExportStore } from "./administration/diagnostic-export-store.js";
+import {
+  type AdministrationReadStore,
+  PostgresAdministrationReadStore,
+} from "./administration/read-store.js";
+import {
+  type AdministrationResourceReadStore,
+  PostgresAdministrationResourceReadStore,
+} from "./administration/resource-read-store.js";
+import { PostgresWorkspaceRoleAssignmentStore } from "./administration/workspace-role-assignment-store.js";
+import { PostgresPlatformLinkConfigurationReadStore } from "./administration/platform-link-configuration-store.js";
+import { PostgresWebhookEndpointRuntimeStore } from "./administration/webhook-endpoint-runtime-store.js";
+import { PostgresAiConfigurationStore } from "./administration/ai-configuration-store.js";
+import { PostgresAiBindingDraftStore } from "./administration/ai-binding-draft-store.js";
+import { PostgresAiBindingResolver } from "./ai/postgres-ai-binding-resolver.js";
+import {
+  type ProviderCapabilityTestTemplateLookup,
+  PostgresProviderCapabilityTestConfigurationStore,
+  PostgresProviderCapabilityTestStore,
+} from "./administration/provider-capability-test-store.js";
 import {
   PostgresAnalysisExecutionStore,
   PostgresCaseSnapshotTombstoneStore,
 } from "./analysis/index.js";
+import { PostgresKnowledgeSourceCommandStore } from "./knowledge/source-command-store.js";
 import { PostgresOperationsStore } from "./operations/index.js";
 import {
   PostgresPublicationExecutionStore,
@@ -49,6 +97,10 @@ import {
   PostgresVerifiedWebhookEventStore,
 } from "./publication/index.js";
 
+export * from "./administration/workspace-role-assignment-store.js";
+export * from "./administration/webhook-endpoint-configuration-store.js";
+export * from "./administration/webhook-endpoint-runtime-store.js";
+export * from "./administration/platform-link-configuration-store.js";
 export * from "./retrieval/index.js";
 
 type PrismaTransaction = Prisma.TransactionClient;
@@ -252,6 +304,18 @@ class PostgresAuditStore implements AuditStore {
         beforeHash: record.beforeHash,
         afterHash: record.afterHash,
         occurredAt: asDate(record.occurredAt),
+        origin: record.origin,
+        targetType: record.targetType,
+        outcome: record.outcome,
+        permission: record.permission,
+        reasonCode: record.reasonCode,
+        uiActionId: record.uiActionId,
+        requestId: record.requestId,
+        correlationId: record.correlationId,
+        traceId: record.traceId,
+        idempotencyKeyDigest: record.idempotencyKeyDigest,
+        clientAddress: record.clientAddress,
+        userAgent: record.userAgent,
       },
     });
   }
@@ -716,6 +780,7 @@ export interface PostgresPersistence {
   readonly unitOfWork: UnitOfWork;
   readonly bootstrapWorkspaceStore: BootstrapWorkspaceStore;
   readonly analysisRequestStore: AnalysisRequestStore;
+  readonly knowledgeSourceCommandStore: KnowledgeSourceCommandStore;
   readonly publicationIntentStore: PublicationIntentStore;
   readonly analysisExecutionStore: PostgresAnalysisExecutionStore;
   readonly publicationExecutionStore: PostgresPublicationExecutionStore;
@@ -726,6 +791,42 @@ export interface PostgresPersistence {
   readonly outboxStore: OutboxStore;
   readonly resourceLeaseStore: ResourceLeaseStore;
   readonly operationsStore: OperationsStore;
+  readonly authSessionStore: AuthSessionStore;
+  /** Atomic successful session mutation and append-only auth audit boundary. */
+  readonly authSessionAuditMutationStore: AuthSessionAuditMutationStore;
+  /** Fail-closed, append-only recorder for API-managed auth events. */
+  readonly authAuditRecorder: AuthAuditRecorder;
+  readonly oidcIdentityMappingStore: OidcIdentityMappingStore;
+  /** Trusted composition registers safe connector/provider descriptor snapshots here. */
+  readonly descriptorRegistry: DescriptorRegistry & {
+    register(value: unknown): Promise<unknown>;
+  };
+  readonly administrationActionPreviewStore: PostgresAdministrationActionPreviewStore;
+  readonly diagnosticExportStore: DiagnosticExportRequestStore &
+    DiagnosticExportRequestMutationStore;
+  readonly diagnosticExportArtifactStore: DiagnosticExportArtifactStore;
+  readonly diagnosticExportSource: DiagnosticExportSource;
+  readonly diagnosticExportDispatchStore: PostgresDiagnosticExportDispatchStore;
+  readonly administrationReadStore: AdministrationReadStore;
+  readonly administrationResourceReadStore: AdministrationResourceReadStore;
+  /** Workspace membership mutation boundary with persisted-admin authorization. */
+  readonly workspaceRoleAssignmentStore: WorkspaceRoleAssignmentStore;
+  /** Immutable AI administration aggregates and the fail-closed runtime resolver. */
+  readonly aiConfigurationStore: PostgresAiConfigurationStore;
+  readonly aiBindingDraftStore: PostgresAiBindingDraftStore;
+  readonly aiBindingResolver: PostgresAiBindingResolver;
+  /** Public-webhook routing state is opaque and contains no secret material. */
+  readonly webhookEndpointRuntimeStore: PostgresWebhookEndpointRuntimeStore;
+  /** Public-link values are safe but their development URL policy is deployment-owned. */
+  platformLinkReadStore(
+    policy: PlatformLinkConfigurationPolicy,
+  ): PostgresPlatformLinkConfigurationReadStore;
+  providerCapabilityTestStores(
+    templates: ProviderCapabilityTestTemplateLookup,
+  ): Readonly<{
+    readonly configurations: ProviderCapabilityTestConfigurationStore;
+    readonly state: PostgresProviderCapabilityTestStore;
+  }>;
   close(): Promise<void>;
 }
 
@@ -740,11 +841,15 @@ export function createPostgresPersistence(
     adapter: new PrismaPg({ connectionString: configuration.databaseUrl }),
   });
   const unitOfWork = new PrismaUnitOfWork(client);
+  const diagnosticExportStore = new PostgresDiagnosticExportStore(client);
 
   return Object.freeze({
     unitOfWork,
     bootstrapWorkspaceStore: new PostgresBootstrapStore(unitOfWork),
     analysisRequestStore: new PostgresAnalysisRequestStore(unitOfWork),
+    knowledgeSourceCommandStore: new PostgresKnowledgeSourceCommandStore(
+      unitOfWork,
+    ),
     publicationIntentStore: new PostgresPublicationIntentStore(unitOfWork),
     analysisExecutionStore: new PostgresAnalysisExecutionStore(unitOfWork),
     publicationExecutionStore: new PostgresPublicationExecutionStore(
@@ -761,14 +866,72 @@ export function createPostgresPersistence(
     outboxStore: new PostgresOutboxStore(unitOfWork),
     resourceLeaseStore: new PostgresResourceLeaseStore(unitOfWork),
     operationsStore: new PostgresOperationsStore(unitOfWork),
+    authSessionStore: new PostgresAuthSessionStore(client),
+    authSessionAuditMutationStore: new PostgresAuthSessionAuditMutationStore(
+      client,
+    ),
+    authAuditRecorder: new PostgresAuthAuditRecorder(client),
+    oidcIdentityMappingStore: new PostgresOidcIdentityMappingStore(client),
+    descriptorRegistry: new PostgresDescriptorRegistry(client),
+    administrationActionPreviewStore:
+      new PostgresAdministrationActionPreviewStore(client),
+    diagnosticExportStore,
+    diagnosticExportArtifactStore: new PostgresDiagnosticExportArtifactStore(
+      client,
+    ),
+    diagnosticExportSource: new PostgresDiagnosticExportSource(client),
+    diagnosticExportDispatchStore: new PostgresDiagnosticExportDispatchStore(
+      client,
+    ),
+    administrationReadStore: new PostgresAdministrationReadStore(client),
+    administrationResourceReadStore:
+      new PostgresAdministrationResourceReadStore(client),
+    workspaceRoleAssignmentStore: new PostgresWorkspaceRoleAssignmentStore(
+      client,
+    ),
+    aiConfigurationStore: new PostgresAiConfigurationStore(client),
+    aiBindingDraftStore: new PostgresAiBindingDraftStore(client),
+    aiBindingResolver: new PostgresAiBindingResolver(client),
+    webhookEndpointRuntimeStore: new PostgresWebhookEndpointRuntimeStore(
+      client,
+    ),
+    platformLinkReadStore: (policy: PlatformLinkConfigurationPolicy) =>
+      new PostgresPlatformLinkConfigurationReadStore(client, policy),
+    providerCapabilityTestStores: (
+      templates: ProviderCapabilityTestTemplateLookup,
+    ) => {
+      const state = new PostgresProviderCapabilityTestStore(client);
+      return Object.freeze({
+        configurations: new PostgresProviderCapabilityTestConfigurationStore(
+          client,
+          templates,
+        ),
+        state,
+      });
+    },
     close: async () => client.$disconnect(),
   });
 }
 
+export * from "./administration/action-preview-store.js";
+export * from "./administration/ai-configuration-store.js";
+export * from "./administration/ai-binding-draft-store.js";
+export * from "./administration/auth.js";
+export * from "./administration/configuration-store.js";
+export * from "./administration/descriptor-registry.js";
+export * from "./administration/diagnostic-export-artifact-store.js";
+export * from "./administration/diagnostic-export-dispatch-store.js";
+export * from "./administration/diagnostic-export-store.js";
+export * from "./administration/provider-capability-test-store.js";
+export * from "./administration/publication-profile-configuration-store.js";
+export * from "./administration/read-store.js";
+export * from "./administration/resource-read-store.js";
+export * from "./administration/source-schedule-configuration-store.js";
 export * from "./ai/index.js";
 export * from "./analysis/index.js";
 export * from "./attachments/index.js";
 export * from "./knowledge/index.js";
+export * from "./knowledge/source-command-store.js";
 export * from "./operations/index.js";
 export * from "./publication/index.js";
 export * from "./scheduling/index.js";

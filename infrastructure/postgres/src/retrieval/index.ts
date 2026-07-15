@@ -81,7 +81,7 @@ export class PostgresRetrievalSnapshotConflictError extends Error {
 export interface PostgresRetrievalPersistenceConfiguration {
   readonly databaseUrl: string;
   /**
-   * A subset of dimensions provisioned by the PBI-009 migration. Supporting a
+   * A subset of dimensions provisioned by the retrieval migration. Supporting a
    * new dimension requires an explicit migration and index, rather than a scan.
    */
   readonly supportedVectorDimensions?: readonly number[];

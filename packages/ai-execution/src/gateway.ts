@@ -6,6 +6,7 @@ import {
   conservativeReservationUsage,
   decimal,
   type PriceComponentKind,
+  type PriceResolution,
   type PriceResolutionContext,
   resolvePrices,
 } from "@caseweaver/ai-config";
@@ -35,6 +36,7 @@ import {
 } from "@caseweaver/ai-sdk";
 
 import type {
+  AiBudgetPolicyRequirementPort,
   AiBudgetPort,
   AiExecutionClock,
   AiExecutionUnitOfWork,
@@ -65,6 +67,12 @@ interface MeteredRequestBase {
     readonly currency: string;
     readonly hard: boolean;
     readonly allowUnknownPricing?: boolean;
+    /**
+     * Opt-in execution guard for operations, such as administrator capability
+     * tests, which must not proceed unless a persisted budget policy applies.
+     * It is intentionally not evaluated by read-only preflight.
+     */
+    readonly requireBudgetPolicy?: boolean;
   };
 }
 
@@ -113,6 +121,34 @@ export interface MeteredAiResult<TResult = unknown> {
   readonly calculatedCost: CostCalculation;
 }
 
+/**
+ * A read-only, server-side metering plan. It resolves the same immutable
+ * binding, limits, pricing, and conservative reservation as execution, but it
+ * never resolves a secret, contacts a provider, creates an operation, or
+ * touches a ledger or budget adapter.
+ */
+export interface MeteredAiPreflight {
+  readonly bindingVersionId: string;
+  readonly providerInstanceVersionId: string;
+  readonly catalogSnapshotId: string;
+  readonly configuredModel: string;
+  readonly maximumInputTokens: number;
+  readonly maximumOutputTokens: number;
+  readonly pricing: PriceResolution;
+  readonly conservativeCost: CostCalculation;
+}
+
+export interface AiExecutionPreflightContext {
+  readonly workspaceId: string;
+}
+
+export interface AiExecutionPreflightGateway {
+  preflight(
+    request: MeteredAiRequest,
+    context: AiExecutionPreflightContext,
+  ): Promise<MeteredAiPreflight>;
+}
+
 export interface AiExecutionGateway {
   execute<TResult = unknown>(
     request: MeteredAiRequest,
@@ -126,6 +162,8 @@ export interface MeteredAiExecutionGatewayDependencies {
   readonly secretResolver: SecretResolver;
   readonly ledger: AiOperationLedgerPort;
   readonly budget: AiBudgetPort;
+  /** Optional until callers opt into `budget.requireBudgetPolicy`. */
+  readonly budgetPolicy?: AiBudgetPolicyRequirementPort;
   readonly unitOfWork: AiExecutionUnitOfWork;
   readonly operationIds: AiOperationIdGenerator;
   readonly clock: AiExecutionClock;
@@ -511,93 +549,70 @@ function reservationScope(
   };
 }
 
-export class DefaultAiExecutionGateway implements AiExecutionGateway {
+interface ResolvedMeteredExecutionPlan extends MeteredAiPreflight {
+  readonly binding: Awaited<ReturnType<AiBindingResolver["resolve"]>>;
+  readonly repositoryBounds?: RepositoryAgentTokenBounds;
+  readonly startedAt: string;
+}
+
+export class DefaultAiExecutionGateway
+  implements AiExecutionGateway, AiExecutionPreflightGateway
+{
   public constructor(
     private readonly dependencies: MeteredAiExecutionGatewayDependencies,
   ) {}
+
+  public async preflight(
+    request: MeteredAiRequest,
+    context: AiExecutionPreflightContext,
+  ): Promise<MeteredAiPreflight> {
+    const plan = await this.resolvePlan(request, context.workspaceId);
+    return Object.freeze({
+      bindingVersionId: plan.bindingVersionId,
+      providerInstanceVersionId: plan.providerInstanceVersionId,
+      catalogSnapshotId: plan.catalogSnapshotId,
+      configuredModel: plan.configuredModel,
+      maximumInputTokens: plan.maximumInputTokens,
+      maximumOutputTokens: plan.maximumOutputTokens,
+      pricing: plan.pricing,
+      conservativeCost: plan.conservativeCost,
+    });
+  }
 
   public async execute<TResult = unknown>(
     request: MeteredAiRequest,
     context: AiExecutionContext,
   ): Promise<MeteredAiResult<TResult>> {
-    if (!expectedRole(request.kind, request.role)) {
-      throw new AiCapabilityError(
-        "AI request kind does not match the selected role.",
-      );
-    }
-    const repositoryBounds =
-      request.kind === "repositoryAgent"
-        ? repositoryAgentTokenBounds(request.request, request.budget.hard)
-        : undefined;
-    const startedAt = this.dependencies.clock.now();
-    const binding = await this.dependencies.bindingResolver.resolve({
-      workspaceId: context.workspaceId,
-      role: request.role,
-      bindingVersionId: request.bindingVersionId,
-      requiredCapabilities: requestedCapabilities(request),
-      inputTokens:
-        repositoryBounds?.maximumInputTokensPerTurn ??
-        request.maximumInputTokens,
-      outputTokens:
-        repositoryBounds?.maximumOutputTokensPerTurn ??
-        request.maximumOutputTokens,
-    });
-    const maximumInputTokens =
-      repositoryBounds?.maximumInputTokens ??
-      request.maximumInputTokens ??
-      binding.maximumInputTokens;
-    const maximumOutputTokens =
-      request.kind === "repositoryAgent"
-        ? repositoryBounds?.maximumOutputTokens
-        : request.kind === "embedding" || request.kind === "reranker"
-          ? 0
-          : (request.maximumOutputTokens ?? binding.maximumOutputTokens);
-    if (
-      maximumInputTokens === undefined ||
-      (request.kind !== "embedding" &&
-        request.kind !== "reranker" &&
-        maximumOutputTokens === undefined)
-    ) {
-      throw new AiConfigurationError(
-        "A configured maximum input and output limit is required for metered execution.",
-      );
-    }
-    if (maximumInputTokens === undefined) {
-      throw new AiConfigurationError(
-        "A configured maximum input limit is required for metered execution.",
-      );
-    }
-    const boundedOutputTokens = maximumOutputTokens ?? 0;
-    const requestedImageUnits =
-      request.kind === "vision" ? request.request.images.length : 0;
-    const priceContext: PriceResolutionContext = {
-      at: startedAt,
-      currency: request.budget.currency,
-      ...(request.priceContext ?? {}),
-      inputTokenCount: maximumInputTokens,
-    };
-    const cachePricingKinds = binding.capabilities.has("promptCaching")
-      ? (["cacheRead", "cacheCreation"] as const)
-      : [];
-    const pricing = resolvePrices(
-      binding.pricing,
-      [...kindsFor(request), ...cachePricingKinds],
-      priceContext,
-    );
-    const reservation = calculateCost(
+    const plan = await this.resolvePlan(request, context.workspaceId);
+    const {
+      binding,
+      conservativeCost: reservation,
       pricing,
-      conservativeReservationUsage({
-        maximumInputTokens,
-        maximumOutputTokens: boundedOutputTokens,
-        mayUsePromptCache: binding.capabilities.has("promptCaching"),
-        maximumImageUnits: requestedImageUnits,
-      }),
-    );
+      repositoryBounds,
+      startedAt,
+    } = plan;
     const bypass = request.budget.allowUnknownPricing === true;
     if (request.budget.hard && reservation.status !== "known" && !bypass) {
       throw new AiHardBudgetError(
         "A hard budget cannot execute with unknown or incomplete pricing.",
       );
+    }
+    if (request.budget.requireBudgetPolicy === true) {
+      const hasPolicy =
+        this.dependencies.budgetPolicy !== undefined &&
+        (await this.dependencies.budgetPolicy.hasApplicablePolicy({
+          workspaceId: context.workspaceId,
+          currency: request.budget.currency,
+          ...(request.analysisId === undefined
+            ? {}
+            : { analysisId: request.analysisId }),
+          occurredAt: startedAt,
+        }));
+      if (!hasPolicy) {
+        throw new AiHardBudgetError(
+          "This AI request requires an applicable budget policy.",
+        );
+      }
     }
     const operationId = this.dependencies.operationIds.next();
     await this.dependencies.unitOfWork.transaction(async (transaction) => {
@@ -757,6 +772,93 @@ export class DefaultAiExecutionGateway implements AiExecutionGateway {
     } finally {
       composed.dispose();
     }
+  }
+
+  private async resolvePlan(
+    request: MeteredAiRequest,
+    workspaceId: string,
+  ): Promise<ResolvedMeteredExecutionPlan> {
+    if (!expectedRole(request.kind, request.role)) {
+      throw new AiCapabilityError(
+        "AI request kind does not match the selected role.",
+      );
+    }
+    const repositoryBounds =
+      request.kind === "repositoryAgent"
+        ? repositoryAgentTokenBounds(request.request, request.budget.hard)
+        : undefined;
+    const startedAt = this.dependencies.clock.now();
+    const binding = await this.dependencies.bindingResolver.resolve({
+      workspaceId,
+      role: request.role,
+      bindingVersionId: request.bindingVersionId,
+      requiredCapabilities: requestedCapabilities(request),
+      inputTokens:
+        repositoryBounds?.maximumInputTokensPerTurn ??
+        request.maximumInputTokens,
+      outputTokens:
+        repositoryBounds?.maximumOutputTokensPerTurn ??
+        request.maximumOutputTokens,
+    });
+    const maximumInputTokens =
+      repositoryBounds?.maximumInputTokens ??
+      request.maximumInputTokens ??
+      binding.maximumInputTokens;
+    const maximumOutputTokens =
+      request.kind === "repositoryAgent"
+        ? repositoryBounds?.maximumOutputTokens
+        : request.kind === "embedding" || request.kind === "reranker"
+          ? 0
+          : (request.maximumOutputTokens ?? binding.maximumOutputTokens);
+    if (
+      maximumInputTokens === undefined ||
+      (request.kind !== "embedding" &&
+        request.kind !== "reranker" &&
+        maximumOutputTokens === undefined)
+    ) {
+      throw new AiConfigurationError(
+        "A configured maximum input and output limit is required for metered execution.",
+      );
+    }
+    const boundedOutputTokens = maximumOutputTokens ?? 0;
+    const requestedImageUnits =
+      request.kind === "vision" ? request.request.images.length : 0;
+    const priceContext: PriceResolutionContext = {
+      at: startedAt,
+      currency: request.budget.currency,
+      ...(request.priceContext ?? {}),
+      inputTokenCount: maximumInputTokens,
+    };
+    const cachePricingKinds = binding.capabilities.has("promptCaching")
+      ? (["cacheRead", "cacheCreation"] as const)
+      : [];
+    const pricing = resolvePrices(
+      binding.pricing,
+      [...kindsFor(request), ...cachePricingKinds],
+      priceContext,
+    );
+    const conservativeCost = calculateCost(
+      pricing,
+      conservativeReservationUsage({
+        maximumInputTokens,
+        maximumOutputTokens: boundedOutputTokens,
+        mayUsePromptCache: binding.capabilities.has("promptCaching"),
+        maximumImageUnits: requestedImageUnits,
+      }),
+    );
+    return Object.freeze({
+      binding,
+      repositoryBounds,
+      startedAt,
+      bindingVersionId: binding.bindingVersionId,
+      providerInstanceVersionId: binding.providerInstanceVersionId,
+      catalogSnapshotId: binding.catalogSnapshotId,
+      configuredModel: binding.canonicalModel,
+      maximumInputTokens,
+      maximumOutputTokens: boundedOutputTokens,
+      pricing,
+      conservativeCost,
+    });
   }
 
   private async dispatch(

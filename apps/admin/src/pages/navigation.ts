@@ -29,13 +29,18 @@ export const navigationSections: readonly NavigationSection[] = [
     path: "/publication",
     label: "Publication",
     kicker: "04 / release",
-    permissions: ["publication.read"],
+    permissions: ["analysis.read"],
   },
   {
     path: "/operations",
     label: "Operations",
     kicker: "05 / recovery",
-    permissions: ["operations.read"],
+    permissions: [
+      "operations.inspect",
+      "cost.read",
+      "audit.read",
+      "retention.run",
+    ],
   },
   {
     path: "/access",

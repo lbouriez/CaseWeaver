@@ -35,7 +35,8 @@ export type EnvelopeType =
   | "knowledge.synchronize.v1"
   | "knowledge.full-rescan.v1"
   | "retention.reap.v1"
-  | "retention.purge.v1";
+  | "retention.purge.v1"
+  | "diagnostics.export.generate.v1";
 
 export interface AnalysisExecutePayload {
   readonly analysisJobId: AnalysisJobId;
@@ -68,10 +69,16 @@ export interface AnalysisCompletedPayload {
 
 export interface KnowledgeSynchronizePayload {
   readonly sourceId: string;
+  /** Immutable source configuration selected when the command was accepted. */
+  readonly configurationVersion: string;
+  readonly trigger: "manual" | "schedule";
 }
 
 export interface KnowledgeFullRescanPayload {
   readonly sourceId: string;
+  /** Immutable source configuration selected when the command was accepted. */
+  readonly configurationVersion: string;
+  readonly trigger: "manual" | "schedule";
 }
 
 export interface RetentionReapPayload {
@@ -80,6 +87,11 @@ export interface RetentionReapPayload {
 
 export interface RetentionPurgePayload {
   readonly workItemId: string;
+}
+
+/** The durable command contains only the opaque export identifier. */
+export interface DiagnosticsExportGeneratePayload {
+  readonly exportId: string;
 }
 
 export type EnvelopePayloadByType = {
@@ -92,6 +104,7 @@ export type EnvelopePayloadByType = {
   readonly "knowledge.full-rescan.v1": KnowledgeFullRescanPayload;
   readonly "retention.reap.v1": RetentionReapPayload;
   readonly "retention.purge.v1": RetentionPurgePayload;
+  readonly "diagnostics.export.generate.v1": DiagnosticsExportGeneratePayload;
 };
 
 export type EnvelopeFor<Type extends EnvelopeType = EnvelopeType> =
@@ -227,13 +240,22 @@ function parsePayload(
         ),
       });
     case "knowledge.synchronize.v1":
+    case "knowledge.full-rescan.v1": {
+      const trigger = requireString(payload.trigger, "trigger");
+      if (trigger !== "manual" && trigger !== "schedule") {
+        throw new DomainValidationError("Envelope payload is invalid.", {
+          field: "trigger",
+        });
+      }
       return Object.freeze({
         sourceId: requireNonEmptyString(payload.sourceId, "sourceId"),
+        configurationVersion: requireNonEmptyString(
+          payload.configurationVersion,
+          "configurationVersion",
+        ),
+        trigger,
       });
-    case "knowledge.full-rescan.v1":
-      return Object.freeze({
-        sourceId: requireNonEmptyString(payload.sourceId, "sourceId"),
-      });
+    }
     case "retention.reap.v1": {
       const reason = requireString(payload.reason, "reason");
       if (reason !== "scheduled" && reason !== "operator") {
@@ -246,6 +268,10 @@ function parsePayload(
     case "retention.purge.v1":
       return Object.freeze({
         workItemId: requireNonEmptyString(payload.workItemId, "workItemId"),
+      });
+    case "diagnostics.export.generate.v1":
+      return Object.freeze({
+        exportId: requireNonEmptyString(payload.exportId, "exportId"),
       });
   }
 }
@@ -296,6 +322,7 @@ function parseEnvelope(value: unknown): Envelope {
       "knowledge.full-rescan.v1",
       "retention.reap.v1",
       "retention.purge.v1",
+      "diagnostics.export.generate.v1",
     ].includes(type)
   ) {
     throw new DomainValidationError("Envelope type is unsupported.");

@@ -15,6 +15,7 @@ import {
 import { useMemo, useState } from "react";
 
 import type {
+  AdminListItem,
   ConfigurationDescriptor,
   DescriptorSchema,
   JsonScalar,
@@ -25,6 +26,8 @@ type FormValues = Readonly<Record<string, unknown>>;
 
 interface DescriptorFormProps {
   readonly descriptor: ConfigurationDescriptor;
+  /** Redacted server-side registrations; their external locators never reach the UI. */
+  readonly secretReferences?: readonly AdminListItem[];
   readonly onSubmit: (
     settings: Readonly<Record<string, unknown>>,
   ) => Promise<void>;
@@ -71,6 +74,21 @@ function defaultValues(schema: DescriptorSchema): FormValues {
 }
 
 function scalarFromInput(value: string, schema: DescriptorSchema): unknown {
+  if (schema.format === "json") {
+    try {
+      const parsed: unknown = JSON.parse(value);
+      if (
+        (schema.type === "object" && isRecord(parsed)) ||
+        (schema.type === "array" && Array.isArray(parsed))
+      ) {
+        return parsed;
+      }
+    } catch {
+      // Preserve the bounded text until submit, where a clear local validation
+      // message prevents an invalid configuration from crossing the boundary.
+    }
+    return value;
+  }
   if (schema.type === "number" || schema.type === "integer") {
     const number = Number(value);
     return Number.isFinite(number) ? number : value;
@@ -86,21 +104,44 @@ function scalarFromInput(value: string, schema: DescriptorSchema): unknown {
 
 function displayValue(value: unknown): string {
   if (Array.isArray(value)) return value.join("\n");
+  if (isRecord(value)) return JSON.stringify(value, undefined, 2);
   if (typeof value === "string" || typeof value === "number")
     return String(value);
   return "";
 }
 
+function invalidJsonError(
+  schema: DescriptorSchema,
+  values: FormValues,
+  path: readonly string[] = [],
+): string | undefined {
+  for (const [name, child] of Object.entries(schema.properties ?? {})) {
+    const childPath = [...path, name];
+    const value = valueAtPath(values, childPath);
+    if (
+      child.format === "json" &&
+      value !== undefined &&
+      ((child.type === "object" && !isRecord(value)) ||
+        (child.type === "array" && !Array.isArray(value)))
+    ) {
+      return `${name} must be valid JSON.`;
+    }
+    if (child.type === "object") {
+      const nested = invalidJsonError(child, values, childPath);
+      if (nested !== undefined) return nested;
+    }
+  }
+  return undefined;
+}
+
 function requiredError(
   schema: DescriptorSchema,
   values: FormValues,
-  secretSlots: ReadonlySet<string>,
   path: readonly string[] = [],
 ): string | undefined {
   const required = schema.required ?? [];
   for (const field of required) {
     const fieldPath = [...path, field];
-    if (secretSlots.has(fieldPath.join("."))) continue;
     const value = valueAtPath(values, fieldPath);
     if (
       value === undefined ||
@@ -113,10 +154,7 @@ function requiredError(
   }
   for (const [field, childSchema] of Object.entries(schema.properties ?? {})) {
     if (childSchema.type !== "object") continue;
-    const nestedError = requiredError(childSchema, values, secretSlots, [
-      ...path,
-      field,
-    ]);
+    const nestedError = requiredError(childSchema, values, [...path, field]);
     if (nestedError !== undefined) return nestedError;
   }
   return undefined;
@@ -140,6 +178,46 @@ function SecretSlotNotice({ slot }: { readonly slot: SecretReferenceSlot }) {
   );
 }
 
+function SecretReferenceSelector({
+  slot,
+  value,
+  onChange,
+  required,
+  references,
+}: {
+  readonly slot: SecretReferenceSlot;
+  readonly value: unknown;
+  readonly onChange: (value: string) => void;
+  readonly required: boolean;
+  readonly references: readonly AdminListItem[];
+}) {
+  const active = references.filter(
+    (reference) => reference.status === "active",
+  );
+  return (
+    <TextField
+      select
+      fullWidth
+      required={required}
+      label={slot.label}
+      helperText={
+        active.length === 0
+          ? "Register an external secret reference before creating this configuration. The secret value is never entered here."
+          : "Select an opaque, server-registered secret reference. Secret values are never displayed or requested."
+      }
+      value={displayValue(value)}
+      onChange={(event) => onChange(event.target.value)}
+    >
+      <MenuItem value="">Select a registered reference</MenuItem>
+      {active.map((reference) => (
+        <MenuItem key={reference.id} value={reference.id}>
+          {reference.label}
+        </MenuItem>
+      ))}
+    </TextField>
+  );
+}
+
 interface DescriptorFieldProps {
   readonly name: string;
   readonly schema: DescriptorSchema;
@@ -147,6 +225,7 @@ interface DescriptorFieldProps {
   readonly onChange: (value: unknown) => void;
   readonly required: boolean;
   readonly secretSlot?: SecretReferenceSlot;
+  readonly secretReferences: readonly AdminListItem[];
   readonly path: readonly string[];
 }
 
@@ -157,13 +236,41 @@ function DescriptorField({
   onChange,
   required,
   secretSlot,
+  secretReferences,
   path,
 }: DescriptorFieldProps) {
-  if (secretSlot !== undefined) return <SecretSlotNotice slot={secretSlot} />;
+  if (secretSlot !== undefined) {
+    return (
+      <SecretReferenceSelector
+        onChange={onChange}
+        references={secretReferences}
+        required={required || secretSlot.required}
+        slot={secretSlot}
+        value={valueAtPath(values, path)}
+      />
+    );
+  }
 
   const label = schema.title ?? name;
   const helperText = schema.description;
   const value = valueAtPath(values, path);
+
+  if (schema.format === "json") {
+    return (
+      <TextField
+        fullWidth
+        multiline
+        minRows={5}
+        required={required}
+        label={label}
+        helperText={`${helperText ?? ""} Enter a JSON ${schema.type ?? "value"}.`}
+        value={displayValue(value)}
+        onChange={(event) =>
+          onChange(scalarFromInput(event.target.value, schema))
+        }
+      />
+    );
+  }
 
   if (schema.type === "object") {
     return (
@@ -195,6 +302,7 @@ function DescriptorField({
                   })
                 }
                 required={(schema.required ?? []).includes(childName)}
+                secretReferences={secretReferences}
                 path={[...path, childName]}
               />
             ),
@@ -280,6 +388,7 @@ function fieldsForGroup(
 
 export function DescriptorForm({
   descriptor,
+  secretReferences = [],
   onSubmit,
   submitLabel,
 }: DescriptorFormProps) {
@@ -289,10 +398,6 @@ export function DescriptorForm({
   const [error, setError] = useState<string>();
   const [submitting, setSubmitting] = useState(false);
   const properties = descriptor.settingsSchema.properties ?? {};
-  const secretSlotNames = useMemo(
-    () => new Set(descriptor.secretSlots.map((slot) => slot.name)),
-    [descriptor.secretSlots],
-  );
   const fieldsInGroups = useMemo(
     () => new Set(descriptor.uiGroups.flatMap((group) => group.fields)),
     [descriptor.uiGroups],
@@ -306,11 +411,12 @@ export function DescriptorForm({
   };
 
   const submit = async () => {
-    const validationError = requiredError(
-      descriptor.settingsSchema,
-      values,
-      secretSlotNames,
-    );
+    const jsonError = invalidJsonError(descriptor.settingsSchema, values);
+    if (jsonError !== undefined) {
+      setError(jsonError);
+      return;
+    }
+    const validationError = requiredError(descriptor.settingsSchema, values);
     if (validationError !== undefined) {
       setError(validationError);
       return;
@@ -335,6 +441,7 @@ export function DescriptorForm({
       onChange={(value) => change([name], value)}
       required={(descriptor.settingsSchema.required ?? []).includes(name)}
       secretSlot={descriptor.secretSlots.find((slot) => slot.name === name)}
+      secretReferences={secretReferences}
       path={[name]}
     />
   );

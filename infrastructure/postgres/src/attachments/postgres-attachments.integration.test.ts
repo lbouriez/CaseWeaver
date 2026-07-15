@@ -114,7 +114,7 @@ afterAll(async () => {
   await pool.end();
 });
 
-describe("PBI-008 PostgreSQL attachment persistence", () => {
+describe("PostgreSQL attachment persistence", () => {
   it("returns a completed cache hit and persists its opaque vision operation attribution", async () => {
     const sourceReferenceId = await seedWorkspace("attachment-workspace-a");
     const value = identity();

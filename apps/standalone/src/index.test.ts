@@ -31,7 +31,11 @@ const envelope = createEnvelope({
   occurredAt: utcInstant("2026-07-14T18:00:00.000Z"),
   correlationId: correlationId("correlation-1"),
   causationId: causationId("causation-1"),
-  payload: { sourceId: "source-1" },
+  payload: {
+    sourceId: "source-1",
+    configurationVersion: "source-version-1",
+    trigger: "manual",
+  },
 });
 
 class RecordingQueue implements DurableQueueRuntime {

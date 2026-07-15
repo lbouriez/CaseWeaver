@@ -29,6 +29,8 @@ describe("runWorkerCommand", () => {
 
     expect(result.status).toBe(1);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toBe("Usage: caseweaver-worker health\n");
+    expect(result.stderr).toBe(
+      "Usage: caseweaver-worker health | diagnostics | diagnostics-once\n",
+    );
   });
 });

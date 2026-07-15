@@ -10,14 +10,17 @@ const nonSensitiveTextSchema = z.string().trim().min(1).max(2_000);
 
 export const resourceNames = [
   "overview",
+  "secret-references",
   "connector-instances",
   "knowledge-sources",
   "schedules",
   "publication-profiles",
   "webhook-endpoints",
   "ai-provider-instances",
+  "ai-catalog-snapshots",
   "ai-models",
   "ai-bindings",
+  "ai-role-defaults",
   "ai-pricing-overrides",
   "ai-budgets",
   "collections",
@@ -29,6 +32,9 @@ export const resourceNames = [
   "operation-jobs",
   "dead-letters",
   "costs",
+  "retention",
+  "privacy",
+  "diagnostics",
   "audit-events",
   "workspaces",
   "principals",
@@ -42,6 +48,10 @@ export const resourceEndpoints: Readonly<
   Record<AdminResourceName, { readonly list: string; readonly detail?: string }>
 > = {
   overview: { list: "/v1/admin/overview" },
+  "secret-references": {
+    list: "/v1/admin/secret-references",
+    detail: "/v1/admin/secret-references",
+  },
   "connector-instances": {
     list: "/v1/admin/connector-instances",
     detail: "/v1/admin/connector-instances",
@@ -63,10 +73,18 @@ export const resourceEndpoints: Readonly<
     list: "/v1/admin/ai/provider-instances",
     detail: "/v1/admin/ai/provider-instances",
   },
+  "ai-catalog-snapshots": {
+    list: "/v1/admin/ai/catalog-snapshots",
+    detail: "/v1/admin/ai/catalog-snapshots",
+  },
   "ai-models": { list: "/v1/admin/ai/models", detail: "/v1/admin/ai/models" },
   "ai-bindings": {
     list: "/v1/admin/ai/bindings",
     detail: "/v1/admin/ai/bindings",
+  },
+  "ai-role-defaults": {
+    list: "/v1/admin/ai/role-defaults",
+    detail: "/v1/admin/ai/role-defaults",
   },
   "ai-pricing-overrides": {
     list: "/v1/admin/ai/pricing-overrides",
@@ -106,6 +124,9 @@ export const resourceEndpoints: Readonly<
     detail: "/v1/admin/operations/dead-letters",
   },
   costs: { list: "/v1/admin/costs", detail: "/v1/admin/costs" },
+  retention: { list: "/v1/admin/retention" },
+  privacy: { list: "/v1/admin/privacy" },
+  diagnostics: { list: "/v1/admin/diagnostics" },
   "audit-events": {
     list: "/v1/admin/audit-events",
     detail: "/v1/admin/audit-events",
@@ -171,6 +192,29 @@ export interface AdminDetail extends AdminListItem {
   readonly fields: Readonly<Record<string, string | number | boolean | null>>;
 }
 
+export interface WorkspaceRoleAssignment {
+  readonly principalId: string;
+  readonly roles: readonly (
+    | "administrator"
+    | "operator"
+    | "analyst"
+    | "viewer"
+  )[];
+  /** Revision of the complete workspace membership set. */
+  readonly revision: number;
+}
+
+export const workspaceRoleAssignmentSchema: z.ZodType<WorkspaceRoleAssignment> =
+  z
+    .object({
+      principalId: identifierSchema,
+      roles: z
+        .array(z.enum(["administrator", "operator", "analyst", "viewer"]))
+        .max(4),
+      revision: z.number().int().min(0),
+    })
+    .strict();
+
 export const adminDetailSchema: z.ZodType<AdminDetail> = z
   .object({
     id: identifierSchema,
@@ -188,6 +232,359 @@ export const adminDetailSchema: z.ZodType<AdminDetail> = z
         z.null(),
       ]),
     ),
+  })
+  .strict();
+
+export interface ConfigurationVersionSummary {
+  readonly id: string;
+  readonly version: number;
+  readonly createdAt: string;
+  readonly canonicalSettingsSha256: string;
+  readonly secretReferenceCount: number;
+  readonly descriptor?: Readonly<{
+    readonly kind: "connector" | "aiProvider";
+    readonly type: string;
+    readonly version: string;
+  }>;
+}
+
+const configurationVersionSummarySchema: z.ZodType<ConfigurationVersionSummary> =
+  z
+    .object({
+      id: identifierSchema,
+      version: z.number().int().positive(),
+      createdAt: z.string().datetime({ offset: true }),
+      canonicalSettingsSha256: z.string().regex(/^[a-f0-9]{64}$/u),
+      secretReferenceCount: z.number().int().min(0).max(100),
+      descriptor: z
+        .object({
+          kind: z.enum(["connector", "aiProvider"]),
+          type: identifierSchema,
+          version: identifierSchema,
+        })
+        .strict()
+        .optional(),
+    })
+    .strict();
+
+export interface ConfigurationInspection {
+  readonly id: string;
+  readonly resourceType: string;
+  readonly lifecycle: "draft" | "active" | "disabled" | "superseded";
+  readonly revision: number;
+  readonly updatedAt: string;
+  readonly currentVersionId?: string;
+  readonly currentVersion?: ConfigurationVersionSummary;
+}
+
+export const configurationInspectionSchema: z.ZodType<ConfigurationInspection> =
+  z
+    .object({
+      id: identifierSchema,
+      resourceType: identifierSchema,
+      lifecycle: z.enum(["draft", "active", "disabled", "superseded"]),
+      revision: z.number().int().positive(),
+      updatedAt: z.string().datetime({ offset: true }),
+      currentVersionId: identifierSchema.optional(),
+      currentVersion: configurationVersionSummarySchema.optional(),
+    })
+    .strict();
+
+/** Public workspace links are safe configuration, but never deployment OIDC,
+ * proxy, credential, or secret status. */
+export interface PlatformLinkConfiguration {
+  readonly workspaceId: string;
+  readonly configurationId: string;
+  readonly configurationVersionId: string;
+  readonly revision: number;
+  readonly lifecycle: "draft" | "active" | "disabled" | "superseded";
+  readonly settings: Readonly<{
+    readonly apiPublicBaseUrl: string;
+    readonly webhookPublicBaseUrl: string;
+  }>;
+}
+
+/** Browser-safe AI authoring inputs. Provider endpoint, wire API, parameters,
+ * catalog model data, and secret locator are resolved server-side. */
+export interface AiBindingDraftRequest {
+  readonly providerInstanceId: string;
+  readonly catalogSnapshotId: string;
+  readonly canonicalModel: string;
+  readonly role:
+    | "embedding"
+    | "vision"
+    | "analysis"
+    | "repositoryAgent"
+    | "keywordExtraction"
+    | "reranker"
+    | "chat";
+  readonly requiredCapabilities?: readonly (
+    | "vision"
+    | "structuredOutput"
+    | "tools"
+    | "promptCaching"
+    | "reranking"
+    | "repositoryAgent"
+  )[];
+  readonly maximumInputTokens?: number;
+  readonly maximumOutputTokens?: number;
+}
+
+export interface AiRoleDefaultRequest {
+  readonly bindingVersionId: string;
+  readonly expectedRevision: number;
+}
+
+export interface AiPriceOverrideRequest {
+  readonly overrideId?: string;
+  readonly scope: "workspace" | "binding";
+  readonly provider: string;
+  readonly canonicalModel: string;
+  readonly bindingVersionId?: string;
+  readonly effectiveFrom: string;
+  readonly effectiveTo?: string;
+  readonly components: readonly Readonly<{
+    readonly kind:
+      | "input"
+      | "output"
+      | "cacheRead"
+      | "cacheCreation"
+      | "image"
+      | "audio";
+    readonly unit: "token" | "image" | "audio";
+    readonly amount: string;
+    readonly currency: string;
+    readonly conditions?: Readonly<Record<string, unknown>>;
+  }>[];
+}
+
+export interface AiBudgetRequest {
+  readonly budgetPolicyId?: string;
+  readonly scope: "operation" | "analysis" | "day" | "workspace";
+  readonly scopeKey: string;
+  readonly limitAmount: string;
+  readonly currency: string;
+  readonly hard: boolean;
+  readonly expectedRevision: number;
+}
+
+export interface ProviderCapabilityTestOperation {
+  readonly operation: string;
+  readonly requiresConfirmation: boolean;
+  readonly requiresIdempotencyKey: boolean;
+}
+
+export interface ProviderCapabilityTestPreview {
+  readonly providerInstanceId: string;
+  readonly providerInstanceVersionId: string;
+  readonly bindingVersionId: string;
+  readonly testOperation: string;
+  readonly pricingStatus: "known" | "unknown" | "incomplete";
+  readonly canConfirm: boolean;
+  readonly reasonCode?: "pricing.unknown" | "budget.policy_missing";
+  readonly confirmationId?: string;
+  readonly confirmation?: string;
+  readonly impact?: string;
+  readonly estimatedCost?: Readonly<{
+    readonly amount: string;
+    readonly currency: string;
+  }>;
+  readonly expiresAt?: string;
+}
+
+export interface ProviderCapabilityTestResult {
+  readonly id: string;
+  readonly providerInstanceId: string;
+  readonly providerInstanceVersionId: string;
+  readonly bindingVersionId: string;
+  readonly testOperation: string;
+  readonly outcome: "succeeded" | "failed" | "denied" | "outcome_unknown";
+  readonly operationId?: string;
+  readonly estimatedCost?: Readonly<{
+    readonly amount: string;
+    readonly currency: string;
+  }>;
+  readonly actualCost?: Readonly<{
+    readonly amount: string;
+    readonly currency: string;
+  }>;
+  readonly reasonCode?: string;
+  readonly completedAt?: string;
+  readonly idempotency: "created" | "replayed" | "in_progress";
+}
+
+const costSchema = z
+  .object({
+    amount: z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d+)?$/u),
+    currency: z.string().regex(/^[A-Z]{3}$/u),
+  })
+  .strict();
+export const providerCapabilityTestOperationsSchema: z.ZodType<{
+  readonly items: readonly ProviderCapabilityTestOperation[];
+}> = z
+  .object({
+    items: z
+      .array(
+        z
+          .object({
+            operation: identifierSchema,
+            requiresConfirmation: z.boolean(),
+            requiresIdempotencyKey: z.boolean(),
+          })
+          .strict(),
+      )
+      .max(20),
+  })
+  .strict();
+export const providerCapabilityTestPreviewSchema: z.ZodType<ProviderCapabilityTestPreview> =
+  z
+    .object({
+      providerInstanceId: identifierSchema,
+      providerInstanceVersionId: identifierSchema,
+      bindingVersionId: identifierSchema,
+      testOperation: identifierSchema,
+      pricingStatus: z.enum(["known", "unknown", "incomplete"]),
+      canConfirm: z.boolean(),
+      reasonCode: z
+        .enum(["pricing.unknown", "budget.policy_missing"])
+        .optional(),
+      confirmationId: identifierSchema.optional(),
+      confirmation: z.string().trim().min(1).max(2_000).optional(),
+      impact: z.string().trim().min(1).max(2_000).optional(),
+      estimatedCost: costSchema.optional(),
+      expiresAt: z.string().datetime({ offset: true }).optional(),
+    })
+    .strict();
+export const providerCapabilityTestResultSchema: z.ZodType<ProviderCapabilityTestResult> =
+  z
+    .object({
+      id: identifierSchema,
+      providerInstanceId: identifierSchema,
+      providerInstanceVersionId: identifierSchema,
+      bindingVersionId: identifierSchema,
+      testOperation: identifierSchema,
+      outcome: z.enum(["succeeded", "failed", "denied", "outcome_unknown"]),
+      operationId: identifierSchema.optional(),
+      estimatedCost: costSchema.optional(),
+      actualCost: costSchema.optional(),
+      reasonCode: z.string().trim().min(1).max(100).optional(),
+      completedAt: z.string().datetime({ offset: true }).optional(),
+      idempotency: z.enum(["created", "replayed", "in_progress"]),
+    })
+    .strict();
+
+export const platformLinkConfigurationSchema: z.ZodType<PlatformLinkConfiguration> =
+  z
+    .object({
+      workspaceId: identifierSchema,
+      configurationId: identifierSchema,
+      configurationVersionId: identifierSchema,
+      revision: z.number().int().positive(),
+      lifecycle: z.enum(["draft", "active", "disabled", "superseded"]),
+      settings: z
+        .object({
+          apiPublicBaseUrl: z.string().url().max(2_000),
+          webhookPublicBaseUrl: z.string().url().max(2_000),
+        })
+        .strict(),
+    })
+    .strict();
+
+export interface ConfigurationHistoryResponse {
+  readonly items: readonly ConfigurationVersionSummary[];
+  readonly page: CursorPage;
+}
+
+export const configurationHistoryResponseSchema: z.ZodType<ConfigurationHistoryResponse> =
+  z
+    .object({
+      items: z.array(configurationVersionSummarySchema).max(100),
+      page: z
+        .object({
+          hasNextPage: z.boolean(),
+          endCursor: identifierSchema.optional(),
+        })
+        .strict(),
+    })
+    .strict();
+
+export interface DiagnosticExportStatus {
+  readonly id: string;
+  readonly status:
+    | "requested"
+    | "generating"
+    | "ready"
+    | "failed"
+    | "expired"
+    | "deleted";
+  readonly eventCutoffAt: string;
+  readonly expiresAt: string;
+  readonly generatedAt?: string;
+  readonly failureCode?:
+    | "source.unavailable"
+    | "content.tooLarge"
+    | "storage.unavailable";
+}
+
+export const diagnosticExportStatusSchema: z.ZodType<DiagnosticExportStatus> = z
+  .object({
+    id: identifierSchema,
+    status: z.enum([
+      "requested",
+      "generating",
+      "ready",
+      "failed",
+      "expired",
+      "deleted",
+    ]),
+    eventCutoffAt: z.string().datetime({ offset: true }),
+    expiresAt: z.string().datetime({ offset: true }),
+    generatedAt: z.string().datetime({ offset: true }).optional(),
+    failureCode: z
+      .enum(["source.unavailable", "content.tooLarge", "storage.unavailable"])
+      .optional(),
+  })
+  .strict();
+
+export interface ConfigurationSurface {
+  readonly surface: string;
+  readonly mode: "managed" | "read_only" | "unavailable";
+  readonly reasonCode?: string;
+  readonly reason?: string;
+  readonly workflows: readonly string[];
+  readonly operationalActions: readonly (
+    | "source.synchronize"
+    | "source.fullRescan"
+    | "publication.approve"
+  )[];
+}
+
+export const configurationSurfacesSchema: z.ZodType<{
+  readonly items: readonly ConfigurationSurface[];
+}> = z
+  .object({
+    items: z
+      .array(
+        z
+          .object({
+            surface: identifierSchema,
+            mode: z.enum(["managed", "read_only", "unavailable"]),
+            reasonCode: z.string().trim().min(1).max(80).optional(),
+            reason: nonSensitiveTextSchema.optional(),
+            workflows: z.array(z.string().trim().min(1).max(80)).max(5),
+            operationalActions: z
+              .array(
+                z.enum([
+                  "source.synchronize",
+                  "source.fullRescan",
+                  "publication.approve",
+                ]),
+              )
+              .max(3),
+          })
+          .strict(),
+      )
+      .max(100),
   })
   .strict();
 
@@ -209,6 +606,8 @@ export interface DescriptorSchema {
   readonly properties?: Readonly<Record<string, DescriptorSchema>>;
   readonly required?: readonly string[];
   readonly items?: DescriptorSchema;
+  /** Backend-owned JSON Schema safety rule; required for strict descriptor parsing. */
+  readonly additionalProperties?: boolean;
 }
 
 const descriptorSchema: z.ZodType<DescriptorSchema> = z.lazy(() =>
@@ -235,6 +634,7 @@ const descriptorSchema: z.ZodType<DescriptorSchema> = z.lazy(() =>
         .optional(),
       required: z.array(z.string().min(1).max(100)).max(100).optional(),
       items: descriptorSchema.optional(),
+      additionalProperties: z.boolean().optional(),
     })
     .strict(),
 );
@@ -280,9 +680,30 @@ export interface ConfigurationDescriptor {
   readonly displayName: string;
   readonly description: string;
   readonly documentationUrl?: string;
+  /** Safe capability metadata drives selectors without vendor branches. */
+  readonly connectorCapabilities: readonly (
+    | "knowledgeSource"
+    | "caseSource"
+    | "attachmentSource"
+    | "analysisDestination"
+    | "webhookAdapter"
+  )[];
+  readonly aiCapabilities: readonly (
+    | "embedding"
+    | "vision"
+    | "analysis"
+    | "repositoryAgent"
+    | "reranker"
+    | "keywordExtraction"
+    | "chat"
+  )[];
+  readonly supportedWireApis: readonly string[];
+  readonly supportedWebhookEventTypes: readonly string[];
   readonly settingsSchema: DescriptorSchema;
   readonly uiGroups: readonly DescriptorUiGroup[];
   readonly secretSlots: readonly SecretReferenceSlot[];
+  readonly supportsConfigurationMigration: boolean;
+  readonly supportedTestOperations: readonly string[];
 }
 
 const configurationDescriptorSchema: z.ZodType<ConfigurationDescriptor> = z
@@ -293,9 +714,37 @@ const configurationDescriptorSchema: z.ZodType<ConfigurationDescriptor> = z
     displayName: z.string().trim().min(1).max(160),
     description: z.string().trim().min(1).max(1_000),
     documentationUrl: z.url().optional(),
+    connectorCapabilities: z
+      .array(
+        z.enum([
+          "knowledgeSource",
+          "caseSource",
+          "attachmentSource",
+          "analysisDestination",
+          "webhookAdapter",
+        ]),
+      )
+      .max(5),
+    aiCapabilities: z
+      .array(
+        z.enum([
+          "embedding",
+          "vision",
+          "analysis",
+          "repositoryAgent",
+          "reranker",
+          "keywordExtraction",
+          "chat",
+        ]),
+      )
+      .max(7),
+    supportedWireApis: z.array(identifierSchema).max(20),
+    supportedWebhookEventTypes: z.array(identifierSchema).max(100),
     settingsSchema: descriptorSchema,
     uiGroups: z.array(descriptorUiGroupSchema).max(30).default([]),
     secretSlots: z.array(secretReferenceSlotSchema).max(30).default([]),
+    supportsConfigurationMigration: z.boolean(),
+    supportedTestOperations: z.array(identifierSchema).max(20),
   })
   .strict();
 
@@ -376,11 +825,20 @@ export const actionNames = [
   "connector.test",
   "provider.test",
   "source.synchronize",
+  "source.fullRescan",
   "dead-letter.retry",
   "job.cancel",
   "job.recover",
   "retention.reap",
   "privacy.purge",
+  "connector.activate",
+  "connector.disable",
+  "provider.activate",
+  "provider.disable",
+  "diagnostics.export",
+  "secret.rotate",
+  "secret.revoke",
+  "publication.approve",
 ] as const;
 
 export type AdminActionName = (typeof actionNames)[number];

@@ -11,3 +11,7 @@ No timers, database calls, connector calls, or job execution; apps provide those
 `KnowledgeScheduler` only finds due schedules, obtains a fencing lease, derives a
 deterministic occurrence key, and asks its store to atomically persist an occurrence,
 durable command handoff, and next-run state. It has no connector or AI dependency.
+
+Knowledge commands carry the schedule-selected immutable source configuration version
+and a `schedule` trigger marker. Workers must verify that version before connector I/O;
+manual requests use the same domain envelope with a `manual` trigger.

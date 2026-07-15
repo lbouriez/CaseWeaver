@@ -11,6 +11,10 @@ const config: ApiConfig = {
   host: "127.0.0.1",
   nodeEnv: "test",
   port: 3000,
+  workspaceId: "workspace-test",
+  principalId: "principal-test",
+  allowedAdminOrigins: [],
+  trustedProxyCidrs: [],
 };
 
 function createApp(readinessProbe: DatabaseReadinessProbe) {

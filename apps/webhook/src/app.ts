@@ -18,7 +18,21 @@ const endpointParametersSchema = z
   .strict();
 
 export interface WebhookEndpointResolver {
-  resolve(endpointId: string): Promise<WebhookEndpoint | undefined>;
+  resolve(
+    endpointId: string,
+  ): Promise<WebhookEndpoint | ResolvedWebhookEndpoint | undefined>;
+}
+
+/**
+ * Trusted routing policy resolved from the opaque endpoint ID.  The public
+ * transport deliberately sees neither connector settings nor secret-reference
+ * identities; it receives only the already-selected adapter and bounded
+ * admission policy.
+ */
+export interface ResolvedWebhookEndpoint {
+  readonly endpoint: WebhookEndpoint;
+  readonly maximumBodyBytes?: number;
+  readonly admit?: () => Promise<Readonly<{ readonly allowed: boolean }>>;
 }
 
 export interface BuildWebhookAppDependencies {
@@ -90,13 +104,32 @@ export function buildWebhookApp({
       return reply.status(404).send({ status: "not_found" });
     }
 
-    const endpoint = await endpointResolver.resolve(parameters.data.endpointId);
-    if (endpoint === undefined || endpoint.id !== parameters.data.endpointId) {
+    const resolved = normalizeEndpoint(
+      await endpointResolver.resolve(parameters.data.endpointId),
+    );
+    if (
+      resolved === undefined ||
+      resolved.endpoint.id !== parameters.data.endpointId
+    ) {
       return reply.status(404).send({ status: "not_found" });
     }
 
+    if (
+      resolved.maximumBodyBytes !== undefined &&
+      (request.body as Uint8Array).byteLength > resolved.maximumBodyBytes
+    ) {
+      return reply.status(413).send({ status: "payload_too_large" });
+    }
+
+    if (resolved.admit !== undefined) {
+      const admission = await resolved.admit();
+      if (!admission.allowed) {
+        return reply.status(429).send({ status: "rate_limited" });
+      }
+    }
+
     try {
-      const acceptance = await ingress.accept(endpoint, {
+      const acceptance = await ingress.accept(resolved.endpoint, {
         method: request.method,
         headers: normalizeHeaders(request.raw.headers),
         body: request.body as Uint8Array,
@@ -119,4 +152,12 @@ export function buildWebhookApp({
   });
 
   return app;
+}
+
+function normalizeEndpoint(
+  value: WebhookEndpoint | ResolvedWebhookEndpoint | undefined,
+): ResolvedWebhookEndpoint | undefined {
+  if (value === undefined) return undefined;
+  if ("endpoint" in value) return value;
+  return Object.freeze({ endpoint: value });
 }

@@ -128,7 +128,7 @@ afterAll(async () => {
   await pool.end();
 });
 
-describe("PBI-013 PostgreSQL operations", () => {
+describe("PostgreSQL operations", () => {
   it("persists W3C trace context through the durable outbox", async () => {
     const persistence = createPostgresPersistence({ databaseUrl });
     try {

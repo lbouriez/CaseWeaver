@@ -12,6 +12,7 @@ export interface SessionAuthProvider extends AuthProvider {
 
 export interface SessionAuthProviderOptions {
   readonly currentLocation?: () => string;
+  readonly currentOrigin?: () => string;
   readonly navigateToLogin?: (url: URL) => void;
 }
 
@@ -46,6 +47,7 @@ export function createSessionAuthProvider(
     options.currentLocation ??
     (() =>
       `${window.location.pathname}${window.location.search}${window.location.hash}`);
+  const currentOrigin = options.currentOrigin ?? (() => window.location.origin);
   const navigateToLogin =
     options.navigateToLogin ?? ((url) => window.location.assign(url));
 
@@ -57,11 +59,27 @@ export function createSessionAuthProvider(
 
   return {
     async login() {
-      const returnTo = sameOriginReturnTo(currentLocation());
+      const returnTo = new URL(
+        sameOriginReturnTo(currentLocation(), currentOrigin()),
+        currentOrigin(),
+      ).toString();
       navigateToLogin(client.loginUrl(returnTo));
     },
     async logout() {
-      await client.logout();
+      try {
+        await client.logout();
+      } catch (error) {
+        // React-Admin invokes logout after a rejected anonymous checkAuth. The
+        // API correctly rejects that CSRF-protected mutation, but there is no
+        // browser session left to revoke. Clear local state so the login page
+        // can render; all other transport or server failures still surface.
+        if (
+          !(error instanceof PublicApiError) ||
+          error.kind !== "unauthenticated"
+        ) {
+          throw error;
+        }
+      }
       session = undefined;
     },
     async checkAuth() {

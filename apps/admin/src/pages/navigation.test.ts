@@ -16,4 +16,17 @@ describe("permission-aware navigation", () => {
       ),
     ).toEqual(["Overview", "Integrations", "AI", "Access", "Platform"]);
   });
+
+  it("uses only permissions present in the server policy for publication and operations", () => {
+    expect(
+      visibleNavigation(["analysis.read", "operations.inspect"]).map(
+        (section) => section.label,
+      ),
+    ).toEqual([
+      "Overview",
+      "Knowledge & Analysis",
+      "Publication",
+      "Operations",
+    ]);
+  });
 });

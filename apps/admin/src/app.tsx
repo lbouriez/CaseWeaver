@@ -3,10 +3,18 @@ import {
   Button,
   CircularProgress,
   CssBaseline,
+  MenuItem,
+  Select,
   Stack,
   Typography,
 } from "@mui/material";
-import { useEffect, useMemo } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import {
   AppBar,
   type AppBarProps,
@@ -16,15 +24,21 @@ import {
   Admin as ReactAdmin,
   Resource,
   type ResourceProps,
+  useAuthProvider,
   useLogin,
   usePermissions,
+  useRefresh,
 } from "react-admin";
 import { Link, Route } from "react-router-dom";
 
 import { CaseWeaverApiClient } from "./api/api-client.js";
+import type { AuthenticatedSession } from "./api/contracts.js";
 import { ApiClientProvider } from "./api/context.js";
 import { createDataProvider } from "./api/data-provider.js";
-import { createSessionAuthProvider } from "./auth/auth-provider.js";
+import {
+  createSessionAuthProvider,
+  type SessionAuthProvider,
+} from "./auth/auth-provider.js";
 import { visibleNavigation } from "./pages/navigation.js";
 import {
   AdminResourceList,
@@ -34,8 +48,13 @@ import { SectionPage } from "./pages/section-page.js";
 import type { RuntimeConfig } from "./runtime-config.js";
 import { operatorTheme } from "./theme.js";
 
-function OperatorLoginPage() {
-  const login = useLogin();
+function OperatorSignInCard({
+  onContinue,
+  unavailable = false,
+}: {
+  readonly onContinue: () => void;
+  readonly unavailable?: boolean;
+}) {
   return (
     <Box
       sx={{
@@ -59,17 +78,27 @@ function OperatorLoginPage() {
         <Typography variant="overline">
           CaseWeaver / authorized operators only
         </Typography>
-        <Typography variant="h3">Enter the control room.</Typography>
-        <Typography color="text.secondary">
-          Authentication is initiated by the CaseWeaver API. This browser never
-          handles an OAuth token or identity-provider credential.
+        <Typography variant="h3">
+          {unavailable ? "Console unavailable." : "Enter the control room."}
         </Typography>
-        <Button onClick={() => void login({})} variant="contained">
-          Continue with configured identity provider
+        <Typography color="text.secondary">
+          {unavailable
+            ? "The control-plane session could not be checked. Retry when the API is available."
+            : "Authentication is initiated by the CaseWeaver API. This browser never handles an OAuth token or identity-provider credential."}
+        </Typography>
+        <Button onClick={onContinue} variant="contained">
+          {unavailable
+            ? "Retry session check"
+            : "Continue with configured identity provider"}
         </Button>
       </Stack>
     </Box>
   );
+}
+
+function OperatorLoginPage() {
+  const login = useLogin();
+  return <OperatorSignInCard onContinue={() => void login({})} />;
 }
 
 function OperatorMenu() {
@@ -120,25 +149,131 @@ function OperatorMenu() {
 
 function OperatorAppBar({
   title,
+  onSignOut,
   ...props
-}: AppBarProps & { readonly title: string }) {
+}: AppBarProps & {
+  readonly title: string;
+  readonly onSignOut: () => Promise<void>;
+}) {
   return (
     <AppBar {...props} color="transparent" elevation={0}>
-      <Box sx={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <Typography noWrap variant="overline">
-          CaseWeaver / self-hosted operator console
-        </Typography>
-        <Typography noWrap variant="h6">
-          {title}
-        </Typography>
+      <Box
+        sx={{
+          alignItems: "center",
+          display: "flex",
+          gap: 2,
+          justifyContent: "space-between",
+          minWidth: 0,
+          width: "100%",
+        }}
+      >
+        <Box sx={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+          <Typography noWrap variant="overline">
+            CaseWeaver / self-hosted operator console
+          </Typography>
+          <Typography noWrap variant="h6">
+            {title}
+          </Typography>
+        </Box>
+        <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+          <WorkspaceSwitcher />
+          <OperatorSignOutButton onSignOut={onSignOut} />
+        </Stack>
       </Box>
     </AppBar>
   );
 }
 
-function createOperatorLayout(title: string) {
+function OperatorSignOutButton({
+  onSignOut,
+}: {
+  readonly onSignOut: () => Promise<void>;
+}) {
+  const [signingOut, setSigningOut] = useState(false);
+  const [failed, setFailed] = useState(false);
+  return (
+    <Stack spacing={0.25} sx={{ alignItems: "flex-end" }}>
+      <Button
+        aria-label="Sign out"
+        disabled={signingOut}
+        onClick={() => {
+          setSigningOut(true);
+          setFailed(false);
+          void onSignOut()
+            .catch(() => setFailed(true))
+            .finally(() => setSigningOut(false));
+        }}
+        size="small"
+        variant="outlined"
+      >
+        Sign out
+      </Button>
+      {failed ? (
+        <Typography color="error" variant="caption">
+          Sign out was not completed.
+        </Typography>
+      ) : null}
+    </Stack>
+  );
+}
+
+/** Server-authorized workspace selector; the browser does not grant itself access. */
+function WorkspaceSwitcher() {
+  const provider = useAuthProvider() as SessionAuthProvider;
+  const refresh = useRefresh();
+  const [session, setSession] = useState<AuthenticatedSession>();
+  const [switching, setSwitching] = useState(false);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void provider.currentSession().then((value) => {
+      if (active) setSession(value);
+    });
+    return () => {
+      active = false;
+    };
+  }, [provider]);
+
+  if (session === undefined || session.workspaces.length < 2) return null;
+  return (
+    <Stack spacing={0.25}>
+      <Select
+        aria-label="Active workspace"
+        disabled={switching}
+        onChange={(event) => {
+          setSwitching(true);
+          setError(false);
+          void provider
+            .switchWorkspace(String(event.target.value))
+            .then((next) => {
+              setSession(next);
+              refresh();
+            })
+            .catch(() => setError(true))
+            .finally(() => setSwitching(false));
+        }}
+        size="small"
+        value={session.activeWorkspace.id}
+      >
+        {session.workspaces.map((workspace) => (
+          <MenuItem key={workspace.id} value={workspace.id}>
+            {workspace.name}
+          </MenuItem>
+        ))}
+      </Select>
+      {error ? (
+        <Typography color="error" variant="caption">
+          Workspace switch was not completed.
+        </Typography>
+      ) : null}
+    </Stack>
+  );
+}
+
+function createOperatorLayout(title: string, onSignOut: () => Promise<void>) {
   function AppBarWithTitle(props: AppBarProps) {
-    return <OperatorAppBar {...props} title={title} />;
+    return <OperatorAppBar {...props} onSignOut={onSignOut} title={title} />;
   }
 
   function OperatorLayout(props: LayoutProps) {
@@ -158,14 +293,17 @@ function Overview() {
 }
 
 const resources: readonly ResourceProps[] = [
+  "secret-references",
   "connector-instances",
   "knowledge-sources",
   "schedules",
   "publication-profiles",
   "webhook-endpoints",
   "ai-provider-instances",
+  "ai-catalog-snapshots",
   "ai-models",
   "ai-bindings",
+  "ai-role-defaults",
   "ai-pricing-overrides",
   "ai-budgets",
   "collections",
@@ -177,6 +315,9 @@ const resources: readonly ResourceProps[] = [
   "operation-jobs",
   "dead-letters",
   "costs",
+  "retention",
+  "privacy",
+  "diagnostics",
   "audit-events",
   "workspaces",
   "principals",
@@ -195,11 +336,6 @@ export function OperatorApp({ config }: { readonly config: RuntimeConfig }) {
     [client],
   );
   const dataProvider = useMemo(() => createDataProvider(client), [client]);
-  const layout = useMemo(
-    () => createOperatorLayout(config.uiTitle),
-    [config.uiTitle],
-  );
-
   useEffect(() => {
     document.title = config.uiTitle;
   }, [config.uiTitle]);
@@ -207,27 +343,110 @@ export function OperatorApp({ config }: { readonly config: RuntimeConfig }) {
   return (
     <ApiClientProvider client={client}>
       <CssBaseline />
-      <AdminShell
+      <OperatorSessionGate
         authProvider={authProvider}
-        config={config}
-        dataProvider={dataProvider}
-        layout={layout}
+        client={client}
+        renderAuthenticated={(onSignOut) => (
+          <AdminShell
+            authProvider={authProvider}
+            config={config}
+            dataProvider={dataProvider}
+            onSignOut={onSignOut}
+          />
+        )}
       />
     </ApiClientProvider>
   );
+}
+
+type SessionGateClient = Pick<CaseWeaverApiClient, "session">;
+type SessionGateAuth = Pick<SessionAuthProvider, "login" | "logout">;
+
+type SessionGateState =
+  | { readonly phase: "checking" }
+  | { readonly phase: "anonymous" }
+  | { readonly phase: "authenticated" }
+  | { readonly phase: "unavailable" };
+
+/**
+ * The console owns the initial cookie-session decision before React-Admin mounts.
+ * React-Admin retains its normal server-backed authorization checks afterwards.
+ */
+export function OperatorSessionGate({
+  authProvider,
+  client,
+  renderAuthenticated,
+}: {
+  readonly authProvider: SessionGateAuth;
+  readonly client: SessionGateClient;
+  readonly renderAuthenticated: (onSignOut: () => Promise<void>) => ReactNode;
+}) {
+  const [state, setState] = useState<SessionGateState>({ phase: "checking" });
+
+  const checkSession = useCallback(async () => {
+    setState({ phase: "checking" });
+    try {
+      const session = await client.session();
+      setState({
+        phase: session.authenticated ? "authenticated" : "anonymous",
+      });
+    } catch {
+      setState({ phase: "unavailable" });
+    }
+  }, [client]);
+
+  useEffect(() => {
+    void checkSession();
+  }, [checkSession]);
+
+  const signOut = useCallback(async () => {
+    await authProvider.logout({});
+    setState({ phase: "anonymous" });
+  }, [authProvider]);
+
+  if (state.phase === "checking") {
+    return (
+      <Box
+        aria-label="Checking operator session"
+        sx={{
+          alignItems: "center",
+          display: "flex",
+          justifyContent: "center",
+          minHeight: "100vh",
+        }}
+      >
+        <CircularProgress />
+      </Box>
+    );
+  }
+  if (state.phase === "anonymous") {
+    return (
+      <OperatorSignInCard onContinue={() => void authProvider.login({})} />
+    );
+  }
+  if (state.phase === "unavailable") {
+    return (
+      <OperatorSignInCard onContinue={() => void checkSession()} unavailable />
+    );
+  }
+  return renderAuthenticated(signOut);
 }
 
 function AdminShell({
   authProvider,
   config,
   dataProvider,
-  layout,
+  onSignOut,
 }: {
   readonly authProvider: ReturnType<typeof createSessionAuthProvider>;
   readonly config: RuntimeConfig;
   readonly dataProvider: ReturnType<typeof createDataProvider>;
-  readonly layout: ReturnType<typeof createOperatorLayout>;
+  readonly onSignOut: () => Promise<void>;
 }) {
+  const layout = useMemo(
+    () => createOperatorLayout(config.uiTitle, onSignOut),
+    [config.uiTitle, onSignOut],
+  );
   return (
     <ReactAdmin
       authProvider={authProvider}
@@ -247,7 +466,7 @@ function AdminShell({
         <Route
           element={
             <SectionPage
-              lead="Configure registered connectors, knowledge sources, schedules, publication profiles, and verified webhook endpoints through the API."
+              lead="Create registered connector drafts and inspect source, schedule, publication, and webhook state. The control plane labels every unavailable or deployment-owned workflow explicitly."
               section="integrations"
               title="Integrations"
             />

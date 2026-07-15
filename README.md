@@ -87,8 +87,87 @@ orchestrator prompt for beginning implementation with independent subagents.
 
 ## Status
 
-CaseWeaver is currently in specification and foundation planning. No implementation
-choices in this README override the detailed contracts in `.features`.
+The core pipeline and PBI-016 operator console are implemented. The console's secure
+cookie-session administration API, immutable configuration/audit boundary, and static
+runtime configuration are runnable locally; its completed delivery record is in
+[`temp/pbi/PBI-016-react-admin-operator-console.md`](temp/pbi/PBI-016-react-admin-operator-console.md).
+PBI-017 remains the future release-packaging, TLS-edge, and CI delivery item. Detailed
+contracts in `.features` remain authoritative.
+
+## Run locally
+
+Prerequisites: Node.js 22.12 or later, Corepack, pnpm 11.12, and Docker Desktop (or a
+compatible Docker Engine with Compose). The disposable database is intentionally
+separate from production deployment assets.
+
+```powershell
+corepack enable
+pnpm install --frozen-lockfile
+pnpm db:test:up
+$env:DATABASE_URL = "postgresql://caseweaver:caseweaver@localhost:54329/caseweaver_test"
+pnpm --filter @caseweaver/postgres prisma:migrate:deploy
+pnpm typecheck
+pnpm test
+```
+
+Run the API in another PowerShell window. The console uses OIDC only through the API;
+the browser never receives a provider token. Configure a standards-compliant local or
+development OIDC client first, including its registered callback URL
+`https://.../v1/auth/callback`. For local OIDC testing, place a local TLS terminator
+in front of API port 3000 and register that HTTPS URL with the provider; the API itself
+does not terminate TLS. PBI-017 will package the production edge, but it is not needed
+to run the application behind an existing local reverse proxy.
+For a fresh database, set the initial administrator's stable OIDC `sub` claim once;
+the API creates the workspace, principal, administrator role, and OIDC mapping in one
+transaction. Remove the two bootstrap variables after that mapping exists.
+
+```powershell
+$env:NODE_ENV = "development"
+$env:HOST = "127.0.0.1"
+$env:PORT = "3000"
+$env:DATABASE_URL = "postgresql://caseweaver:caseweaver@localhost:54329/caseweaver_test"
+$env:API_WORKSPACE_ID = "local-workspace"
+$env:API_PRINCIPAL_ID = "local-administrator"
+$env:DATABASE_READINESS_TIMEOUT_MS = "5000"
+$env:OIDC_ISSUER = "https://issuer.example"
+$env:OIDC_CLIENT_ID = "caseweaver-admin"
+$env:OIDC_CALLBACK_URL = "https://api.example/v1/auth/callback" # TLS proxy -> 127.0.0.1:3000
+$env:OIDC_EPHEMERAL_ENCRYPTION_KEY = node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))"
+$env:OIDC_EPHEMERAL_KEY_ID = "local-key-1"
+$env:ADMIN_ALLOWED_ORIGINS = "http://127.0.0.1:8082"
+$env:ADMIN_BOOTSTRAP_OIDC_SUBJECT = "stable-subject-from-your-oidc-provider"
+$env:ADMIN_BOOTSTRAP_DISPLAY_NAME = "Initial Administrator"
+pnpm --filter @caseweaver/api start
+```
+
+Build and serve the administration SPA in a third window. Its Docker bridge contains
+only static files and a public runtime API URL; it has no database, queue, provider,
+connector, object-storage, OIDC secret, or browser token access:
+
+```powershell
+pnpm --filter @caseweaver/admin build
+$env:CASEWEAVER_ADMIN_API_BASE_URL = "https://api.example"
+$env:CASEWEAVER_ADMIN_UI_TITLE = "CaseWeaver Control Room"
+docker compose -f deploy\docker\compose.admin.yml up --build -d --wait
+```
+
+Open `http://127.0.0.1:8082`, select the configured identity provider, and use the
+server-issued cookie session. HTTPS deployments use the `__Host-caseweaver-session`
+cookie with `Secure`, `HttpOnly`, and `SameSite=Lax` attributes. The API uses the
+non-prefixed `caseweaver-session` name only in explicit development mode, solely for
+non-OIDC local API tests. Stop the local bridge with
+`docker compose -f deploy\docker\compose.admin.yml down`.
+
+Stop and remove the disposable test database when finished:
+
+```powershell
+pnpm db:test:down
+```
+
+Do not use the test database credentials or the bootstrap environment variables in a
+production deployment. Production Compose and release packaging are owned by PBI-017;
+see [deploy/docker/README.md](deploy/docker/README.md) for its current operator
+contract.
 
 ## License
 

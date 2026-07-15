@@ -1,4 +1,5 @@
 import type {
+  AiBudgetPolicyRequirementPort,
   AiBudgetPort,
   AiExecutionTransaction,
   AiExecutionUnitOfWork,
@@ -9,6 +10,8 @@ import type {
   OperationStart,
 } from "@caseweaver/ai-execution";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
+
+export * from "./postgres-ai-binding-resolver.js";
 
 export type PostgresAiTransaction = AiExecutionTransaction;
 export type PostgresAiUnitOfWork = AiExecutionUnitOfWork;
@@ -120,7 +123,7 @@ function scopeOrder(scope: PolicyRow["scope"]): number {
 }
 
 export class PostgresAiLedgerBudgetRepository
-  implements AiOperationLedgerPort, AiBudgetPort
+  implements AiOperationLedgerPort, AiBudgetPort, AiBudgetPolicyRequirementPort
 {
   public constructor(private readonly unitOfWork: UnitOfWork) {}
 
@@ -388,6 +391,46 @@ export class PostgresAiLedgerBudgetRepository
         ],
       );
     }
+  }
+
+  /**
+   * Capability tests opt into this read-only prerequisite before the gateway
+   * creates an operation. A test has no operation ID yet, so only the stable
+   * workspace/day policy scopes can be proven applicable at preflight time.
+   */
+  public async hasApplicablePolicy(
+    input: Readonly<{
+      readonly workspaceId: string;
+      readonly currency: string;
+      readonly analysisId?: string;
+      readonly occurredAt: string;
+    }>,
+  ): Promise<boolean> {
+    const occurredAt = new Date(input.occurredAt);
+    if (
+      !Number.isFinite(occurredAt.getTime()) ||
+      occurredAt.toISOString() !== input.occurredAt
+    ) {
+      throw new RangeError("AI budget policy time is invalid.");
+    }
+    const day = input.occurredAt.slice(0, 10);
+    return this.unitOfWork.transaction(async (transaction) => {
+      const result = await this.unitOfWork.get(transaction).query(
+        `SELECT 1
+         FROM ai_budget_policies
+         WHERE workspace_id = $1
+           AND active
+           AND hard
+           AND currency = $2
+           AND (
+             (scope = 'day' AND scope_key = $3)
+             OR (scope = 'workspace' AND scope_key = 'all')
+           )
+         LIMIT 1`,
+        [input.workspaceId, input.currency, day],
+      );
+      return result.rows.length === 1;
+    });
   }
 
   public async reconcile(

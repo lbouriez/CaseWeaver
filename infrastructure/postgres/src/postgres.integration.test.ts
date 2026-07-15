@@ -60,7 +60,7 @@ async function resetDatabase(): Promise<void> {
 
 beforeAll(async () => resetDatabase());
 
-describe("PBI-002 PostgreSQL foundation", () => {
+describe("PostgreSQL foundation", () => {
   it("migrates the vector extension and foundational tables", async () => {
     const extension = await pool.query<{ extname: string }>(
       "SELECT extname FROM pg_extension WHERE extname = 'vector'",

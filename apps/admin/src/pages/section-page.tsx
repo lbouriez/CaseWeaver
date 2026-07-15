@@ -10,24 +10,160 @@ import {
   Stack,
   Typography,
 } from "@mui/material";
-import { useGetList } from "react-admin";
+import { useEffect, useState } from "react";
+import { useGetList, useRefresh } from "react-admin";
 import { useApiClient } from "../api/context.js";
-import type { AdminListItem, AdminResourceName } from "../api/contracts.js";
+import type {
+  AdminListItem,
+  AdminResourceName,
+  ConfigurationSurface,
+} from "../api/contracts.js";
 import { ActionConfirmationDialog } from "../components/action-confirmation-dialog.js";
 import { ApiFailure } from "../components/api-failure.js";
+import { PublicationWebhookLifecycleControl } from "../components/publication-webhook-lifecycle-control.js";
+import { SourceScheduleLifecycleControl } from "../components/source-schedule-lifecycle-control.js";
+import { AiConfigurationAuthoring } from "./ai-configuration-authoring.js";
+import { ControlPlaneAuthoring } from "./control-plane-authoring.js";
 import { DescriptorCatalog } from "./descriptor-catalog.js";
+import { DiagnosticExportPanel } from "./diagnostic-export.js";
+import { PrivacyPurgeDialog } from "./privacy-purge-dialog.js";
+import { RoleAssignmentEditor } from "./role-assignment-editor.js";
+import { SecretReferenceRegistration } from "./secret-reference-registration.js";
+import { SourceScheduleDrafts } from "./source-schedule-drafts.js";
 
 interface ResourcePanelProps {
   readonly resource: AdminResourceName;
   readonly title: string;
   readonly description: string;
+  readonly configurationSurface?: ConfigurationSurface;
+}
+
+export type ResourceItemAction = Readonly<{
+  readonly action:
+    | "connector.activate"
+    | "connector.disable"
+    | "provider.activate"
+    | "provider.disable"
+    | "source.synchronize"
+    | "source.fullRescan"
+    | "secret.rotate"
+    | "secret.revoke"
+    | "dead-letter.retry"
+    | "job.cancel"
+    | "job.recover"
+    | "publication.approve";
+  readonly label: string;
+}>;
+
+export function itemActions(
+  resource: AdminResourceName,
+  item: AdminListItem,
+  configurationSurface?: ConfigurationSurface,
+): readonly ResourceItemAction[] {
+  const actions: readonly ResourceItemAction[] = (() => {
+    switch (resource) {
+      case "connector-instances":
+        return item.status === "active"
+          ? [{ action: "connector.disable", label: "Disable" }]
+          : [{ action: "connector.activate", label: "Activate" }];
+      case "ai-provider-instances":
+        return item.status === "active"
+          ? [{ action: "provider.disable", label: "Disable" }]
+          : [{ action: "provider.activate", label: "Activate" }];
+      case "knowledge-sources":
+        return item.status === "enabled"
+          ? [
+              { action: "source.synchronize", label: "Synchronize" },
+              { action: "source.fullRescan", label: "Full rescan" },
+            ]
+          : [];
+      case "secret-references":
+        return item.status === "revoked"
+          ? []
+          : [
+              { action: "secret.rotate", label: "Rotate" },
+              { action: "secret.revoke", label: "Revoke" },
+            ];
+      case "dead-letters":
+        return [{ action: "dead-letter.retry", label: "Retry" }];
+      case "operation-jobs":
+        return [
+          { action: "job.cancel", label: "Cancel" },
+          { action: "job.recover", label: "Recover" },
+        ];
+      case "publications":
+        return item.status === "awaitingApproval"
+          ? [{ action: "publication.approve", label: "Approve" }]
+          : [];
+      default:
+        return [];
+    }
+  })();
+  if (
+    resource !== "connector-instances" &&
+    resource !== "ai-provider-instances" &&
+    resource !== "knowledge-sources" &&
+    resource !== "publications"
+  ) {
+    return actions;
+  }
+  if (configurationSurface === undefined) return [];
+  return actions.filter(({ action }) => {
+    switch (action) {
+      case "connector.activate":
+      case "provider.activate":
+        return (
+          configurationSurface.mode === "managed" &&
+          configurationSurface.workflows.includes("activate")
+        );
+      case "connector.disable":
+      case "provider.disable":
+        return (
+          configurationSurface.mode === "managed" &&
+          configurationSurface.workflows.includes("disable")
+        );
+      case "source.synchronize":
+      case "source.fullRescan":
+      case "publication.approve":
+        return configurationSurface.operationalActions.includes(action);
+      default:
+        return false;
+    }
+  });
+}
+
+function supportsSourceScheduleLifecycle(
+  resource: AdminResourceName,
+  item: AdminListItem,
+  configurationSurface: ConfigurationSurface | undefined,
+): resource is "knowledge-sources" | "schedules" {
+  if (resource !== "knowledge-sources" && resource !== "schedules")
+    return false;
+  if (configurationSurface?.mode !== "managed") return false;
+  const workflow = item.status === "enabled" ? "disable" : "activate";
+  return configurationSurface.workflows.includes(workflow);
+}
+
+function supportsPublicationWebhookLifecycle(
+  resource: AdminResourceName,
+  item: AdminListItem,
+  configurationSurface: ConfigurationSurface | undefined,
+): resource is "publication-profiles" | "webhook-endpoints" {
+  if (resource !== "publication-profiles" && resource !== "webhook-endpoints") {
+    return false;
+  }
+  if (configurationSurface?.mode !== "managed") return false;
+  const workflow = item.status === "active" ? "disable" : "activate";
+  return configurationSurface.workflows.includes(workflow);
 }
 
 export function ResourcePanel({
   resource,
   title,
   description,
+  configurationSurface,
 }: ResourcePanelProps) {
+  const client = useApiClient();
   const { data, error, isLoading, refetch } = useGetList<AdminListItem>(
     resource,
     {
@@ -76,10 +212,17 @@ export function ResourcePanel({
       {data === undefined || data.length === 0 ? null : (
         <List dense disablePadding>
           {data.map((item) => (
-            <ListItem disablePadding divider key={item.id}>
+            <ListItem
+              alignItems="flex-start"
+              disablePadding
+              divider
+              key={item.id}
+              sx={{ flexWrap: "wrap" }}
+            >
               <ListItemButton
                 component="a"
                 href={`#/${resource}/${item.id}/show`}
+                sx={{ flex: "1 1 180px" }}
               >
                 <ListItemText
                   primary={item.label}
@@ -90,9 +233,77 @@ export function ResourcePanel({
                   }
                 />
               </ListItemButton>
+              {itemActions(resource, item, configurationSurface).length ===
+              0 ? null : (
+                <Stack
+                  direction="row"
+                  spacing={0.5}
+                  sx={{ alignItems: "center", p: 0.75 }}
+                >
+                  {itemActions(resource, item, configurationSurface).map(
+                    ({ action, label }) => (
+                      <ActionConfirmationDialog
+                        action={action}
+                        client={client}
+                        key={action}
+                        label={label}
+                        target={{ resource, id: item.id }}
+                      />
+                    ),
+                  )}
+                </Stack>
+              )}
+              {supportsSourceScheduleLifecycle(
+                resource,
+                item,
+                configurationSurface,
+              ) ? (
+                <Box sx={{ p: 0.75 }}>
+                  <SourceScheduleLifecycleControl
+                    client={client}
+                    onCompleted={() => refetch().then(() => undefined)}
+                    resource={resource}
+                    resourceId={item.id}
+                    status={item.status}
+                  />
+                </Box>
+              ) : null}
+              {supportsPublicationWebhookLifecycle(
+                resource,
+                item,
+                configurationSurface,
+              ) ? (
+                <Box sx={{ p: 0.75 }}>
+                  <PublicationWebhookLifecycleControl
+                    client={client}
+                    onCompleted={() => refetch().then(() => undefined)}
+                    resource={resource}
+                    resourceId={item.id}
+                    status={item.status}
+                  />
+                </Box>
+              ) : null}
+              {resource === "privacy" && item.status === "eligible" ? (
+                <Box sx={{ p: 0.75 }}>
+                  <PrivacyPurgeDialog
+                    client={client}
+                    onCompleted={() => void refetch()}
+                    snapshotId={item.id}
+                  />
+                </Box>
+              ) : null}
             </ListItem>
           ))}
         </List>
+      )}
+      {configurationSurface === undefined ||
+      configurationSurface.mode === "managed" ? null : (
+        <Box sx={{ p: 2 }}>
+          <Typography color="text.secondary" variant="body2">
+            {configurationSurface.reason ??
+              "This configuration surface is not available in this deployment."}
+          </Typography>
+        </Box>
       )}
     </Paper>
   );
@@ -107,6 +318,11 @@ const sectionResources = {
     ],
   ],
   integrations: [
+    [
+      "secret-references",
+      "Secret references",
+      "External-secret metadata and lifecycle only; values are never displayed.",
+    ],
     [
       "connector-instances",
       "Connector instances",
@@ -131,6 +347,16 @@ const sectionResources = {
       "Configured runtime endpoints.",
     ],
     ["ai-bindings", "Model bindings", "Immutable role bindings and versions."],
+    [
+      "ai-catalog-snapshots",
+      "Catalog snapshots",
+      "Registered provider-neutral catalog records.",
+    ],
+    [
+      "ai-role-defaults",
+      "Role defaults",
+      "Resolved defaults from immutable bindings.",
+    ],
     [
       "ai-pricing-overrides",
       "Pricing",
@@ -169,6 +395,17 @@ const sectionResources = {
       "Failed work requiring controlled recovery.",
     ],
     ["costs", "Costs", "Attributed and unknown-price operation costs."],
+    [
+      "retention",
+      "Retention",
+      "Server-owned retention state and bounded reaping.",
+    ],
+    ["privacy", "Privacy", "Tombstoned records and controlled deletion state."],
+    [
+      "diagnostics",
+      "Diagnostics",
+      "Redacted, server-generated diagnostic posture.",
+    ],
     ["audit-events", "Audit", "Append-only administrative activity."],
   ],
   access: [
@@ -197,6 +434,32 @@ export function SectionPage({
   readonly lead: string;
 }) {
   const client = useApiClient();
+  const refresh = useRefresh();
+  const [secretReferenceRefresh, setSecretReferenceRefresh] = useState(0);
+  const [configurationSurfaces, setConfigurationSurfaces] =
+    useState<readonly ConfigurationSurface[]>();
+  useEffect(() => {
+    const abort = new AbortController();
+    void client
+      .configurationSurfaces(abort.signal)
+      .then(setConfigurationSurfaces)
+      // An unavailable registry must never fabricate a client-side workflow.
+      .catch(() => setConfigurationSurfaces(undefined));
+    return () => abort.abort();
+  }, [client]);
+  const surfaceFor = (resource: AdminResourceName) =>
+    configurationSurfaces?.find((surface) => surface.surface === resource);
+  const connectorSurface = surfaceFor("connector-instances");
+  const providerSurface = surfaceFor("ai-provider-instances");
+  const sourceSurface = surfaceFor("knowledge-sources");
+  const scheduleSurface = surfaceFor("schedules");
+  const publicationProfileSurface = surfaceFor("publication-profiles");
+  const webhookEndpointSurface = surfaceFor("webhook-endpoints");
+  const aiBindingSurface = surfaceFor("ai-bindings");
+  const aiRoleDefaultSurface = surfaceFor("ai-role-defaults");
+  const aiPricingSurface = surfaceFor("ai-pricing-overrides");
+  const aiBudgetSurface = surfaceFor("ai-budgets");
+  const platformSurface = surfaceFor("platform");
   return (
     <Stack spacing={3} sx={{ maxWidth: 1480 }}>
       <Box>
@@ -210,18 +473,85 @@ export function SectionPage({
           {lead}
         </Typography>
       </Box>
-      {section === "integrations" ? (
+      {section === "integrations" || section === "ai" ? (
+        <SecretReferenceRegistration
+          onRegistered={() =>
+            setSecretReferenceRefresh((current) => current + 1)
+          }
+        />
+      ) : null}
+      {section === "integrations" && connectorSurface?.mode === "managed" ? (
         <DescriptorCatalog
+          key={`connector-${secretReferenceRefresh}`}
           kind="connector"
           title="Connector configuration drafts"
         />
       ) : null}
-      {section === "ai" ? (
+      {section === "integrations" ? (
+        <SourceScheduleDrafts
+          scheduleEnabled={
+            scheduleSurface?.mode === "managed" &&
+            scheduleSurface.workflows.includes("create_draft")
+          }
+          sourceEnabled={
+            sourceSurface?.mode === "managed" &&
+            sourceSurface.workflows.includes("create_draft")
+          }
+        />
+      ) : null}
+      {section === "integrations" ||
+      section === "publication" ||
+      section === "platform" ? (
+        <ControlPlaneAuthoring
+          client={client}
+          key={`control-plane-authoring-${secretReferenceRefresh}`}
+          onCompleted={() => refresh()}
+          platformEnabled={
+            section === "platform" &&
+            platformSurface?.mode === "managed" &&
+            platformSurface.workflows.includes("create_draft")
+          }
+          publicationEnabled={
+            section === "publication" &&
+            publicationProfileSurface?.mode === "managed" &&
+            publicationProfileSurface.workflows.includes("create_draft")
+          }
+          webhookEnabled={
+            section === "integrations" &&
+            webhookEndpointSurface?.mode === "managed" &&
+            webhookEndpointSurface.workflows.includes("create_draft")
+          }
+        />
+      ) : null}
+      {section === "ai" && providerSurface?.mode === "managed" ? (
         <DescriptorCatalog
+          key={`ai-provider-${secretReferenceRefresh}`}
           kind="ai-provider"
           title="AI provider configuration drafts"
         />
       ) : null}
+      {section === "ai" ? (
+        <AiConfigurationAuthoring
+          bindingsEnabled={
+            aiBindingSurface?.mode === "managed" &&
+            aiBindingSurface.workflows.includes("create_draft")
+          }
+          budgetsEnabled={
+            aiBudgetSurface?.mode === "managed" &&
+            aiBudgetSurface.workflows.includes("replace")
+          }
+          pricingEnabled={
+            aiPricingSurface?.mode === "managed" &&
+            aiPricingSurface.workflows.includes("create")
+          }
+          rolesEnabled={
+            aiRoleDefaultSurface?.mode === "managed" &&
+            aiRoleDefaultSurface.workflows.includes("replace")
+          }
+        />
+      ) : null}
+      {section === "operations" ? <DiagnosticExportPanel /> : null}
+      {section === "access" ? <RoleAssignmentEditor /> : null}
       {section === "operations" ? (
         <Paper
           component="section"
@@ -258,6 +588,7 @@ export function SectionPage({
               description={description}
               key={resource}
               resource={resource}
+              configurationSurface={surfaceFor(resource)}
               title={resourceTitle}
             />
           ),

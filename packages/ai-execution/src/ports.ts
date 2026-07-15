@@ -138,3 +138,19 @@ export interface AiBudgetPort {
     reconciliation: BudgetReconciliation,
   ): Promise<void>;
 }
+
+/**
+ * Read-only budget-policy lookup used only by requests that explicitly require
+ * an applicable persisted policy before they may execute. It deliberately does
+ * not reserve money or expose policy limits.
+ */
+export interface AiBudgetPolicyRequirementPort {
+  hasApplicablePolicy(
+    input: Readonly<{
+      readonly workspaceId: string;
+      readonly currency: string;
+      readonly analysisId?: string;
+      readonly occurredAt: string;
+    }>,
+  ): Promise<boolean>;
+}

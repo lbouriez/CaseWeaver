@@ -23,7 +23,7 @@ import {
 import { createPostgresPersistence } from "@caseweaver/postgres";
 
 import { parseCliConfig } from "./config.js";
-import { isPbi013Command, runPbi013Cli } from "./modules/pbi-013.js";
+import { isOperationsCommand, runOperationsCli } from "./modules/operations.js";
 
 export interface CliOutput {
   log(message: string): void;
@@ -67,7 +67,7 @@ export async function startCli(
   output: CliOutput = console,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<number> {
-  if (!isPbi013Command(arguments_[0])) {
+  if (!isOperationsCommand(arguments_[0])) {
     return runCli(arguments_, output);
   }
   const config = parseCliConfig(env);
@@ -166,7 +166,7 @@ export async function startCli(
           clock,
         ).execute(mutation, commandContext, limit),
     };
-    return runPbi013Cli(arguments_, output, operations);
+    return runOperationsCli(arguments_, output, operations);
   } finally {
     await persistence.close();
   }

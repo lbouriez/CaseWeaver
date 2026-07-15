@@ -4,10 +4,11 @@ import type {
 } from "@caseweaver/connector-sdk";
 
 import type { JitbitSettings } from "./config.js";
-import type { JitbitAnalysisDestination } from "./jitbit-destination.js";
 import type { JitbitCaseSource } from "./jitbit-case-source.js";
+import type { JitbitAnalysisDestination } from "./jitbit-destination.js";
 import type { JitbitKnowledgeSource } from "./jitbit-knowledge-source.js";
 
+export * from "./administration-descriptor.js";
 export * from "./client.js";
 export * from "./config.js";
 export * from "./fakes.js";
@@ -17,7 +18,7 @@ export * from "./jitbit-knowledge-source.js";
 export * from "./mapping.js";
 export * from "./schemas.js";
 
-/** Registers only the Jitbit capabilities implemented by PBI-007. */
+/** Registers the Jitbit capabilities supported by this adapter. */
 export function registerJitbitConnector(
   registry: ConnectorCapabilityRegistry,
   configuration: ConnectorConfiguration<JitbitSettings>,

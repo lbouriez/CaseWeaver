@@ -1,6 +1,6 @@
 # API application
 
-**PBIs:** 001, 002, 012, 013
+**PBIs:** 001, 002, 012, 013, 016
 
 Authenticated control-plane HTTP API for configuration, synchronization requests,
 analysis jobs, approvals, publications, evidence, budgets, and cost queries.
@@ -12,3 +12,52 @@ trusted execution-context adapter, not request input.
 
 Depends on application use cases and composition modules. It must not execute background
 work, implement connector logic, or duplicate domain authorization.
+
+## PBI-016 administration API
+
+`modules/auth` implements provider-neutral OIDC Authorization Code + PKCE with
+server-managed encrypted state/nonce/verifier material, HttpOnly cookie sessions,
+CSRF, trusted-origin enforcement, workspace selection, and redacted append-only auth
+audits. `modules/administration` exposes the typed `/v1/auth/*` and `/v1/admin/*`
+surface consumed by `apps/admin`; it validates descriptors server-side, scopes all
+records to the session workspace, uses persistent one-use action previews, and composes
+existing publication/operations use cases rather than duplicating their policy.
+
+The API returns credentialed CORS headers only for explicit
+`ADMIN_ALLOWED_ORIGINS`; it never reflects or wildcards an origin. `POST
+/v1/admin/secret-references` accepts an opaque external-secret locator, persists only
+that server-side metadata and a generated ID, and never returns the locator or a secret
+value. Descriptor drafts accept those registration IDs for secret slots; composition
+resolves active metadata inside the transaction before adapter-owned validation.
+
+`POST /v1/admin/diagnostics/exports` accepts a bounded export request and returns a
+safe status DTO only after it has atomically persisted the request, worker outbox
+envelope, and audit. `GET /v1/admin/diagnostics/exports/:exportId` and its `/download`
+subroute are workspace-scoped sensitive reads. The download audit commits before any
+private bytes are streamed; status responses and URLs never include artifact locators.
+
+`POST /v1/admin/knowledge-sources/drafts` and `/v1/admin/schedules/drafts`
+compose feature-owned immutable configuration lifecycles. The server issues source
+and schedule IDs from the scoped idempotency boundary, validates connector capability,
+collection/source/version workspace ownership in the PostgreSQL transaction, and writes
+the projection plus its append-only audit event atomically. Drafts are inert and the
+resource-specific `POST /v1/admin/knowledge-sources/:id/lifecycle` and
+`POST /v1/admin/schedules/:id/lifecycle` routes create successor immutable versions
+from server-reloaded projections. They accept only an expected revision and lifecycle,
+never connector, collection, filters, or schedule settings. An enabled schedule must
+reference an enabled source; disabling a source with enabled schedules is conflict-safe
+and requires those schedules to be disabled first.
+
+Publication profiles, webhook endpoints, and platform links have their own draft,
+lifecycle, and public-link routes. A webhook draft never becomes public until its
+successor configuration activates; public ingress resolves the endpoint's opaque ID and
+persisted limits before it asks trusted composition for an adapter. AI routes manage
+pinned catalog snapshots/models, immutable binding versions, role defaults, pricing
+overrides, and budget policies. Provider capability-test preview/execute routes use the
+exclusive `@caseweaver/ai-execution` gateway and require server-owned known pricing,
+budget policy, confirmation, rate limit, deadline, idempotency, and atomic audit state.
+
+OIDC startup requires `ADMIN_ALLOWED_ORIGINS`. A fresh installation may set the paired
+deployment-only `ADMIN_BOOTSTRAP_OIDC_SUBJECT` and
+`ADMIN_BOOTSTRAP_DISPLAY_NAME` values to create the first workspace administrator
+mapping atomically. They are never an HTTP API, browser value, or diagnostic output.

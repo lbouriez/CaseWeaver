@@ -15,6 +15,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@caseweaver/administration": "workspace:*",
+    "@caseweaver/connector-sdk": "workspace:*",
     "@caseweaver/webhooks": "workspace:*",
     "fastify": "^5.0.0",
     "zod": "^4.0.0"

@@ -30,6 +30,8 @@ describe("parseApiConfig", () => {
       port: 3000,
       principalId: "principal-test",
       workspaceId: "workspace-test",
+      allowedAdminOrigins: [],
+      trustedProxyCidrs: [],
     });
   });
 
@@ -47,6 +49,110 @@ describe("parseApiConfig", () => {
     expect(() => parseApiConfig({ ...validEnvironment, [key]: value })).toThrow(
       "API configuration is invalid.",
     );
+  });
+
+  it("requires complete HTTPS OIDC bootstrap configuration", () => {
+    expect(() =>
+      parseApiConfig({
+        ...validEnvironment,
+        OIDC_ISSUER: "https://issuer.example",
+      }),
+    ).toThrow(ApiConfigurationError);
+    expect(() =>
+      parseApiConfig({
+        ...validEnvironment,
+        OIDC_ISSUER: "http://issuer.example",
+        OIDC_CLIENT_ID: "admin-client",
+        OIDC_CALLBACK_URL: "https://caseweaver.example/v1/auth/callback",
+      }),
+    ).toThrow(ApiConfigurationError);
+  });
+
+  it("requires a deployment encryption key whenever OIDC is enabled", () => {
+    expect(() =>
+      parseApiConfig({
+        ...validEnvironment,
+        OIDC_ISSUER: "https://issuer.example",
+        OIDC_CLIENT_ID: "admin-client",
+        OIDC_CALLBACK_URL: "https://caseweaver.example/v1/auth/callback",
+      }),
+    ).toThrow(ApiConfigurationError);
+  });
+
+  it("requires an explicit trusted UI origin whenever OIDC sessions are enabled", () => {
+    const oidc = {
+      OIDC_ISSUER: "https://issuer.example",
+      OIDC_CLIENT_ID: "admin-client",
+      OIDC_CALLBACK_URL: "https://caseweaver.example/v1/auth/callback",
+      OIDC_EPHEMERAL_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64url"),
+      OIDC_EPHEMERAL_KEY_ID: "key-1",
+    };
+    expect(() => parseApiConfig({ ...validEnvironment, ...oidc })).toThrow(
+      ApiConfigurationError,
+    );
+    expect(
+      parseApiConfig({
+        ...validEnvironment,
+        ...oidc,
+        ADMIN_ALLOWED_ORIGINS: "https://admin.example",
+      }).allowedAdminOrigins,
+    ).toEqual(["https://admin.example"]);
+  });
+
+  it("accepts a complete deployment-only first-administrator bootstrap and rejects partial values", () => {
+    const oidc = {
+      OIDC_ISSUER: "https://issuer.example",
+      OIDC_CLIENT_ID: "admin-client",
+      OIDC_CALLBACK_URL: "https://caseweaver.example/v1/auth/callback",
+      OIDC_EPHEMERAL_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64url"),
+      OIDC_EPHEMERAL_KEY_ID: "key-1",
+      ADMIN_ALLOWED_ORIGINS: "https://admin.example",
+    };
+    expect(() =>
+      parseApiConfig({
+        ...validEnvironment,
+        ...oidc,
+        ADMIN_BOOTSTRAP_OIDC_SUBJECT: "operator-subject",
+      }),
+    ).toThrow(ApiConfigurationError);
+    expect(
+      parseApiConfig({
+        ...validEnvironment,
+        ...oidc,
+        ADMIN_BOOTSTRAP_OIDC_SUBJECT: "operator-subject",
+        ADMIN_BOOTSTRAP_DISPLAY_NAME: "Initial Administrator",
+      }).administrationBootstrap,
+    ).toEqual({
+      oidcSubject: "operator-subject",
+      displayName: "Initial Administrator",
+    });
+  });
+
+  it("allows localhost UI origins only for explicit development deployments and validates trusted proxy sources", () => {
+    expect(
+      parseApiConfig({
+        ...validEnvironment,
+        NODE_ENV: "development",
+        ADMIN_ALLOWED_ORIGINS: "http://localhost:8082",
+        TRUSTED_PROXY_CIDRS: "127.0.0.1/32,10.0.0.0/8",
+      }),
+    ).toMatchObject({
+      allowedAdminOrigins: ["http://localhost:8082"],
+      trustedProxyCidrs: ["127.0.0.1/32", "10.0.0.0/8"],
+    });
+    expect(() =>
+      parseApiConfig({
+        ...validEnvironment,
+        NODE_ENV: "production",
+        ADMIN_ALLOWED_ORIGINS: "http://localhost:8082",
+      }),
+    ).toThrow(ApiConfigurationError);
+    expect(() =>
+      parseApiConfig({
+        ...validEnvironment,
+        TRUSTED_PROXY_CIDRS: "forwarded.example",
+      }),
+    ).toThrow(ApiConfigurationError);
   });
 });
 

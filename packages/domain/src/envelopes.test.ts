@@ -22,32 +22,48 @@ const envelopeMetadata = {
 };
 
 describe("knowledge command envelopes", () => {
-  it("creates a typed synchronization command with a source ID", () => {
+  it("creates a typed, version-pinned manual synchronization command", () => {
     const envelope = createEnvelope({
       ...envelopeMetadata,
       type: "knowledge.synchronize.v1",
-      payload: { sourceId: "knowledge-source-1" },
+      payload: {
+        sourceId: "knowledge-source-1",
+        configurationVersion: "source-configuration-1",
+        trigger: "manual",
+      },
     });
 
     expect(envelope).toMatchObject<EnvelopeFor<"knowledge.synchronize.v1">>({
       type: "knowledge.synchronize.v1",
       kind: "command",
-      payload: { sourceId: "knowledge-source-1" },
+      payload: {
+        sourceId: "knowledge-source-1",
+        configurationVersion: "source-configuration-1",
+        trigger: "manual",
+      },
     });
     expect(Object.isFrozen(envelope.payload)).toBe(true);
   });
 
-  it("deserializes a full-rescan command with its source ID", () => {
+  it("deserializes a version-pinned scheduled full-rescan command", () => {
     const envelope = deserializeEnvelope({
       ...envelopeMetadata,
       type: "knowledge.full-rescan.v1",
-      payload: { sourceId: "knowledge-source-1" },
+      payload: {
+        sourceId: "knowledge-source-1",
+        configurationVersion: "source-configuration-2",
+        trigger: "schedule",
+      },
     });
 
     expect(envelope).toMatchObject<EnvelopeFor<"knowledge.full-rescan.v1">>({
       type: "knowledge.full-rescan.v1",
       kind: "command",
-      payload: { sourceId: "knowledge-source-1" },
+      payload: {
+        sourceId: "knowledge-source-1",
+        configurationVersion: "source-configuration-2",
+        trigger: "schedule",
+      },
     });
   });
 
@@ -56,7 +72,11 @@ describe("knowledge command envelopes", () => {
       deserializeEnvelope({
         ...envelopeMetadata,
         type: "knowledge.synchronize.v1",
-        payload: { sourceId: "" },
+        payload: {
+          sourceId: "",
+          configurationVersion: "source-configuration-1",
+          trigger: "manual",
+        },
       }),
     ).toThrow("Envelope is invalid");
 
@@ -64,9 +84,24 @@ describe("knowledge command envelopes", () => {
       deserializeEnvelope({
         ...envelopeMetadata,
         type: "knowledge.full-rescan.v1",
-        payload: { sourceId: 1 },
+        payload: {
+          sourceId: "knowledge-source-1",
+          configurationVersion: 1,
+          trigger: "manual",
+        },
       }),
     ).toThrow("Envelope is invalid");
+    expect(() =>
+      deserializeEnvelope({
+        ...envelopeMetadata,
+        type: "knowledge.full-rescan.v1",
+        payload: {
+          sourceId: "knowledge-source-1",
+          configurationVersion: "source-configuration-1",
+          trigger: "webhook",
+        },
+      }),
+    ).toThrow("Envelope payload is invalid");
   });
 
   it("preserves only validated W3C trace context on a durable retention command", () => {
@@ -90,5 +125,29 @@ describe("knowledge command envelopes", () => {
         payload: { workItemId: "retention-work-1" },
       }),
     ).toThrow("trace context");
+  });
+
+  it("accepts a bounded diagnostic-export command without diagnostic content", () => {
+    const envelope = createEnvelope({
+      ...envelopeMetadata,
+      id: outboxEnvelopeId("outbox-diagnostics-export-1"),
+      type: "diagnostics.export.generate.v1",
+      payload: { exportId: "diagnostic-export-1" },
+    });
+
+    expect(envelope).toMatchObject<
+      EnvelopeFor<"diagnostics.export.generate.v1">
+    >({
+      type: "diagnostics.export.generate.v1",
+      kind: "command",
+      payload: { exportId: "diagnostic-export-1" },
+    });
+    expect(() =>
+      deserializeEnvelope({
+        ...envelopeMetadata,
+        type: "diagnostics.export.generate.v1",
+        payload: { exportId: "" },
+      }),
+    ).toThrow("Envelope is invalid");
   });
 });

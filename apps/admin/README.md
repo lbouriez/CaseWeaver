@@ -27,24 +27,64 @@ OIDC configuration, credential, or secret is compiled into the bundle.
 For local development, copy the example to `public/runtime-config.json`, substitute a
 local API URL, and do not commit that file.
 
-## Planned API dependencies
+## Live API contract
 
-Live operation requires PBI-016 API work that is not yet implemented. The app therefore
-shows an accessible unavailable state—never sample records—until these typed endpoints
-exist:
+PBI-016 supplies the following typed API boundary. The console always renders server
+responses or an explicit unavailable/denied state; it never substitutes sample records:
 
 - Session control: `GET /v1/auth/session`, `GET /v1/auth/login`,
   `POST /v1/auth/logout`, and `POST /v1/auth/session/workspace`.
 - Descriptors: `GET /v1/admin/descriptors/connectors` and
   `GET /v1/admin/descriptors/ai-providers`.
 - Resource-specific, cursor-paginated `GET /v1/admin/*` routes listed in
-  `src/api/contracts.ts`, including integrations, AI, knowledge, publication,
-  operations, access, and platform summaries.
+  `src/api/contracts.ts`, including redacted secret-reference metadata,
+  integrations, AI, knowledge, publication, operations, access, and platform
+  summaries.
 - Draft configuration routes:
   `POST /v1/admin/connector-instances/drafts` and
-  `POST /v1/admin/ai/provider-instances/drafts`.
+  `POST /v1/admin/ai/provider-instances/drafts`,
+  `POST /v1/admin/knowledge-sources/drafts`, and
+  `POST /v1/admin/schedules/drafts`. Source and schedule forms discover
+  workspace-scoped selection records from the API; schedule drafts pin a
+  specific immutable source-version ID rather than silently following source
+  edits. Dedicated source/schedule lifecycle routes accept only a server-read
+  optimistic revision and `active`/`disabled` state, so the console never sends
+  projection settings back to activate or disable a draft.
+- Publication and webhook authoring routes:
+  `POST /v1/admin/publication-profiles/drafts` and
+  `POST /v1/admin/webhook-endpoints/drafts`, with their resource-specific
+  lifecycle routes. Publication policy and webhook settings are bounded JSON
+  objects; webhook authoring selects only active connector IDs and opaque
+  secret-reference *registration IDs*. The console has no secret-value,
+  locator, header, body, adapter, or endpoint/client field. It can configure
+  only server-validated event types and limits, then reads the server-owned
+  optimistic revision for lifecycle transitions.
+- Public-link configuration: `GET`/`PUT /v1/admin/platform/links`. The form
+  reads and submits only workspace public API/webhook bases and an optional
+  server-read revision. URL normalization, permitted localhost development
+  mode, OIDC/trusted-proxy posture, and derivation of opaque endpoint URLs
+  remain server-owned.
+- AI configuration routes create immutable binding drafts/successors, set role defaults,
+  replace pricing/budget policies, and issue/run provider capability-test confirmations.
+  Every provider, catalog, model, role, and operation is discovered from bounded API
+  read models; the browser never supplies an endpoint, wire API, secret, or price/budget
+  decision for a test.
+- External-secret metadata registration: `POST /v1/admin/secret-references`.
+  The console submits an opaque secret-backend locator once, receives only its
+  generated registration ID, and uses that ID in generic descriptor selectors.
+  It never renders, stores, or requests a secret value.
 - Guarded action routes: `POST /v1/admin/action-previews` and
-  `POST /v1/admin/actions/execute`.
+  `POST /v1/admin/actions/execute`, including immutable connector/provider
+  activation and disablement, secret-reference lifecycle changes, and existing
+  operational recovery use cases.
+- Workspace membership: `GET /v1/admin/role-assignments/:principalId/assignment`
+  and `PUT /v1/admin/role-assignments/:principalId`. The UI reads the
+  workspace-wide optimistic revision before replacing a code-owned role set;
+  actor, workspace, authorization, final-administrator protection, immutable
+  history, and success audit all remain server-owned.
+- Diagnostics export: `POST /v1/admin/diagnostics/exports`, status, and the dedicated
+  audited download route. The UI never polls automatically, retains export bytes, or
+  constructs storage links; it shows a download control only for a worker-ready export.
 
 Responses must match the Zod-validated local boundary DTOs. Authenticated responses
 provide effective permissions and a CSRF token; all mutations require that token and
@@ -57,7 +97,11 @@ audit writes, and outcome reconciliation.
 - Requests include cookies, UI action/correlation IDs, idempotency headers for
   mutations, and an explicit passive-polling marker when used.
 - Descriptor forms are schema-driven without connector/provider name conditionals.
-  Secret slots are redacted notices, never credential inputs or returned values.
+  Secret slots are generic selectors of redacted, active server registrations;
+  they are never credential inputs or returned values.
+- Workspace selection is derived from the API session's memberships and sent through
+  the CSRF-protected session-switch endpoint. The browser cannot submit a role,
+  permission, or arbitrary workspace grant.
 - Costly or destructive actions cannot be enabled until the server provides an
   expiring impact/cost preview. `outcome_unknown` is displayed as unresolved.
 - The console intentionally provides read-only lists/shows for operational resources;
@@ -72,6 +116,7 @@ pnpm --filter @caseweaver/admin test
 pnpm --filter @caseweaver/admin build
 ```
 
-The live console remains blocked on the backend contracts above. Static build and
-component/client tests do not pretend that OAuth, API auditing, descriptors, or
-operations exist without that control-plane support.
+The API owns OIDC validation, cookie sessions, CSRF, effective permissions, workspace
+scope, idempotency, server-side audit records, and all secret handling. Configure an
+OIDC issuer and one trusted UI origin before starting the API; see the repository root
+README for a complete local run.

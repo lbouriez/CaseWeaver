@@ -12,6 +12,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import { buildWebhookApp, type WebhookEndpointResolver } from "./app.js";
+import { PersistedWebhookEndpointResolver } from "./persisted-endpoint-resolver.js";
 
 const verified: VerifiedWebhook = {
   eventType: "case.updated",
@@ -155,5 +156,81 @@ describe("buildWebhookApp", () => {
     const adapter = endpoint.adapter as RecordingWebhookAdapter;
     expect(adapter.verificationRequests).toEqual([]);
     await app.close();
+  });
+
+  it("enforces the endpoint-specific body limit and database admission before an adapter", async () => {
+    const endpoint = createEndpoint();
+    const resolver: WebhookEndpointResolver = {
+      resolve: async () => ({
+        endpoint,
+        maximumBodyBytes: 4,
+        admit: async () => ({ allowed: false }),
+      }),
+    };
+    const app = buildWebhookApp({
+      ingress: createIngress(),
+      endpointResolver: resolver,
+      maximumBodyBytes: 1_024,
+    });
+
+    const tooLarge = await app.inject({
+      method: "POST",
+      url: "/webhooks/opaque_endpoint-1",
+      payload: "12345",
+    });
+    expect(tooLarge.statusCode).toBe(413);
+    expect(tooLarge.json()).toEqual({ status: "payload_too_large" });
+
+    const rateLimited = await app.inject({
+      method: "POST",
+      url: "/webhooks/opaque_endpoint-1",
+      payload: "1234",
+    });
+    expect(rateLimited.statusCode).toBe(429);
+    expect(rateLimited.json()).toEqual({ status: "rate_limited" });
+    const adapter = endpoint.adapter as RecordingWebhookAdapter;
+    expect(adapter.verificationRequests).toEqual([]);
+    await app.close();
+  });
+
+  it("builds a public endpoint only from active persisted routing state", async () => {
+    const adapter = new RecordingWebhookAdapter(verified, signals);
+    const findActive = vi.fn(async () => ({
+      endpointId: "opaque_endpoint-1",
+      workspaceId: "workspace-1",
+      lifecycle: "active" as const,
+      connectorRegistrationId: "connector-1",
+      configurationVersionId: "version-1",
+      verifiedEventTypes: ["case.updated"],
+      maximumBodyBytes: 512,
+      maximumRequestsPerMinute: 4,
+      analysisTriggerId: "trigger-1",
+    }));
+    const acquire = vi.fn(async () => ({ allowed: true }));
+    const resolveAdapter = vi.fn(async () => adapter);
+    const resolver = new PersistedWebhookEndpointResolver(
+      { findActive },
+      { acquire },
+      { resolve: resolveAdapter },
+    );
+
+    const resolved = await resolver.resolve("opaque_endpoint-1");
+    expect(resolved?.endpoint).toMatchObject({
+      id: "opaque_endpoint-1",
+      workspaceId: "workspace-1",
+      connectorInstanceId: "connector-1",
+      analysisTriggerId: "trigger-1",
+    });
+    expect(resolveAdapter).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      connectorRegistrationId: "connector-1",
+      configurationVersionId: "version-1",
+      verifiedEventTypes: ["case.updated"],
+    });
+    await resolved?.admit?.();
+    expect(acquire).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      endpointId: "opaque_endpoint-1",
+    });
   });
 });

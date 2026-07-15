@@ -10,7 +10,14 @@ import {
 import { captureOpenTelemetryTraceContext } from "@caseweaver/observability";
 
 import type { ApiConfig } from "./config.js";
-import type { ApiExecutionContextResolver } from "./modules/pbi-012/routes.js";
+
+export interface ApiExecutionContextResolver {
+  /**
+   * Authentication is composed outside feature routes. Route headers and bodies are
+   * never converted to a principal by a feature module.
+   */
+  resolve(request: unknown): Promise<ExecutionContext>;
+}
 
 /**
  * The deployment supplies this actor after authenticating callers upstream.

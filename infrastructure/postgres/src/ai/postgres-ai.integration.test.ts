@@ -239,7 +239,7 @@ afterAll(async () => {
   await pool.end();
 });
 
-describe("PBI-003 PostgreSQL AI ledger and budget repository", () => {
+describe("PostgreSQL AI ledger and budget repository", () => {
   it("migrates the catalog, binding, ledger, and budget tables", async () => {
     const tables = await pool.query<{ table_name: string }>(
       `SELECT table_name FROM information_schema.tables
@@ -457,6 +457,40 @@ describe("PBI-003 PostgreSQL AI ledger and budget repository", () => {
         spent_amount: "0.000000000000000000",
       },
     ]);
+  });
+
+  it("requires a hard workspace or UTC-day policy before a capability test can enter the metered gateway", async () => {
+    await seedConfiguration();
+    const request = {
+      workspaceId: "ai-workspace-a",
+      currency: "USD",
+      occurredAt: "2026-07-13T19:00:00.000Z",
+    };
+    await expect(persistence.budget.hasApplicablePolicy(request)).resolves.toBe(
+      false,
+    );
+    await pool.query(
+      `INSERT INTO ai_budget_policies (
+        id, workspace_id, scope, scope_key, limit_amount, currency, hard
+      ) VALUES ('ai-soft-policy-required', 'ai-workspace-a', 'workspace', 'all', 1, 'USD', false)`,
+    );
+    await expect(persistence.budget.hasApplicablePolicy(request)).resolves.toBe(
+      false,
+    );
+    await pool.query(
+      `INSERT INTO ai_budget_policies (
+        id, workspace_id, scope, scope_key, limit_amount, currency, hard
+      ) VALUES ('ai-hard-policy-required', 'ai-workspace-a', 'day', '2026-07-13', 1, 'USD', true)`,
+    );
+    await expect(persistence.budget.hasApplicablePolicy(request)).resolves.toBe(
+      true,
+    );
+    await expect(
+      persistence.budget.hasApplicablePolicy({
+        ...request,
+        currency: "EUR",
+      }),
+    ).resolves.toBe(false);
   });
 
   it("reserves only policies whose canonical scope key applies", async () => {

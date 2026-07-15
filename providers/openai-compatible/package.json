@@ -15,6 +15,7 @@
     "test": "pnpm --filter @caseweaver/ai-sdk run build && vitest run"
   },
   "dependencies": {
+    "@caseweaver/administration": "workspace:*",
     "@caseweaver/ai-sdk": "workspace:*",
     "zod": "^4.0.0"
   },

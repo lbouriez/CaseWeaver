@@ -1,0 +1,2 @@
+ALTER TABLE knowledge_source_states
+  ADD COLUMN last_manual_full_rescan_requested_at timestamptz;

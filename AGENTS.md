@@ -21,6 +21,9 @@ work must read `.features/20-persistence-and-database-guide.md`; every change mu
 9. Do not create generic dumping grounds such as `common`, `shared`, or `utils`.
 10. A cross-package contract change requires contract tests and updates to affected
     folder READMEs/specifications.
+11. PBIs are delivery tracking only. Production paths, exported symbols, configuration
+    keys, and test names must use the domain capability they represent, never a PBI
+    number.
 
 ## Parallel-agent ownership
 

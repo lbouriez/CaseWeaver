@@ -15,6 +15,8 @@ import {
   type RepositoryReadOnlyTool,
 } from "@caseweaver/ai-sdk";
 
+export * from "./administration-descriptor.js";
+
 export type {
   ConfiguredRepository as AdministratorRepositorySelection,
   RepositoryAgentEvidence,

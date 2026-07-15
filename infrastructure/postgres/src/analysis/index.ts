@@ -205,7 +205,7 @@ function ensureCompletionMatchesExecution(input: {
 }
 
 /**
- * Durable PBI-011 execution store. Each method owns a short database
+ * Durable analysis execution store. Each method owns a short database
  * transaction; the completion transaction inserts the immutable result,
  * selected evidence, terminal attempt/job states, and completion outbox event.
  */

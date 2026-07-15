@@ -242,7 +242,7 @@ function completedEvent(
 
 beforeAll(async () => resetDatabase());
 
-describe("PBI-011 PostgreSQL analysis execution store", () => {
+describe("PostgreSQL analysis execution store", () => {
   it("atomically stores a completed result, terminal states, and completed-event outbox record", async () => {
     await resetDatabase();
     await seedAnalysisJob();

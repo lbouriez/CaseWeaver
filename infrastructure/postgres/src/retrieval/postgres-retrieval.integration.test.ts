@@ -116,16 +116,21 @@ async function seedKnowledge(): Promise<void> {
     "retrieval-source-active",
     "retrieval-source-denied",
   ]) {
+    const configurationVersionId = `${sourceId}-configuration-v1`;
+    await seedSourceConfiguration({
+      sourceId,
+      versionId: configurationVersionId,
+    });
     await pool.query(
       `INSERT INTO knowledge_sources (
          id, workspace_id, connector_registration_id, knowledge_collection_id,
          lifecycle, configuration_version, normalization_profile_version,
          chunking_profile_version, synchronization_policy, deletion_behavior
        ) VALUES (
-         $1, $2, 'retrieval-connector', $3, 'enabled', '1', 'normalization-v1',
+         $1, $2, 'retrieval-connector', $3, 'enabled', $4, 'normalization-v1',
          'chunking-v1', '{}'::jsonb, 'tombstone'
        )`,
-      [sourceId, workspaceId, collection.id],
+      [sourceId, workspaceId, collection.id, configurationVersionId],
     );
   }
   await seedDocument({
@@ -164,6 +169,32 @@ async function seedKnowledge(): Promise<void> {
     content: "Password reset secret for Widget",
     metadata: { product: "widget" },
   });
+}
+
+async function seedSourceConfiguration(
+  input: Readonly<{
+    readonly sourceId: string;
+    readonly versionId: string;
+  }>,
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO administration_configurations (
+       id, workspace_id, resource_type, lifecycle, current_version_id
+     ) VALUES ($1, $2, 'knowledge-sources', 'active', NULL)`,
+    [input.sourceId, workspaceId],
+  );
+  await pool.query(
+    `INSERT INTO administration_configuration_versions (
+       id, workspace_id, configuration_id, version, settings, secret_references
+     ) VALUES ($1, $2, $3, 1, '{}'::jsonb, '[]'::jsonb)`,
+    [input.versionId, workspaceId, input.sourceId],
+  );
+  await pool.query(
+    `UPDATE administration_configurations
+     SET current_version_id = $1
+     WHERE workspace_id = $2 AND id = $3`,
+    [input.versionId, workspaceId, input.sourceId],
+  );
 }
 
 async function seedDocument(input: {
@@ -292,7 +323,7 @@ afterAll(async () => {
   await pool.end();
 });
 
-describe("PBI-009 PostgreSQL retrieval adapter", () => {
+describe("PostgreSQL retrieval adapter", () => {
   it("uses bounded lexical and vector search while enforcing workspace, source, and active-revision access", async () => {
     const candidates = await persistence.search.search(searchInput());
 

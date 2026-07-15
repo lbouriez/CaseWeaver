@@ -18,6 +18,8 @@ import {
   type VisionRequest,
   type VisionResult,
 } from "@caseweaver/ai-sdk";
+
+export * from "./administration-descriptor.js";
 import { z } from "zod";
 
 const recordSchema = z.record(z.string(), z.unknown());

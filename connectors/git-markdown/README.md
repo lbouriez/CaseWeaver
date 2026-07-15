@@ -6,6 +6,10 @@ Knowledge source for local/remote Git repositories, Markdown and Docusaurus
 conventions, blob-OID fingerprints, secret-reference authentication, path filters, and
 stable source URLs.
 
+The package exports safe administration discovery metadata for API composition. Runtime
+validation remains in this package's configuration schema; descriptors never contain
+configured secret values, clients, filesystem state, or repository runtime state.
+
 `GitMarkdownKnowledgeSource` accepts an injected `GitRepository`; it does not invoke a
 shell, Git executable, filesystem, or network client. The injected boundary must safely
 resolve configured local/remote repositories and return validated tree and blob data.

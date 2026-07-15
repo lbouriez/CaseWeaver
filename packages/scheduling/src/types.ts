@@ -33,7 +33,9 @@ export interface KnowledgeSynchronizationCommand {
   readonly type: "knowledge.synchronize.v1" | "knowledge.full-rescan.v1";
   readonly workspaceId: string;
   readonly sourceId: string;
+  /** Immutable source configuration pinned when the occurrence was scheduled. */
   readonly configurationVersion: string;
+  readonly trigger: "schedule";
   readonly occurrenceKey: string;
   readonly scheduledFor: string;
 }

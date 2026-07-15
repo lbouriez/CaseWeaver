@@ -1,6 +1,6 @@
 # Docker deployment
 
-**PBIs:** 001, 013
+**PBIs:** 001, 013, 016
 
 `compose.production.yml` is a production Compose example with two mutually exclusive
 runtime profiles:
@@ -46,6 +46,38 @@ Set `OTEL_EXPORTER_OTLP_ENDPOINT` only when an OTLP collector is available. Appl
 then use real OTLP/HTTP trace and metric exporters; leaving it empty produces no SDK or
 fake telemetry. The database is isolated on an internal Docker network. Runtime
 services have a separate egress network for the collector and configured providers.
+
+## Local administration-console bridge
+
+`compose.admin.yml` is a deliberately small, local static-hosting bridge for the
+PBI-016 admin artifact. It does not replace the PBI-017 production image, TLS edge, or
+release process. It has no database URL, Docker secret, queue, connector, provider, or
+object-storage mount. It binds only to loopback and requires a separately running API.
+
+Build the browser artifact first, then supply its **public** API base URL. The API URL
+must use HTTPS except for localhost development. Do not put OIDC credentials, bearer
+tokens, connector credentials, or database values in either variable.
+
+```powershell
+pnpm --filter @caseweaver/admin build
+$env:CASEWEAVER_ADMIN_API_BASE_URL = "http://127.0.0.1:3000"
+$env:CASEWEAVER_ADMIN_UI_TITLE = "CaseWeaver Control Room"
+docker compose -f deploy\docker\compose.admin.yml up --build -d --wait
+```
+
+Open `http://127.0.0.1:8082`. The container generates `/runtime-config.json` in its
+read-only runtime filesystem and serves it with `Cache-Control: no-store`; it is the
+same credential-free public contract consumed by `apps/admin`. The static artifact is
+mounted read-only. Stop the bridge with:
+
+```powershell
+docker compose -f deploy\docker\compose.admin.yml down
+```
+
+This bridge is intentionally not an authentication or TLS boundary. Run it only for
+local development until PBI-017 provides a TLS edge and digest-pinned release images.
+The API remains responsible for OIDC sessions, cookies, CSRF, origin validation,
+authorization, auditing, and all secret handling.
 
 ## Disposable test PostgreSQL
 

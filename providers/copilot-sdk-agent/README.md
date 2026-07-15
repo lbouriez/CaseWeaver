@@ -12,3 +12,7 @@ configuration.
 It receives an injected repository runtime and administrator-selected pinned repository;
 the runtime, not this provider, owns checkout brokering, isolation, and evidence-path
 validation.
+
+The package also exports safe administration discovery metadata for API composition. It
+does not expose BYOK values, runtime clients, repository paths, or provider calls to the
+browser.

@@ -12,7 +12,10 @@ import {
 import { useEffect, useState } from "react";
 
 import { useApiClient } from "../api/context.js";
-import type { ConfigurationDescriptor } from "../api/contracts.js";
+import type {
+  AdminListItem,
+  ConfigurationDescriptor,
+} from "../api/contracts.js";
 import { ApiFailure } from "../components/api-failure.js";
 import { DescriptorForm } from "../components/descriptor-form.js";
 
@@ -26,6 +29,8 @@ export function DescriptorCatalog({
   const client = useApiClient();
   const [descriptors, setDescriptors] =
     useState<readonly ConfigurationDescriptor[]>();
+  const [secretReferences, setSecretReferences] =
+    useState<readonly AdminListItem[]>();
   const [selectedType, setSelectedType] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState<unknown>();
@@ -35,10 +40,17 @@ export function DescriptorCatalog({
     const controller = new AbortController();
     setDescriptors(undefined);
     setError(undefined);
-    void client
-      .listDescriptors(kind, controller.signal)
-      .then((items) => {
+    void Promise.all([
+      client.listDescriptors(kind, controller.signal),
+      client.list(
+        "secret-references",
+        { limit: 200 },
+        { signal: controller.signal },
+      ),
+    ])
+      .then(([items, references]) => {
         setDescriptors(items);
+        setSecretReferences(references.items);
         const first = items[0];
         if (first !== undefined) {
           setSelectedType(first.type);
@@ -79,7 +91,8 @@ export function DescriptorCatalog({
         </Box>
         <Divider />
         {error === undefined ? null : <ApiFailure error={error} />}
-        {descriptors === undefined && error === undefined ? (
+        {(descriptors === undefined || secretReferences === undefined) &&
+        error === undefined ? (
           <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
             <CircularProgress size={18} />
             <Typography>Discovering registered descriptors…</Typography>
@@ -119,6 +132,7 @@ export function DescriptorCatalog({
             )}
             <DescriptorForm
               descriptor={selected}
+              secretReferences={secretReferences ?? []}
               onSubmit={async (settings) => {
                 if (displayName.trim().length === 0) {
                   throw new Error("Display name is required.");

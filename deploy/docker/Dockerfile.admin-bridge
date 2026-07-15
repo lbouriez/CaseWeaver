@@ -1,0 +1,10 @@
+FROM nginxinc/nginx-unprivileged:1.27-alpine@sha256:28d91bdce70ad09025ea901458fdd149259d8e05982ade79d4ef2c0d9470eb48
+
+# The admin artifact is deliberately bind-mounted by compose. This image contains only
+# the unprivileged static server and public-runtime-configuration generator.
+COPY --chown=101:101 admin-nginx.conf /etc/nginx/conf.d/default.conf
+COPY --chown=101:101 admin-runtime-config.sh /usr/local/bin/admin-runtime-config
+
+USER 101:101
+ENTRYPOINT ["/usr/local/bin/admin-runtime-config"]
+CMD ["nginx", "-g", "daemon off;"]

@@ -14,6 +14,7 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
+  type AiBudgetPolicyRequirementPort,
   type AiBudgetPort,
   type AiExecutionTransaction,
   type AiExecutionUnitOfWork,
@@ -102,6 +103,9 @@ function repositoryAgentBinding() {
 function harness(
   provider: DeterministicAiProviderDispatcher,
   model = binding(),
+  options: Readonly<{
+    readonly budgetPolicy?: AiBudgetPolicyRequirementPort;
+  }> = {},
 ) {
   const starts: unknown[] = [];
   const finalizations: unknown[] = [];
@@ -139,6 +143,9 @@ function harness(
       secretResolver: { resolve: async () => ({ value: "secret" }) },
       ledger,
       budget,
+      ...(options.budgetPolicy === undefined
+        ? {}
+        : { budgetPolicy: options.budgetPolicy }),
       unitOfWork,
       operationIds: { next: () => `operation-${++next}` },
       clock: { now: () => "2026-02-01T00:00:00.000Z" },
@@ -159,6 +166,74 @@ function request(overrides: Record<string, unknown> = {}) {
 }
 
 describe("DefaultAiExecutionGateway", () => {
+  it("preflights the same immutable binding and conservative price without external side effects", async () => {
+    const provider = new DeterministicAiProviderDispatcher({
+      generate: async () => ({
+        value: { text: "must not run" },
+        metadata: { retryCount: 0 },
+      }),
+    });
+    const test = harness(provider);
+
+    await expect(
+      test.gateway.preflight(request(), { workspaceId: "workspace-1" }),
+    ).resolves.toMatchObject({
+      bindingVersionId: "binding-1:1",
+      providerInstanceVersionId: "provider-version-1",
+      maximumInputTokens: 10,
+      maximumOutputTokens: 5,
+      conservativeCost: { status: "known", amount: "0.02", currency: "USD" },
+    });
+
+    expect(provider.calls).toHaveLength(0);
+    expect(test.starts).toHaveLength(0);
+    expect(test.reservations).toHaveLength(0);
+    expect(test.finalizations).toHaveLength(0);
+    expect(test.reconciliations).toHaveLength(0);
+  });
+
+  it("requires an applicable budget policy only when a request opts into the guard", async () => {
+    const provider = new DeterministicAiProviderDispatcher({
+      generate: async () => ({
+        value: { text: "ok" },
+        usage: { inputTokens: 1, outputTokens: 1 },
+        metadata: { retryCount: 0 },
+      }),
+    });
+    const blocked = harness(provider);
+    await expect(
+      blocked.gateway.execute(
+        request({
+          budget: {
+            currency: "USD",
+            hard: true,
+            requireBudgetPolicy: true,
+          },
+        }),
+        { workspaceId: "workspace-1", signal: new AbortController().signal },
+      ),
+    ).rejects.toBeInstanceOf(AiHardBudgetError);
+    expect(blocked.starts).toHaveLength(0);
+    expect(blocked.reservations).toHaveLength(0);
+    expect(provider.calls).toHaveLength(0);
+
+    const allowed = harness(provider, binding(), {
+      budgetPolicy: { hasApplicablePolicy: async () => true },
+    });
+    await expect(
+      allowed.gateway.execute(
+        request({
+          budget: {
+            currency: "USD",
+            hard: true,
+            requireBudgetPolicy: true,
+          },
+        }),
+        { workspaceId: "workspace-1", signal: new AbortController().signal },
+      ),
+    ).resolves.toMatchObject({ operationId: "operation-1" });
+  });
+
   it("starts, reserves, finalizes, and reconciles successful calls", async () => {
     const provider = new DeterministicAiProviderDispatcher({
       generate: async () => ({

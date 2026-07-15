@@ -36,6 +36,7 @@ function commandFor(
     workspaceId: schedule.workspaceId,
     sourceId: schedule.sourceId,
     configurationVersion: schedule.configurationVersion,
+    trigger: "schedule",
     occurrenceKey: key,
     scheduledFor: schedule.nextRunAt,
   };

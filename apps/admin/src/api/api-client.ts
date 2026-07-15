@@ -1,5 +1,9 @@
 import type { RuntimeConfig } from "../runtime-config.js";
 import {
+  type AiBindingDraftRequest,
+  type AiBudgetRequest,
+  type AiPriceOverrideRequest,
+  type AiRoleDefaultRequest,
   type ActionOutcome,
   type ActionPreview,
   type AdminActionName,
@@ -11,12 +15,29 @@ import {
   adminDetailSchema,
   adminListResponseSchema,
   type ConfigurationDescriptor,
+  type ConfigurationHistoryResponse,
+  type ConfigurationInspection,
+  type ConfigurationSurface,
+  configurationHistoryResponseSchema,
+  configurationInspectionSchema,
+  configurationSurfacesSchema,
+  type DiagnosticExportStatus,
   descriptorCatalogSchema,
+  diagnosticExportStatusSchema,
+  type PlatformLinkConfiguration,
+  type ProviderCapabilityTestPreview,
+  providerCapabilityTestOperationsSchema,
+  providerCapabilityTestPreviewSchema,
+  type ProviderCapabilityTestResult,
+  providerCapabilityTestResultSchema,
   type PublicApiErrorBody,
+  platformLinkConfigurationSchema,
   publicApiErrorBodySchema,
   resourceEndpoints,
   type Session,
   sessionSchema,
+  type WorkspaceRoleAssignment,
+  workspaceRoleAssignmentSchema,
 } from "./contracts.js";
 
 export type UiActionMode = "user" | "passive_poll";
@@ -38,6 +59,94 @@ export interface DescriptorDraftInput {
   readonly descriptorType: string;
   readonly displayName: string;
   readonly settings: Readonly<Record<string, unknown>>;
+}
+
+export interface SecretReferenceRegistrationInput {
+  /** Opaque locator in the configured external secret backend, never a value. */
+  readonly reference: string;
+}
+
+/** Resource-owned source draft. Connector settings remain descriptor-owned and
+ * are never copied into this feature-level control-plane command. */
+export interface KnowledgeSourceDraftInput {
+  readonly displayName: string;
+  readonly connectorInstanceId: string;
+  readonly collectionId: string;
+  readonly normalizationProfileVersion: string;
+  readonly chunkingProfileVersion: string;
+  readonly synchronizationPolicy: Readonly<Record<string, unknown>>;
+  readonly deletionBehavior: "tombstone" | "retain";
+}
+
+/** Schedule draft pins an immutable source configuration version, not a mutable
+ * source record. This prevents later source edits from rewriting queued work. */
+export interface KnowledgeScheduleDraftInput {
+  readonly displayName: string;
+  readonly sourceId: string;
+  readonly sourceConfigurationVersionId: string;
+  readonly kind: "synchronize" | "fullRescan";
+  readonly cadence:
+    | Readonly<{
+        readonly kind: "cron";
+        readonly expression: string;
+        readonly timezone: string;
+        readonly jitterMs?: number;
+        readonly overlapPolicy: "skip" | "queue";
+      }>
+    | Readonly<{
+        readonly kind: "interval";
+        readonly intervalMs: number;
+        readonly jitterMs?: number;
+        readonly overlapPolicy: "skip" | "queue";
+      }>;
+  readonly nextRunAt: string;
+}
+
+/** Publication policy is a server-validated opaque configuration object. The
+ * browser has no profile/version identity and may not include secret fields. */
+export interface PublicationProfileDraftInput {
+  readonly displayName: string;
+  readonly definition: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * Webhook authoring selects only opaque server registrations. In particular,
+ * `secretReferenceRegistrationIds` are registration identifiers, never secret
+ * values, locators, headers, or connector adapter configuration.
+ */
+export interface WebhookEndpointDraftInput {
+  readonly displayName: string;
+  readonly connectorInstanceId: string;
+  readonly verifiedEventTypes: readonly string[];
+  readonly maximumBodyBytes: number;
+  readonly maximumRequestsPerMinute: number;
+  readonly analysisTriggerId?: string;
+  readonly settings: Readonly<Record<string, unknown>>;
+  readonly secretReferenceRegistrationIds: readonly string[];
+}
+
+export interface PlatformLinkUpdateInput {
+  readonly apiPublicBaseUrl: string;
+  readonly webhookPublicBaseUrl: string;
+  /** Omitted only while creating the first workspace-level configuration. */
+  readonly expectedRevision?: number;
+}
+
+/** A source/schedule lifecycle transition contains no feature settings. The API
+ * reloads the current immutable projection and rejects a stale revision. */
+export interface ConfigurationLifecycleTransitionInput {
+  readonly expectedRevision: number;
+  readonly lifecycle: "active" | "disabled";
+}
+
+export interface ReplaceWorkspaceRolesInput {
+  readonly roles: readonly (
+    | "administrator"
+    | "operator"
+    | "analyst"
+    | "viewer"
+  )[];
+  readonly expectedRevision: number;
 }
 
 export type ApiFailureKind =
@@ -150,7 +259,12 @@ export class CaseWeaverApiClient {
     private readonly config: RuntimeConfig,
     options: ApiClientOptions = {},
   ) {
-    this.fetchImplementation = options.fetchImplementation ?? fetch;
+    // Store a wrapper rather than the browser function itself: requestJson calls
+    // this as an instance member, whereas browser fetch must retain its global
+    // receiver. Test fakes remain injectable through the same narrow seam.
+    this.fetchImplementation =
+      options.fetchImplementation ??
+      ((input, init) => globalThis.fetch(input, init));
     this.createActionId = options.createActionId ?? createBrowserActionId;
   }
 
@@ -237,6 +351,48 @@ export class CaseWeaverApiClient {
     );
   }
 
+  public async configurationInspection(
+    configurationId: string,
+    signal?: AbortSignal,
+  ): Promise<ConfigurationInspection> {
+    return this.requestJson(
+      `/v1/admin/configurations/${safelyEncodeIdentifier(configurationId)}`,
+      { method: "GET", signal },
+      configurationInspectionSchema,
+      "user",
+    );
+  }
+
+  public async configurationHistory(
+    configurationId: string,
+    query: Readonly<{ readonly limit?: number; readonly after?: string }> = {},
+    signal?: AbortSignal,
+  ): Promise<ConfigurationHistoryResponse> {
+    const parameters = new URLSearchParams();
+    if (query.limit !== undefined) parameters.set("limit", String(query.limit));
+    if (query.after !== undefined)
+      parameters.set("after", validateIdentifier(query.after));
+    const suffix = parameters.size === 0 ? "" : `?${parameters.toString()}`;
+    return this.requestJson(
+      `/v1/admin/configurations/${safelyEncodeIdentifier(configurationId)}/versions${suffix}`,
+      { method: "GET", signal },
+      configurationHistoryResponseSchema,
+      "user",
+    );
+  }
+
+  public async configurationSurfaces(
+    signal?: AbortSignal,
+  ): Promise<readonly ConfigurationSurface[]> {
+    const result = await this.requestJson(
+      "/v1/admin/configuration-surfaces",
+      { method: "GET", signal },
+      configurationSurfacesSchema,
+      "user",
+    );
+    return result.items;
+  }
+
   public async listDescriptors(
     kind: ConfigurationDescriptor["kind"],
     signal?: AbortSignal,
@@ -275,6 +431,291 @@ export class CaseWeaverApiClient {
     );
   }
 
+  public async createSecretReference(
+    input: SecretReferenceRegistrationInput,
+    signal?: AbortSignal,
+  ): Promise<AdminDetail> {
+    return this.requestJson(
+      "/v1/admin/secret-references",
+      {
+        method: "POST",
+        signal,
+        body: JSON.stringify(input),
+      },
+      adminDetailSchema,
+      "user",
+    );
+  }
+
+  public async createKnowledgeSourceDraft(
+    input: KnowledgeSourceDraftInput,
+    signal?: AbortSignal,
+  ): Promise<AdminDetail> {
+    return this.requestJson(
+      "/v1/admin/knowledge-sources/drafts",
+      { method: "POST", signal, body: JSON.stringify(input) },
+      adminDetailSchema,
+      "user",
+    );
+  }
+
+  public async createKnowledgeScheduleDraft(
+    input: KnowledgeScheduleDraftInput,
+    signal?: AbortSignal,
+  ): Promise<AdminDetail> {
+    return this.requestJson(
+      "/v1/admin/schedules/drafts",
+      { method: "POST", signal, body: JSON.stringify(input) },
+      adminDetailSchema,
+      "user",
+    );
+  }
+
+  public async createPublicationProfileDraft(
+    input: PublicationProfileDraftInput,
+    signal?: AbortSignal,
+  ): Promise<AdminDetail> {
+    return this.requestJson(
+      "/v1/admin/publication-profiles/drafts",
+      { method: "POST", signal, body: JSON.stringify(input) },
+      adminDetailSchema,
+      "user",
+    );
+  }
+
+  public async createWebhookEndpointDraft(
+    input: WebhookEndpointDraftInput,
+    signal?: AbortSignal,
+  ): Promise<AdminDetail> {
+    return this.requestJson(
+      "/v1/admin/webhook-endpoints/drafts",
+      { method: "POST", signal, body: JSON.stringify(input) },
+      adminDetailSchema,
+      "user",
+    );
+  }
+
+  public async transitionPublicationProfile(
+    profileId: string,
+    input: ConfigurationLifecycleTransitionInput,
+    signal?: AbortSignal,
+  ): Promise<AdminDetail> {
+    return this.requestJson(
+      `/v1/admin/publication-profiles/${safelyEncodeIdentifier(profileId)}/lifecycle`,
+      { method: "POST", signal, body: JSON.stringify(input) },
+      adminDetailSchema,
+      "user",
+    );
+  }
+
+  public async transitionWebhookEndpoint(
+    endpointId: string,
+    input: ConfigurationLifecycleTransitionInput,
+    signal?: AbortSignal,
+  ): Promise<AdminDetail> {
+    return this.requestJson(
+      `/v1/admin/webhook-endpoints/${safelyEncodeIdentifier(endpointId)}/lifecycle`,
+      { method: "POST", signal, body: JSON.stringify(input) },
+      adminDetailSchema,
+      "user",
+    );
+  }
+
+  public async platformLinks(
+    signal?: AbortSignal,
+  ): Promise<PlatformLinkConfiguration> {
+    return this.requestJson(
+      "/v1/admin/platform/links",
+      { method: "GET", signal },
+      platformLinkConfigurationSchema,
+      "user",
+    );
+  }
+
+  public async savePlatformLinks(
+    input: PlatformLinkUpdateInput,
+    signal?: AbortSignal,
+  ): Promise<AdminDetail> {
+    return this.requestJson(
+      "/v1/admin/platform/links",
+      { method: "PUT", signal, body: JSON.stringify(input) },
+      adminDetailSchema,
+      "user",
+    );
+  }
+
+  public async createAiBindingDraft(
+    input: AiBindingDraftRequest,
+    signal?: AbortSignal,
+  ): Promise<AdminDetail> {
+    return this.requestJson(
+      "/v1/admin/ai/bindings/drafts",
+      { method: "POST", signal, body: JSON.stringify(input) },
+      adminDetailSchema,
+      "user",
+    );
+  }
+
+  public async transitionAiBinding(
+    bindingId: string,
+    input: ConfigurationLifecycleTransitionInput,
+    signal?: AbortSignal,
+  ): Promise<AdminDetail> {
+    return this.requestJson(
+      `/v1/admin/ai/bindings/${safelyEncodeIdentifier(bindingId)}/lifecycle`,
+      { method: "POST", signal, body: JSON.stringify(input) },
+      adminDetailSchema,
+      "user",
+    );
+  }
+
+  public async createAiBindingVersionDraft(
+    bindingId: string,
+    input: AiBindingDraftRequest &
+      Readonly<{ readonly expectedRevision: number }>,
+    signal?: AbortSignal,
+  ): Promise<AdminDetail> {
+    return this.requestJson(
+      `/v1/admin/ai/bindings/${safelyEncodeIdentifier(bindingId)}/versions/drafts`,
+      { method: "POST", signal, body: JSON.stringify(input) },
+      adminDetailSchema,
+      "user",
+    );
+  }
+
+  public async setAiRoleDefault(
+    role: AiBindingDraftRequest["role"],
+    input: AiRoleDefaultRequest,
+    signal?: AbortSignal,
+  ): Promise<AdminDetail> {
+    return this.requestJson(
+      `/v1/admin/ai/role-defaults/${safelyEncodeIdentifier(role)}`,
+      { method: "PUT", signal, body: JSON.stringify(input) },
+      adminDetailSchema,
+      "user",
+    );
+  }
+
+  public async createAiPriceOverride(
+    input: AiPriceOverrideRequest,
+    signal?: AbortSignal,
+  ): Promise<AdminDetail> {
+    return this.requestJson(
+      "/v1/admin/ai/pricing-overrides",
+      { method: "POST", signal, body: JSON.stringify(input) },
+      adminDetailSchema,
+      "user",
+    );
+  }
+
+  public async replaceAiBudget(
+    input: AiBudgetRequest,
+    signal?: AbortSignal,
+  ): Promise<AdminDetail> {
+    return this.requestJson(
+      "/v1/admin/ai/budgets",
+      { method: "PUT", signal, body: JSON.stringify(input) },
+      adminDetailSchema,
+      "user",
+    );
+  }
+
+  public async providerCapabilityTestOperations(
+    providerInstanceId: string,
+    signal?: AbortSignal,
+  ) {
+    return this.requestJson(
+      `/v1/admin/ai/provider-instances/${safelyEncodeIdentifier(providerInstanceId)}/capability-tests`,
+      { method: "GET", signal },
+      providerCapabilityTestOperationsSchema,
+      "user",
+    );
+  }
+
+  public async previewProviderCapabilityTest(
+    providerInstanceId: string,
+    testOperation: string,
+    signal?: AbortSignal,
+  ): Promise<ProviderCapabilityTestPreview> {
+    return this.requestJson(
+      `/v1/admin/ai/provider-instances/${safelyEncodeIdentifier(providerInstanceId)}/capability-tests/${safelyEncodeIdentifier(testOperation)}/previews`,
+      { method: "POST", signal },
+      providerCapabilityTestPreviewSchema,
+      "user",
+    );
+  }
+
+  public async runProviderCapabilityTest(
+    providerInstanceId: string,
+    testOperation: string,
+    confirmationId: string,
+    signal?: AbortSignal,
+  ): Promise<ProviderCapabilityTestResult> {
+    return this.requestJson(
+      `/v1/admin/ai/provider-instances/${safelyEncodeIdentifier(providerInstanceId)}/capability-tests/${safelyEncodeIdentifier(testOperation)}/executions`,
+      {
+        method: "POST",
+        signal,
+        body: JSON.stringify({
+          confirmationId: safelyEncodeIdentifier(confirmationId),
+        }),
+      },
+      providerCapabilityTestResultSchema,
+      "user",
+    );
+  }
+
+  public async transitionKnowledgeSource(
+    sourceId: string,
+    input: ConfigurationLifecycleTransitionInput,
+    signal?: AbortSignal,
+  ): Promise<AdminDetail> {
+    return this.requestJson(
+      `/v1/admin/knowledge-sources/${safelyEncodeIdentifier(sourceId)}/lifecycle`,
+      { method: "POST", signal, body: JSON.stringify(input) },
+      adminDetailSchema,
+      "user",
+    );
+  }
+
+  public async transitionKnowledgeSchedule(
+    scheduleId: string,
+    input: ConfigurationLifecycleTransitionInput,
+    signal?: AbortSignal,
+  ): Promise<AdminDetail> {
+    return this.requestJson(
+      `/v1/admin/schedules/${safelyEncodeIdentifier(scheduleId)}/lifecycle`,
+      { method: "POST", signal, body: JSON.stringify(input) },
+      adminDetailSchema,
+      "user",
+    );
+  }
+
+  public async workspaceRoleAssignment(
+    principalId: string,
+    signal?: AbortSignal,
+  ): Promise<WorkspaceRoleAssignment> {
+    return this.requestJson(
+      `/v1/admin/role-assignments/${safelyEncodeIdentifier(principalId)}/assignment`,
+      { method: "GET", signal },
+      workspaceRoleAssignmentSchema,
+      "user",
+    );
+  }
+
+  public async replaceWorkspaceRoles(
+    principalId: string,
+    input: ReplaceWorkspaceRolesInput,
+    signal?: AbortSignal,
+  ): Promise<AdminDetail> {
+    return this.requestJson(
+      `/v1/admin/role-assignments/${safelyEncodeIdentifier(principalId)}`,
+      { method: "PUT", signal, body: JSON.stringify(input) },
+      adminDetailSchema,
+      "user",
+    );
+  }
+
   public async previewAction(
     action: AdminActionName,
     target: { readonly resource: AdminResourceName; readonly id?: string },
@@ -300,6 +741,33 @@ export class CaseWeaverApiClient {
     );
   }
 
+  /** A privacy reason is accepted only by its dedicated server route. It is
+   * not logged, placed in a URL, or retained by browser state after the
+   * preview request reaches a terminal result. */
+  public async previewPrivacyPurge(
+    caseSnapshotId: string,
+    reason: string,
+    signal?: AbortSignal,
+  ): Promise<ActionPreview> {
+    if (reason.trim().length < 1 || reason.length > 4_000) {
+      throw new PublicApiError(
+        "invalid",
+        "privacy.reason.invalid",
+        "Provide a concise reason for the privacy purge.",
+      );
+    }
+    return this.requestJson(
+      `/v1/admin/privacy/case-snapshots/${safelyEncodeIdentifier(caseSnapshotId)}/purge`,
+      {
+        method: "POST",
+        signal,
+        body: JSON.stringify({ reason: reason.trim() }),
+      },
+      actionPreviewSchema,
+      "user",
+    );
+  }
+
   public async executeAction(
     previewId: string,
     signal?: AbortSignal,
@@ -314,6 +782,71 @@ export class CaseWeaverApiClient {
       actionOutcomeSchema,
       "user",
     );
+  }
+
+  /** Starts a bounded server-side diagnostic export; no diagnostic data passes
+   * through this command response. */
+  public async requestDiagnosticExport(
+    signal?: AbortSignal,
+  ): Promise<DiagnosticExportStatus> {
+    return this.requestJson(
+      "/v1/admin/diagnostics/exports",
+      { method: "POST", signal },
+      diagnosticExportStatusSchema,
+      "user",
+    );
+  }
+
+  public async diagnosticExportStatus(
+    exportId: string,
+    signal?: AbortSignal,
+  ): Promise<DiagnosticExportStatus> {
+    return this.requestJson(
+      `/v1/admin/diagnostics/exports/${safelyEncodeIdentifier(exportId)}`,
+      { method: "GET", signal },
+      diagnosticExportStatusSchema,
+      "user",
+    );
+  }
+
+  /** Reads a private export only through the audited API download endpoint. */
+  public async downloadDiagnosticExport(
+    exportId: string,
+    signal?: AbortSignal,
+  ): Promise<Blob> {
+    const actionId = this.createActionId();
+    const headers = new Headers({ Accept: "application/json" });
+    headers.set("X-CaseWeaver-UI-Action-ID", actionId);
+    headers.set("X-CaseWeaver-Correlation-ID", actionId);
+    headers.set("X-CaseWeaver-Request-Mode", "user");
+    let response: Response;
+    try {
+      response = await this.fetchImplementation(
+        this.endpointUrl(
+          `/v1/admin/diagnostics/exports/${safelyEncodeIdentifier(exportId)}/download`,
+        ),
+        { method: "GET", signal, headers, credentials: "include" },
+      );
+    } catch (error: unknown) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        throw new PublicApiError(
+          "cancelled",
+          "request.cancelled",
+          "The request was cancelled.",
+        );
+      }
+      throw genericFailure();
+    }
+    if (!response.ok) {
+      let payload: unknown;
+      try {
+        payload = await response.json();
+      } catch {
+        payload = undefined;
+      }
+      throw parsePublicError(response.status, payload);
+    }
+    return response.blob();
   }
 
   private endpointUrl(endpoint: string): URL {
@@ -359,7 +892,10 @@ export class CaseWeaverApiClient {
     headers.set("X-CaseWeaver-Correlation-ID", actionId);
     headers.set("X-CaseWeaver-Request-Mode", mode);
     if (isMutation) {
-      headers.set("Content-Type", "application/json");
+      // An empty POST (notably logout) is not JSON. Declaring it as such makes
+      // strict HTTP parsers reject the request before the CSRF/session boundary.
+      if (init.body !== undefined)
+        headers.set("Content-Type", "application/json");
       headers.set("Idempotency-Key", actionId);
       if (this.csrfToken !== undefined)
         headers.set("X-CSRF-Token", this.csrfToken);

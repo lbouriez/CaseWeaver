@@ -37,7 +37,7 @@ export interface CaseAnalysisSchedulerRuntimeDependencies {
 }
 
 /**
- * PBI-012 scheduling composition only persists `analysis.trigger.v1` work.
+ * Case-analysis scheduling composition only persists `analysis.trigger.v1` work.
  * It deliberately has no connector, renderer, or worker dependency.
  */
 export function createCaseAnalysisSchedulerRuntime(

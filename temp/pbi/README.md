@@ -29,8 +29,9 @@ temporary source material for GitHub Issues and should be removed after issue mi
 | 013 | Production operations | Completed | 012 | None |
 | 014 | MCP foundation | Deferred | 013 | Start only when MCP is reprioritized. |
 | 015 | Evidence-aware chat service | Deferred | 003, 009, 014 | Start only after PBI-014 is completed and chat is reprioritized. |
-| 016 | React-Admin operator console | In progress | 013 | Frontend is complete; OAuth/session, administration APIs, persistence, and end-to-end integration remain. See PBI-016. |
-| 017 | Docker-first self-hosting and delivery | Pending | 013, 016 | Blocked on PBI-016 backend/API completion. |
+| 016 | React-Admin operator console | Completed | 013 | None. Secure cookie-session administration APIs, immutable configuration, audits, and validated static-console integration are delivered. See PBI-016. |
+| 017 | Docker-first self-hosting and delivery | Pending | 013, 016 | Release images, TLS edge, and CI delivery remain planned; PBI-016 is accepted. |
+| 018 | Documentation portal and operator guide | Pending | 013, 016, 017 | Docusaurus portal, task-oriented operator/developer guides, Rekindle-derived presentation and translation workflow, and clearly separated current/future capability documentation. |
 
 PBIs should be implemented in order unless their declared dependencies are complete.
 Each PBI must satisfy `.features/11-engineering-standards.md`.
@@ -54,8 +55,9 @@ Each PBI must satisfy `.features/11-engineering-standards.md`.
 | 013 | `packages/observability`, `apps/standalone`, `deploy/docker`, `tests/integration`, `tests/e2e` |
 | 014 | `apps/mcp` |
 | 015 | `packages/chat` |
-| 016 | `apps/admin`, `apps/api/src/modules/pbi-016`, `packages/administration`, `infrastructure/postgres/src/administration`, `tests/contract/administration`, `tests/integration`, `tests/e2e` |
+| 016 | `apps/admin`, `apps/api/src/modules/auth`, `apps/api/src/modules/administration`, `packages/administration`, `infrastructure/postgres/src/administration`, `tests/contract/administration`, `tests/integration`, `tests/e2e` |
 | 017 | `deploy/docker`, `.github/workflows`, `tests/e2e/deployment`, deployment/operator documentation; coordinated integration with `apps/admin`, `apps/api`, and `apps/standalone` |
+| 018 | `website`, repository/operator documentation, and documentation links; coordinated review with PBI 003, 016, and 017 owners |
 
 Agents may touch shared contracts only when their PBI owns the contract or after
 coordinating the change with the owning PBI.
@@ -69,8 +71,8 @@ Parallel agents own capability-specific subpaths rather than entire shared folde
 | PostgreSQL migrations | Each PBI adds a uniquely numbered migration and capability repository under `infrastructure/postgres/src/<capability>`; PBI 002 owns transaction/migration frameworks |
 | AI contract tests | PBI 003 owns `tests/contract/ai` |
 | Connector contract tests | PBI 006 owns `tests/contract/connectors` |
-| Worker handlers | Feature PBI owns `apps/worker/src/modules/pbi-<id>`; one designated integration owner updates the module registry per delivery wave |
-| API routes | Feature PBI owns `apps/api/src/modules/pbi-<id>`; PBI 001 owns transport/bootstrap conventions |
+| Worker handlers | Feature PBI owns a domain-named module under `apps/worker/src/modules` (for example `analysis`, `publication`, or `operations`); one designated integration owner updates the module registry per delivery wave |
+| API routes | Feature PBI owns a domain-named module under `apps/api/src/modules`; PBI 001 owns transport/bootstrap conventions |
 | Scheduler jobs | PBI 004 owns knowledge schedule modules; PBI 012 owns case-analysis schedule modules |
 | Composition roots | PBI 001 establishes registries; PBI 013 owns final distributed/standalone integration and production profiles |
 | Administration contracts | PBI 016 owns `packages/administration`; feature packages retain their domain policy and immutable configuration contracts |

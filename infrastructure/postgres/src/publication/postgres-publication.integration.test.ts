@@ -169,7 +169,7 @@ async function seedCompletedAnalysis(): Promise<void> {
 
 beforeEach(async () => resetDatabase());
 
-describe("PBI-012 PostgreSQL publication and webhook persistence", () => {
+describe("PostgreSQL publication and webhook persistence", () => {
   it("rejects a publication profile version without an active destination capability", async () => {
     await pool.query("INSERT INTO workspaces (id) VALUES ('workspace-1')");
     await pool.query(

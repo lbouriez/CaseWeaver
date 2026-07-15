@@ -55,7 +55,11 @@ describe("worker command runtime", () => {
     const envelope = createEnvelope({
       ...envelopeMetadata,
       type: "knowledge.synchronize.v1",
-      payload: { sourceId: "knowledge-source-1" },
+      payload: {
+        sourceId: "knowledge-source-1",
+        configurationVersion: "knowledge-source-version-1",
+        trigger: "manual",
+      },
     });
     const signal = new AbortController().signal;
 
@@ -75,7 +79,11 @@ describe("worker command runtime", () => {
     const envelope = createEnvelope({
       ...envelopeMetadata,
       type: "knowledge.full-rescan.v1",
-      payload: { sourceId: "knowledge-source-1" },
+      payload: {
+        sourceId: "knowledge-source-1",
+        configurationVersion: "knowledge-source-version-1",
+        trigger: "manual",
+      },
     });
     const signal = new AbortController().signal;
 
@@ -146,14 +154,14 @@ describe("worker command runtime", () => {
     ).rejects.toMatchObject({ code: "worker.unsupportedEnvelope" });
   });
 
-  it("routes retention purge through the PBI-013 durable handler", async () => {
+  it("routes retention purge through the durable operations handler", async () => {
     const purge = vi.fn(async () => {});
     const runtime = createWorkerRuntime(
       createWorkerCommandDispatcher({
         synchronize: { handle: async () => {} },
         fullRescan: { handle: async () => {} },
         analysis: { execute: { handle: async () => {} } },
-        pbi013: {
+        operations: {
           retention: {
             reap: { handle: async () => {} },
             purge: { handle: purge },
@@ -171,5 +179,28 @@ describe("worker command runtime", () => {
     await runtime.consume(envelope, signal);
 
     expect(purge).toHaveBeenCalledWith(envelope, signal);
+  });
+
+  it("routes the opaque diagnostic export command only when its handler is composed", async () => {
+    const generate = vi.fn(async () => {});
+    const runtime = createWorkerRuntime(
+      createWorkerCommandDispatcher({
+        synchronize: { handle: async () => {} },
+        fullRescan: { handle: async () => {} },
+        analysis: { execute: { handle: async () => {} } },
+        diagnostics: { generate: { handle: generate } },
+      }),
+    );
+    const envelope = createEnvelope({
+      ...envelopeMetadata,
+      id: outboxEnvelopeId("outbox-diagnostic-export-1"),
+      type: "diagnostics.export.generate.v1",
+      payload: { exportId: "diagnostic-export-1" },
+    });
+    const signal = new AbortController().signal;
+
+    await runtime.consume(envelope, signal);
+
+    expect(generate).toHaveBeenCalledWith(envelope, signal);
   });
 });

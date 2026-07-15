@@ -20,7 +20,7 @@ For each PBI:
 3. Add deterministic fakes/fixtures.
 4. Implement vendor-neutral policy.
 5. Implement outer adapter.
-6. Register through the PBI-owned application module.
+6. Register through the domain-named application module owned by the PBI.
 7. Add targeted tests from `22-testing-strategy.md`.
 8. Validate the measurable PBI acceptance criteria.
 9. Update feature/package documentation when behavior differs.
@@ -32,6 +32,8 @@ Do not scaffold every future adapter before the first vertical slice works.
 Only dispatch work that has exclusive file ownership and no unresolved dependency:
 
 - Give each subagent the complete PBI, relevant feature guides, and allowed paths.
+- Use domain names for production paths, exports, dependency fields, and test names.
+  PBI identifiers belong only in delivery documentation and immutable migration history.
 - One subagent owns one cohesive module or adapter.
 - The parent/integration agent owns shared registries, root configuration, and final
   validation.

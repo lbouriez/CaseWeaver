@@ -103,7 +103,7 @@ export interface PreparedAttachment {
 }
 
 /**
- * PBI-004 requests attachment preparation through a port. Attachment runtimes own
+ * Knowledge ingestion requests attachment preparation through a port. Attachment runtimes own
  * fetching and parsing and are never imported into knowledge ingestion.
  */
 export interface AttachmentPreparationPort {

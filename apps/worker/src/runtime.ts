@@ -23,6 +23,8 @@ export type PublicationReconcileCommand =
 export type AnalysisCompletedEvent = EnvelopeFor<"analysis.completed.v1">;
 export type RetentionReapCommand = EnvelopeFor<"retention.reap.v1">;
 export type RetentionPurgeCommand = EnvelopeFor<"retention.purge.v1">;
+export type DiagnosticsExportGenerateCommand =
+  EnvelopeFor<"diagnostics.export.generate.v1">;
 
 export interface AnalysisCommandHandlers {
   readonly execute: WorkerCommandHandler<AnalysisExecuteCommand>;
@@ -33,23 +35,28 @@ export interface PublicationCommandHandlers {
   readonly reconcile: WorkerCommandHandler<PublicationReconcileCommand>;
 }
 
-export interface Pbi012CommandHandlers {
+export interface PublicationWorkflowCommandHandlers {
   readonly trigger: WorkerCommandHandler<AnalysisTriggerCommand>;
-  readonly publication: PublicationCommandHandlers;
+  readonly delivery: PublicationCommandHandlers;
   readonly analysisCompleted: WorkerCommandHandler<AnalysisCompletedEvent>;
 }
 
-export interface Pbi013CommandHandlers {
+export interface OperationsCommandHandlers {
   readonly retention: {
     readonly reap: WorkerCommandHandler<RetentionReapCommand>;
     readonly purge: WorkerCommandHandler<RetentionPurgeCommand>;
   };
 }
 
+export interface DiagnosticsCommandHandlers {
+  readonly generate: WorkerCommandHandler<DiagnosticsExportGenerateCommand>;
+}
+
 export interface WorkerCommandHandlers extends KnowledgeCommandHandlers {
   readonly analysis: AnalysisCommandHandlers;
-  readonly pbi012?: Pbi012CommandHandlers;
-  readonly pbi013?: Pbi013CommandHandlers;
+  readonly publication?: PublicationWorkflowCommandHandlers;
+  readonly operations?: OperationsCommandHandlers;
+  readonly diagnostics?: DiagnosticsCommandHandlers;
 }
 
 export interface WorkerCommandDispatcher {
@@ -99,40 +106,49 @@ export function createWorkerCommandDispatcher(
           await handlers.analysis.execute.handle(envelope, signal);
           return;
         case "analysis.trigger.v1":
-          if (handlers.pbi012 === undefined) {
+          if (handlers.publication === undefined) {
             throw new UnsupportedWorkerEnvelopeError(envelope.type);
           }
-          await handlers.pbi012.trigger.handle(envelope, signal);
+          await handlers.publication.trigger.handle(envelope, signal);
           return;
         case "publication.execute.v1":
-          if (handlers.pbi012 === undefined) {
+          if (handlers.publication === undefined) {
             throw new UnsupportedWorkerEnvelopeError(envelope.type);
           }
-          await handlers.pbi012.publication.execute.handle(envelope, signal);
+          await handlers.publication.delivery.execute.handle(envelope, signal);
           return;
         case "publication.reconcile.v1":
-          if (handlers.pbi012 === undefined) {
+          if (handlers.publication === undefined) {
             throw new UnsupportedWorkerEnvelopeError(envelope.type);
           }
-          await handlers.pbi012.publication.reconcile.handle(envelope, signal);
+          await handlers.publication.delivery.reconcile.handle(
+            envelope,
+            signal,
+          );
           return;
         case "analysis.completed.v1":
-          if (handlers.pbi012 === undefined) {
+          if (handlers.publication === undefined) {
             throw new UnsupportedWorkerEnvelopeError(envelope.type);
           }
-          await handlers.pbi012.analysisCompleted.handle(envelope, signal);
+          await handlers.publication.analysisCompleted.handle(envelope, signal);
           return;
         case "retention.reap.v1":
-          if (handlers.pbi013 === undefined) {
+          if (handlers.operations === undefined) {
             throw new UnsupportedWorkerEnvelopeError(envelope.type);
           }
-          await handlers.pbi013.retention.reap.handle(envelope, signal);
+          await handlers.operations.retention.reap.handle(envelope, signal);
           return;
         case "retention.purge.v1":
-          if (handlers.pbi013 === undefined) {
+          if (handlers.operations === undefined) {
             throw new UnsupportedWorkerEnvelopeError(envelope.type);
           }
-          await handlers.pbi013.retention.purge.handle(envelope, signal);
+          await handlers.operations.retention.purge.handle(envelope, signal);
+          return;
+        case "diagnostics.export.generate.v1":
+          if (handlers.diagnostics === undefined) {
+            throw new UnsupportedWorkerEnvelopeError(envelope.type);
+          }
+          await handlers.diagnostics.generate.handle(envelope, signal);
           return;
         case "knowledge.synchronize.v1":
           await handlers.synchronize.handle(envelope, signal);

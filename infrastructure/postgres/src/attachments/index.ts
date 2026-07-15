@@ -1126,8 +1126,8 @@ export interface PostgresAttachmentPersistenceConfiguration {
 }
 
 /**
- * Creates persistence composition only. PBI-008 has no durable command input, so
- * worker invocation deliberately waits for PBI-011/012 orchestration ownership.
+ * Creates persistence composition only. Attachment persistence has no durable command
+ * input, so worker invocation belongs to analysis/publication orchestration.
  */
 export function createPostgresAttachmentPersistence(
   configuration: PostgresAttachmentPersistenceConfiguration,

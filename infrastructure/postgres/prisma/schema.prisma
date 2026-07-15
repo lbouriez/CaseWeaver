@@ -17,74 +17,88 @@ model InstallationState {
 }
 
 model Workspace {
-  id                    String                    @id
-  createdAt             DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
-  principals            Principal[]
-  roleAssignments       WorkspaceRoleAssignment[]
-  credentials           CredentialRegistration[]
-  connectors            ConnectorRegistration[]
-  externalReferences    ExternalReference[]
-  caseSnapshots         CaseSnapshot[]
-  knowledgeItems        KnowledgeItem[]
-  attachments           Attachment[]
-  attachmentBlobs       AttachmentBlob[]
-  attachmentDerivatives AttachmentDerivative[]
-  attachmentDerivativeSources AttachmentDerivativeSource[]
-  knowledgeCollections  KnowledgeCollection[]
-  knowledgeSources      KnowledgeSource[]
-  knowledgeSourceStates KnowledgeSourceState[]
-  knowledgeDocuments    KnowledgeDocument[]
-  knowledgeRevisions    KnowledgeRevision[]
-  knowledgeChunks       KnowledgeChunk[]
-  knowledgeEmbeddingCacheEntries KnowledgeEmbeddingCacheEntry[]
-  knowledgeEmbeddingAllocations KnowledgeEmbeddingAllocation[]
-  knowledgeSchedules    KnowledgeSchedule[]
-  knowledgeScheduleLeases KnowledgeScheduleLease[]
-  knowledgeScheduleOccurrences KnowledgeScheduleOccurrence[]
-  knowledgeScheduleCommands KnowledgeScheduleCommand[]
-  retrievalSnapshots    RetrievalSnapshot[]
-  retrievalSnapshotEvidence RetrievalSnapshotEvidence[]
-  analysisProfiles      AnalysisProfile[]
-  analysisProfileVersions AnalysisProfileVersion[]
-  analysisIdentities    AnalysisIdentity[]
-  analysisJobs          AnalysisJob[]
-  analysisAttempts      AnalysisAttempt[]
-  analysisResults       AnalysisResult[]
-  evidence              Evidence[]
-  publicationIntents    PublicationIntent[]
-  publicationAttempts   PublicationAttempt[]
-  publicationProfiles   PublicationProfile[]
-  publicationProfileVersions PublicationProfileVersion[]
-  webhookInboxes        WebhookInbox[]
-  caseAnalysisSchedules CaseAnalysisSchedule[]
-  caseAnalysisScheduleLeases CaseAnalysisScheduleLease[]
+  id                              String                           @id
+  createdAt                       DateTime                         @default(now()) @map("created_at") @db.Timestamptz(6)
+  principals                      Principal[]
+  roleAssignments                 WorkspaceRoleAssignment[]
+  roleAssignmentState             WorkspaceRoleAssignmentState?
+  roleAssignmentRevisions         WorkspaceRoleAssignmentRevision[]
+  roleAssignmentMutations         WorkspaceRoleAssignmentMutation[]
+  credentials                     CredentialRegistration[]
+  connectors                      ConnectorRegistration[]
+  externalReferences              ExternalReference[]
+  caseSnapshots                   CaseSnapshot[]
+  knowledgeItems                  KnowledgeItem[]
+  attachments                     Attachment[]
+  attachmentBlobs                 AttachmentBlob[]
+  attachmentDerivatives           AttachmentDerivative[]
+  attachmentDerivativeSources     AttachmentDerivativeSource[]
+  knowledgeCollections            KnowledgeCollection[]
+  knowledgeSources                KnowledgeSource[]
+  knowledgeSourceStates           KnowledgeSourceState[]
+  knowledgeDocuments              KnowledgeDocument[]
+  knowledgeRevisions              KnowledgeRevision[]
+  knowledgeChunks                 KnowledgeChunk[]
+  knowledgeEmbeddingCacheEntries  KnowledgeEmbeddingCacheEntry[]
+  knowledgeEmbeddingAllocations   KnowledgeEmbeddingAllocation[]
+  knowledgeSchedules              KnowledgeSchedule[]
+  knowledgeScheduleLeases         KnowledgeScheduleLease[]
+  knowledgeScheduleOccurrences    KnowledgeScheduleOccurrence[]
+  knowledgeScheduleCommands       KnowledgeScheduleCommand[]
+  retrievalSnapshots              RetrievalSnapshot[]
+  retrievalSnapshotEvidence       RetrievalSnapshotEvidence[]
+  analysisProfiles                AnalysisProfile[]
+  analysisProfileVersions         AnalysisProfileVersion[]
+  analysisIdentities              AnalysisIdentity[]
+  analysisJobs                    AnalysisJob[]
+  analysisAttempts                AnalysisAttempt[]
+  analysisResults                 AnalysisResult[]
+  evidence                        Evidence[]
+  publicationIntents              PublicationIntent[]
+  publicationAttempts             PublicationAttempt[]
+  publicationProfiles             PublicationProfile[]
+  publicationProfileVersions      PublicationProfileVersion[]
+  webhookInboxes                  WebhookInbox[]
+  caseAnalysisSchedules           CaseAnalysisSchedule[]
+  caseAnalysisScheduleLeases      CaseAnalysisScheduleLease[]
   caseAnalysisScheduleOccurrences CaseAnalysisScheduleOccurrence[]
-  auditEvents           AuditEvent[]
-  idempotencyRecords    IdempotencyRecord[]
-  inboxMessages         InboxMessage[]
-  outboxEnvelopes       OutboxEnvelope[]
-  resourceLeases        ResourceLease[]
+  auditEvents                     AuditEvent[]
+  idempotencyRecords              IdempotencyRecord[]
+  inboxMessages                   InboxMessage[]
+  outboxEnvelopes                 OutboxEnvelope[]
+  resourceLeases                  ResourceLease[]
+  administrationConfigurations    AdministrationConfiguration[]
+  administrationConfigurationChangeOutbox AdministrationConfigurationChangeOutbox[]
+  administrationAiConfigurationChangeOutbox AdministrationAiConfigurationChangeOutbox[]
+  administrationActionPreviews          AdministrationActionPreview[]
+  administrationDiagnosticExports       AdministrationDiagnosticExport[]
+  administrationSessions          AdministrationSession[]
+  administrationLoginTransactions AdministrationLoginTransaction[]
+  oidcIdentityMappings            OidcIdentityMapping[]
 
   @@map("workspaces")
 }
 
 model Principal {
-  id                       String                    @id
-  workspaceId              String                    @map("workspace_id")
-  createdAt                DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
-  workspace                Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  roleAssignments          WorkspaceRoleAssignment[]
-  tombstonedCaseSnapshots  CaseSnapshot[]            @relation("CaseSnapshotTombstonedBy")
+  id                      String                    @id
+  workspaceId             String                    @map("workspace_id")
+  createdAt               DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace               Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  roleAssignments         WorkspaceRoleAssignment[]
+  roleAssignmentRevisionsAsTarget WorkspaceRoleAssignmentRevision[] @relation("WorkspaceRoleAssignmentRevisionTarget")
+  roleAssignmentRevisionsAsActor  WorkspaceRoleAssignmentRevision[] @relation("WorkspaceRoleAssignmentRevisionActor")
+  roleAssignmentMutations         WorkspaceRoleAssignmentMutation[]
+  tombstonedCaseSnapshots CaseSnapshot[]            @relation("CaseSnapshotTombstonedBy")
 
   @@unique([workspaceId, id])
   @@map("principals")
 }
 
 model WorkspaceRoleAssignment {
-  workspaceId String   @map("workspace_id")
-  principalId String   @map("principal_id")
+  workspaceId String    @map("workspace_id")
+  principalId String    @map("principal_id")
   role        String
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   principal   Principal @relation(fields: [workspaceId, principalId], references: [workspaceId, id], onDelete: Restrict)
 
@@ -92,13 +106,61 @@ model WorkspaceRoleAssignment {
   @@map("workspace_role_assignments")
 }
 
+/** Workspace-wide optimistic concurrency boundary for membership administration. */
+model WorkspaceRoleAssignmentState {
+  workspaceId String    @id @map("workspace_id")
+  revision    Int       @default(0)
+  updatedAt   DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@map("workspace_role_assignment_states")
+}
+
+/** Immutable membership-change history; roles are safe code-owned role names only. */
+model WorkspaceRoleAssignmentRevision {
+  id                String    @id
+  workspaceId       String    @map("workspace_id")
+  revision          Int
+  targetPrincipalId String    @map("target_principal_id")
+  actorPrincipalId  String    @map("actor_principal_id")
+  previousRoles     Json      @map("previous_roles")
+  currentRoles      Json      @map("current_roles")
+  occurredAt        DateTime  @map("occurred_at") @db.Timestamptz(6)
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  targetPrincipal   Principal @relation("WorkspaceRoleAssignmentRevisionTarget", fields: [workspaceId, targetPrincipalId], references: [workspaceId, id], onDelete: Restrict)
+  actorPrincipal    Principal @relation("WorkspaceRoleAssignmentRevisionActor", fields: [workspaceId, actorPrincipalId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, revision])
+  @@index([workspaceId, targetPrincipalId, revision])
+  @@map("workspace_role_assignment_revisions")
+}
+
+/** Durable replay result for membership mutations; no browser-controlled actor identity is stored. */
+model WorkspaceRoleAssignmentMutation {
+  workspaceId       String    @map("workspace_id")
+  operation         String
+  keyDigest         String    @map("key_digest")
+  requestDigest     String    @map("request_digest")
+  targetPrincipalId String    @map("target_principal_id")
+  revision          Int
+  previousRoles     Json      @map("previous_roles")
+  currentRoles      Json      @map("current_roles")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  targetPrincipal   Principal @relation(fields: [workspaceId, targetPrincipalId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@id([workspaceId, operation, keyDigest])
+  @@map("workspace_role_assignment_mutations")
+}
+
 model CredentialRegistration {
-  id              String   @id
-  workspaceId     String   @map("workspace_id")
-  secretReference String   @map("secret_reference")
+  id              String    @id
+  workspaceId     String    @map("workspace_id")
+  secretReference String    @map("secret_reference")
   lifecycle       String
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
   workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
 
   @@unique([workspaceId, secretReference])
@@ -106,27 +168,27 @@ model CredentialRegistration {
 }
 
 model ConnectorRegistration {
-  id           String                @id
-  workspaceId  String                @map("workspace_id")
-  lifecycle    String
-  version      Int                   @default(1)
-  createdAt    DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt    DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
-  workspace    Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  capabilities ConnectorCapability[]
-  references   ExternalReference[]
-  knowledgeSources KnowledgeSource[] @relation("KnowledgeSourceConnector")
+  id               String                @id
+  workspaceId      String                @map("workspace_id")
+  lifecycle        String
+  version          Int                   @default(1)
+  createdAt        DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace        Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  capabilities     ConnectorCapability[]
+  references       ExternalReference[]
+  knowledgeSources KnowledgeSource[]     @relation("KnowledgeSourceConnector")
 
   @@unique([workspaceId, id])
   @@map("connector_registrations")
 }
 
 model ConnectorCapability {
-  workspaceId              String                @map("workspace_id")
-  connectorRegistrationId  String                @map("connector_registration_id")
-  capability               String
-  createdAt                DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
-  connector                ConnectorRegistration @relation(fields: [workspaceId, connectorRegistrationId], references: [workspaceId, id], onDelete: Restrict)
+  workspaceId             String                @map("workspace_id")
+  connectorRegistrationId String                @map("connector_registration_id")
+  capability              String
+  createdAt               DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  connector               ConnectorRegistration @relation(fields: [workspaceId, connectorRegistrationId], references: [workspaceId, id], onDelete: Restrict)
 
   @@id([workspaceId, connectorRegistrationId, capability])
   @@map("connector_capabilities")
@@ -154,21 +216,21 @@ model ExternalReference {
 }
 
 model CaseSnapshot {
-  id                       String             @id
-  workspaceId              String             @map("workspace_id")
-  externalReferenceId      String             @map("external_reference_id")
-  lifecycle                String
-  snapshotHash             String             @map("snapshot_hash")
-  snapshot                 Json               @default("{}")
-  observedAt               DateTime           @map("observed_at") @db.Timestamptz(6)
-  tombstonedByPrincipalId  String?            @map("tombstoned_by_principal_id")
-  tombstonedAt             DateTime?          @map("tombstoned_at") @db.Timestamptz(6)
-  tombstoneReason          String?            @map("tombstone_reason")
-  createdAt                DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
-  workspace                Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  externalReference        ExternalReference  @relation(fields: [workspaceId, externalReferenceId], references: [workspaceId, id], onDelete: Restrict)
-  tombstonedByPrincipal    Principal?         @relation("CaseSnapshotTombstonedBy", fields: [workspaceId, tombstonedByPrincipalId], references: [workspaceId, id], onDelete: Restrict)
-  analysisIdentities       AnalysisIdentity[]
+  id                      String             @id
+  workspaceId             String             @map("workspace_id")
+  externalReferenceId     String             @map("external_reference_id")
+  lifecycle               String
+  snapshotHash            String             @map("snapshot_hash")
+  snapshot                Json               @default("{}")
+  observedAt              DateTime           @map("observed_at") @db.Timestamptz(6)
+  tombstonedByPrincipalId String?            @map("tombstoned_by_principal_id")
+  tombstonedAt            DateTime?          @map("tombstoned_at") @db.Timestamptz(6)
+  tombstoneReason         String?            @map("tombstone_reason")
+  createdAt               DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace               Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  externalReference       ExternalReference  @relation(fields: [workspaceId, externalReferenceId], references: [workspaceId, id], onDelete: Restrict)
+  tombstonedByPrincipal   Principal?         @relation("CaseSnapshotTombstonedBy", fields: [workspaceId, tombstonedByPrincipalId], references: [workspaceId, id], onDelete: Restrict)
+  analysisIdentities      AnalysisIdentity[]
 
   @@unique([workspaceId, id])
   @@unique([workspaceId, externalReferenceId, snapshotHash])
@@ -192,35 +254,35 @@ model KnowledgeItem {
 }
 
 model KnowledgeCollection {
-  id                      String   @id
-  workspaceId             String   @map("workspace_id")
-  embeddingBindingVersionId String @map("embedding_binding_version_id")
-  embeddingProfileVersion String   @map("embedding_profile_version")
-  dimensions              Int
-  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  workspace               Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  sources                 KnowledgeSource[]
+  id                        String            @id
+  workspaceId               String            @map("workspace_id")
+  embeddingBindingVersionId String            @map("embedding_binding_version_id")
+  embeddingProfileVersion   String            @map("embedding_profile_version")
+  dimensions                Int
+  createdAt                 DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace                 Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  sources                   KnowledgeSource[]
 
   @@unique([workspaceId, id])
   @@map("knowledge_collections")
 }
 
 model KnowledgeSource {
-  id                          String   @id
-  workspaceId                 String   @map("workspace_id")
-  connectorRegistrationId     String   @map("connector_registration_id")
-  knowledgeCollectionId       String   @map("knowledge_collection_id")
+  id                          String                @id
+  workspaceId                 String                @map("workspace_id")
+  connectorRegistrationId     String                @map("connector_registration_id")
+  knowledgeCollectionId       String                @map("knowledge_collection_id")
   lifecycle                   String
-  configurationVersion        String   @map("configuration_version")
-  normalizationProfileVersion String   @map("normalization_profile_version")
-  chunkingProfileVersion      String   @map("chunking_profile_version")
-  synchronizationPolicy       Json     @map("synchronization_policy")
-  deletionBehavior            String   @map("deletion_behavior")
-  createdAt                   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt                   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-  workspace                   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  configurationVersion        String                @map("configuration_version")
+  normalizationProfileVersion String                @map("normalization_profile_version")
+  chunkingProfileVersion      String                @map("chunking_profile_version")
+  synchronizationPolicy       Json                  @map("synchronization_policy")
+  deletionBehavior            String                @map("deletion_behavior")
+  createdAt                   DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                   DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace                   Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   connector                   ConnectorRegistration @relation("KnowledgeSourceConnector", fields: [workspaceId, connectorRegistrationId], references: [workspaceId, id], onDelete: Restrict)
-  collection                  KnowledgeCollection @relation(fields: [workspaceId, knowledgeCollectionId], references: [workspaceId, id], onDelete: Restrict)
+  collection                  KnowledgeCollection   @relation(fields: [workspaceId, knowledgeCollectionId], references: [workspaceId, id], onDelete: Restrict)
   state                       KnowledgeSourceState?
   documents                   KnowledgeDocument[]
   schedules                   KnowledgeSchedule[]
@@ -230,15 +292,17 @@ model KnowledgeSource {
 }
 
 model KnowledgeSourceState {
-  workspaceId          String   @map("workspace_id")
-  knowledgeSourceId    String   @map("knowledge_source_id")
-  cursorVersion        String?  @map("cursor_version")
-  cursorValue          String?  @map("cursor_value")
-  lastCompletedAt      DateTime? @map("last_completed_at") @db.Timestamptz(6)
-  lastScanEpochVersion String?  @map("last_scan_epoch_version")
-  lastScanEpochValue   String?  @map("last_scan_epoch_value")
-  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-  workspace            Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  workspaceId          String          @map("workspace_id")
+  knowledgeSourceId    String          @map("knowledge_source_id")
+  cursorVersion        String?         @map("cursor_version")
+  cursorValue          String?         @map("cursor_value")
+  lastCompletedAt      DateTime?       @map("last_completed_at") @db.Timestamptz(6)
+  lastScanEpochVersion String?         @map("last_scan_epoch_version")
+  lastScanEpochValue   String?         @map("last_scan_epoch_value")
+  /** Bounded operator full-rescan reservation; scheduled work is unaffected. */
+  lastManualFullRescanRequestedAt DateTime? @map("last_manual_full_rescan_requested_at") @db.Timestamptz(6)
+  updatedAt            DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace            Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   source               KnowledgeSource @relation(fields: [workspaceId, knowledgeSourceId], references: [workspaceId, id], onDelete: Restrict)
 
   @@id([workspaceId, knowledgeSourceId])
@@ -246,23 +310,23 @@ model KnowledgeSourceState {
 }
 
 model KnowledgeDocument {
-  id                    String   @id
-  workspaceId           String   @map("workspace_id")
-  knowledgeSourceId     String   @map("knowledge_source_id")
-  externalReferenceId   String   @map("external_reference_id")
-  lifecycle             String
-  activeRevisionId      String?  @map("active_revision_id")
-  lastFingerprintVersion String? @map("last_fingerprint_version")
-  lastFingerprintValue  String?  @map("last_fingerprint_value")
-  lastSeenEpochVersion  String?  @map("last_seen_epoch_version")
-  lastSeenEpochValue    String?  @map("last_seen_epoch_value")
-  observedAt            DateTime @map("observed_at") @db.Timestamptz(6)
-  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt             DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-  workspace             Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  source                KnowledgeSource @relation(fields: [workspaceId, knowledgeSourceId], references: [workspaceId, id], onDelete: Restrict)
-  externalReference     ExternalReference @relation(fields: [workspaceId, externalReferenceId], references: [workspaceId, id], onDelete: Restrict)
-  revisions             KnowledgeRevision[] @relation("DocumentRevisions")
+  id                     String              @id
+  workspaceId            String              @map("workspace_id")
+  knowledgeSourceId      String              @map("knowledge_source_id")
+  externalReferenceId    String              @map("external_reference_id")
+  lifecycle              String
+  activeRevisionId       String?             @map("active_revision_id")
+  lastFingerprintVersion String?             @map("last_fingerprint_version")
+  lastFingerprintValue   String?             @map("last_fingerprint_value")
+  lastSeenEpochVersion   String?             @map("last_seen_epoch_version")
+  lastSeenEpochValue     String?             @map("last_seen_epoch_value")
+  observedAt             DateTime            @map("observed_at") @db.Timestamptz(6)
+  createdAt              DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace              Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  source                 KnowledgeSource     @relation(fields: [workspaceId, knowledgeSourceId], references: [workspaceId, id], onDelete: Restrict)
+  externalReference      ExternalReference   @relation(fields: [workspaceId, externalReferenceId], references: [workspaceId, id], onDelete: Restrict)
+  revisions              KnowledgeRevision[] @relation("DocumentRevisions")
 
   @@unique([workspaceId, id])
   @@unique([workspaceId, knowledgeSourceId, externalReferenceId])
@@ -270,25 +334,25 @@ model KnowledgeDocument {
 }
 
 model KnowledgeRevision {
-  id                          String   @id
-  workspaceId                 String   @map("workspace_id")
-  knowledgeDocumentId         String   @map("knowledge_document_id")
-  revisionOrdinal             Int      @map("revision_ordinal")
+  id                          String            @id
+  workspaceId                 String            @map("workspace_id")
+  knowledgeDocumentId         String            @map("knowledge_document_id")
+  revisionOrdinal             Int               @map("revision_ordinal")
   state                       String
-  contentHash                 String   @map("content_hash")
-  normalizationProfileVersion String   @map("normalization_profile_version")
-  chunkingProfileVersion      String   @map("chunking_profile_version")
-  embeddingBindingVersionId   String   @map("embedding_binding_version_id")
-  embeddingProfileVersion     String   @map("embedding_profile_version")
-  embeddingDimensions         Int      @map("embedding_dimensions")
-  normalizedContent           String?  @map("normalized_content")
+  contentHash                 String            @map("content_hash")
+  normalizationProfileVersion String            @map("normalization_profile_version")
+  chunkingProfileVersion      String            @map("chunking_profile_version")
+  embeddingBindingVersionId   String            @map("embedding_binding_version_id")
+  embeddingProfileVersion     String            @map("embedding_profile_version")
+  embeddingDimensions         Int               @map("embedding_dimensions")
+  normalizedContent           String?           @map("normalized_content")
   title                       String?
-  sourceUrl                   String?  @map("source_url")
-  metadata                    Json     @default("{}")
+  sourceUrl                   String?           @map("source_url")
+  metadata                    Json              @default("{}")
   diagnostic                  Json?
-  createdAt                   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  activatedAt                 DateTime? @map("activated_at") @db.Timestamptz(6)
-  workspace                   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  createdAt                   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  activatedAt                 DateTime?         @map("activated_at") @db.Timestamptz(6)
+  workspace                   Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   document                    KnowledgeDocument @relation("DocumentRevisions", fields: [workspaceId, knowledgeDocumentId], references: [workspaceId, id], onDelete: Restrict)
   chunks                      KnowledgeChunk[]
 
@@ -298,16 +362,16 @@ model KnowledgeRevision {
 }
 
 model KnowledgeEmbeddingCacheEntry {
-  id                          String   @id
-  workspaceId                 String   @map("workspace_id")
-  chunkHash                   String   @map("chunk_hash")
-  embeddingBindingVersionId   String   @map("embedding_binding_version_id")
-  embeddingProfileVersion     String   @map("embedding_profile_version")
+  id                          String                         @id
+  workspaceId                 String                         @map("workspace_id")
+  chunkHash                   String                         @map("chunk_hash")
+  embeddingBindingVersionId   String                         @map("embedding_binding_version_id")
+  embeddingProfileVersion     String                         @map("embedding_profile_version")
   dimensions                  Int
-  normalizationProfileVersion String   @map("normalization_profile_version")
+  normalizationProfileVersion String                         @map("normalization_profile_version")
   embedding                   Unsupported("vector")
-  createdAt                   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  workspace                   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  createdAt                   DateTime                       @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace                   Workspace                      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   chunks                      KnowledgeChunk[]
   allocations                 KnowledgeEmbeddingAllocation[]
 
@@ -317,17 +381,17 @@ model KnowledgeEmbeddingCacheEntry {
 }
 
 model KnowledgeChunk {
-  id                    String   @id
-  workspaceId           String   @map("workspace_id")
-  knowledgeRevisionId   String   @map("knowledge_revision_id")
+  id                    String                       @id
+  workspaceId           String                       @map("workspace_id")
+  knowledgeRevisionId   String                       @map("knowledge_revision_id")
   position              Int
-  contentHash           String   @map("content_hash")
+  contentHash           String                       @map("content_hash")
   content               String
-  sourceAnchor          String?  @map("source_anchor")
-  embeddingCacheEntryId String   @map("embedding_cache_entry_id")
-  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  workspace             Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  revision              KnowledgeRevision @relation(fields: [workspaceId, knowledgeRevisionId], references: [workspaceId, id], onDelete: Restrict)
+  sourceAnchor          String?                      @map("source_anchor")
+  embeddingCacheEntryId String                       @map("embedding_cache_entry_id")
+  createdAt             DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace             Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  revision              KnowledgeRevision            @relation(fields: [workspaceId, knowledgeRevisionId], references: [workspaceId, id], onDelete: Restrict)
   embeddingCacheEntry   KnowledgeEmbeddingCacheEntry @relation(fields: [workspaceId, embeddingCacheEntryId], references: [workspaceId, id], onDelete: Restrict)
 
   @@unique([workspaceId, id])
@@ -336,19 +400,19 @@ model KnowledgeChunk {
 }
 
 model KnowledgeEmbeddingAllocation {
-  id                      String   @id
-  workspaceId             String   @map("workspace_id")
-  embeddingCacheEntryId   String   @map("embedding_cache_entry_id")
-  aiOperationId           String   @map("ai_operation_id")
-  allocatedInputTokens    Int?     @map("allocated_input_tokens")
-  calculatedCostAmount    Decimal? @map("calculated_cost_amount") @db.Decimal(38, 18)
-  calculatedCostCurrency  String?  @map("calculated_cost_currency") @db.Char(3)
-  calculationStatus       String   @map("calculation_status")
-  weightNumerator         Int      @map("weight_numerator")
-  weightDenominator       Int      @map("weight_denominator")
-  createdAt               DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  workspace               Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  embeddingCacheEntry     KnowledgeEmbeddingCacheEntry @relation(fields: [workspaceId, embeddingCacheEntryId], references: [workspaceId, id], onDelete: Restrict)
+  id                     String                       @id
+  workspaceId            String                       @map("workspace_id")
+  embeddingCacheEntryId  String                       @map("embedding_cache_entry_id")
+  aiOperationId          String                       @map("ai_operation_id")
+  allocatedInputTokens   Int?                         @map("allocated_input_tokens")
+  calculatedCostAmount   Decimal?                     @map("calculated_cost_amount") @db.Decimal(38, 18)
+  calculatedCostCurrency String?                      @map("calculated_cost_currency") @db.Char(3)
+  calculationStatus      String                       @map("calculation_status")
+  weightNumerator        Int                          @map("weight_numerator")
+  weightDenominator      Int                          @map("weight_denominator")
+  createdAt              DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace              Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  embeddingCacheEntry    KnowledgeEmbeddingCacheEntry @relation(fields: [workspaceId, embeddingCacheEntryId], references: [workspaceId, id], onDelete: Restrict)
 
   @@unique([workspaceId, embeddingCacheEntryId, aiOperationId])
   @@map("knowledge_embedding_allocations")
@@ -399,38 +463,40 @@ model RetrievalSnapshotEvidence {
 }
 
 model KnowledgeSchedule {
-  id                   String   @id
-  workspaceId          String   @map("workspace_id")
-  knowledgeSourceId    String   @map("knowledge_source_id")
-  scheduleKind         String   @map("schedule_kind")
-  configurationVersion String   @map("configuration_version")
-  triggerKind          String   @map("trigger_kind")
-  cronExpression       String?  @map("cron_expression")
+  id                   String                        @id
+  workspaceId          String                        @map("workspace_id")
+  knowledgeSourceId    String                        @map("knowledge_source_id")
+  scheduleKind         String                        @map("schedule_kind")
+  configurationVersion String                        @map("configuration_version")
+  /** Immutable administration version for the schedule itself. Legacy rows remain null. */
+  administrationConfigurationVersionId String?       @map("administration_configuration_version_id")
+  triggerKind          String                        @map("trigger_kind")
+  cronExpression       String?                       @map("cron_expression")
   timezone             String?
-  intervalMs           BigInt?  @map("interval_ms")
-  jitterMs             BigInt?  @map("jitter_ms")
-  overlapPolicy        String   @map("overlap_policy")
-  enabled              Boolean  @default(true)
-  nextRunAt            DateTime @map("next_run_at") @db.Timestamptz(6)
-  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-  workspace            Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  source               KnowledgeSource @relation(fields: [workspaceId, knowledgeSourceId], references: [workspaceId, id], onDelete: Restrict)
+  intervalMs           BigInt?                       @map("interval_ms")
+  jitterMs             BigInt?                       @map("jitter_ms")
+  overlapPolicy        String                        @map("overlap_policy")
+  enabled              Boolean                       @default(true)
+  nextRunAt            DateTime                      @map("next_run_at") @db.Timestamptz(6)
+  createdAt            DateTime                      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt            DateTime                      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace            Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  source               KnowledgeSource               @relation(fields: [workspaceId, knowledgeSourceId], references: [workspaceId, id], onDelete: Restrict)
   lease                KnowledgeScheduleLease?
   occurrences          KnowledgeScheduleOccurrence[]
 
-  @@index([enabled, nextRunAt])
   @@unique([workspaceId, id])
+  @@index([enabled, nextRunAt])
   @@map("knowledge_schedules")
 }
 
 model KnowledgeScheduleLease {
-  workspaceId         String   @map("workspace_id")
-  knowledgeScheduleId String   @map("knowledge_schedule_id")
-  fencingToken        BigInt   @map("fencing_token")
-  expiresAt           DateTime @map("expires_at") @db.Timestamptz(6)
-  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-  workspace           Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  workspaceId         String            @map("workspace_id")
+  knowledgeScheduleId String            @map("knowledge_schedule_id")
+  fencingToken        BigInt            @map("fencing_token")
+  expiresAt           DateTime          @map("expires_at") @db.Timestamptz(6)
+  updatedAt           DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace           Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   schedule            KnowledgeSchedule @relation(fields: [workspaceId, knowledgeScheduleId], references: [workspaceId, id], onDelete: Restrict)
 
   @@id([workspaceId, knowledgeScheduleId])
@@ -438,14 +504,14 @@ model KnowledgeScheduleLease {
 }
 
 model KnowledgeScheduleOccurrence {
-  id                  String   @id
-  workspaceId         String   @map("workspace_id")
-  knowledgeScheduleId String   @map("knowledge_schedule_id")
-  occurrenceKey       String   @map("occurrence_key")
-  scheduledFor        DateTime @map("scheduled_for") @db.Timestamptz(6)
-  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  workspace           Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  schedule            KnowledgeSchedule @relation(fields: [workspaceId, knowledgeScheduleId], references: [workspaceId, id], onDelete: Restrict)
+  id                  String                     @id
+  workspaceId         String                     @map("workspace_id")
+  knowledgeScheduleId String                     @map("knowledge_schedule_id")
+  occurrenceKey       String                     @map("occurrence_key")
+  scheduledFor        DateTime                   @map("scheduled_for") @db.Timestamptz(6)
+  createdAt           DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace           Workspace                  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  schedule            KnowledgeSchedule          @relation(fields: [workspaceId, knowledgeScheduleId], references: [workspaceId, id], onDelete: Restrict)
   commands            KnowledgeScheduleCommand[]
 
   @@unique([workspaceId, id])
@@ -454,20 +520,20 @@ model KnowledgeScheduleOccurrence {
 }
 
 model KnowledgeScheduleCommand {
-  id                           String   @id
-  workspaceId                  String   @map("workspace_id")
-  knowledgeScheduleOccurrenceId String  @map("knowledge_schedule_occurrence_id")
-  commandType                  String   @map("command_type")
-  idempotencyKey               String   @map("idempotency_key")
-  payload                      Json
-  createdAt                    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  deliveredAt                  DateTime? @map("delivered_at") @db.Timestamptz(6)
-  workspace                    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  occurrence                   KnowledgeScheduleOccurrence @relation(fields: [workspaceId, knowledgeScheduleOccurrenceId], references: [workspaceId, id], onDelete: Restrict)
+  id                            String                      @id
+  workspaceId                   String                      @map("workspace_id")
+  knowledgeScheduleOccurrenceId String                      @map("knowledge_schedule_occurrence_id")
+  commandType                   String                      @map("command_type")
+  idempotencyKey                String                      @map("idempotency_key")
+  payload                       Json
+  createdAt                     DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  deliveredAt                   DateTime?                   @map("delivered_at") @db.Timestamptz(6)
+  workspace                     Workspace                   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  occurrence                    KnowledgeScheduleOccurrence @relation(fields: [workspaceId, knowledgeScheduleOccurrenceId], references: [workspaceId, id], onDelete: Restrict)
 
-  @@index([deliveredAt, createdAt])
   @@unique([workspaceId, knowledgeScheduleOccurrenceId])
   @@unique([workspaceId, idempotencyKey])
+  @@index([deliveredAt, createdAt])
   @@map("knowledge_schedule_commands")
 }
 
@@ -521,36 +587,36 @@ model AttachmentBlob {
 }
 
 model AttachmentDerivative {
-  id                      String                       @id
-  workspaceId             String                       @map("workspace_id")
-  identityKey             String                       @map("identity_key")
-  accessPolicyHash        String                       @map("access_policy_hash")
-  contentHash             String                       @map("content_hash")
+  id                      String                        @id
+  workspaceId             String                        @map("workspace_id")
+  identityKey             String                        @map("identity_key")
+  accessPolicyHash        String                        @map("access_policy_hash")
+  contentHash             String                        @map("content_hash")
   processor               String
-  processorVersion        String                       @map("processor_version")
-  securityPolicyVersion   String                       @map("security_policy_version")
-  normalizationVersion    String                       @map("normalization_version")
-  visionPromptVersion     String?                      @map("vision_prompt_version")
-  visionBindingVersionId  String?                      @map("vision_binding_version_id")
+  processorVersion        String                        @map("processor_version")
+  securityPolicyVersion   String                        @map("security_policy_version")
+  normalizationVersion    String                        @map("normalization_version")
+  visionPromptVersion     String?                       @map("vision_prompt_version")
+  visionBindingVersionId  String?                       @map("vision_binding_version_id")
   status                  String
-  claimId                 String?                      @map("claim_id")
-  claimExpiresAt          DateTime?                    @map("claim_expires_at") @db.Timestamptz(6)
-  claimAttempts           Int                          @default(0) @map("claim_attempts")
-  outputStorageKey        String?                      @map("output_storage_key")
-  outputMimeType          String?                      @map("output_mime_type")
-  aiOperationId           String?                      @map("ai_operation_id")
-  failureCode             String?                      @map("failure_code")
-  failureRetryable        Boolean?                     @map("failure_retryable")
-  createdAt               DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
-  completedAt             DateTime?                    @map("completed_at") @db.Timestamptz(6)
-  failedAt                DateTime?                    @map("failed_at") @db.Timestamptz(6)
-  retentionExpiresAt      DateTime?                    @map("retention_expires_at") @db.Timestamptz(6)
-  retentionState          String                       @default("active") @map("retention_state")
-  retentionClaimId        String?                      @map("retention_claim_id")
-  retentionClaimedAt      DateTime?                    @map("retention_claimed_at") @db.Timestamptz(6)
-  retentionClaimExpiresAt DateTime?                    @map("retention_claim_expires_at") @db.Timestamptz(6)
-  retentionDeletedAt      DateTime?                    @map("retention_deleted_at") @db.Timestamptz(6)
-  workspace               Workspace                    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  claimId                 String?                       @map("claim_id")
+  claimExpiresAt          DateTime?                     @map("claim_expires_at") @db.Timestamptz(6)
+  claimAttempts           Int                           @default(0) @map("claim_attempts")
+  outputStorageKey        String?                       @map("output_storage_key")
+  outputMimeType          String?                       @map("output_mime_type")
+  aiOperationId           String?                       @map("ai_operation_id")
+  failureCode             String?                       @map("failure_code")
+  failureRetryable        Boolean?                      @map("failure_retryable")
+  createdAt               DateTime                      @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt             DateTime?                     @map("completed_at") @db.Timestamptz(6)
+  failedAt                DateTime?                     @map("failed_at") @db.Timestamptz(6)
+  retentionExpiresAt      DateTime?                     @map("retention_expires_at") @db.Timestamptz(6)
+  retentionState          String                        @default("active") @map("retention_state")
+  retentionClaimId        String?                       @map("retention_claim_id")
+  retentionClaimedAt      DateTime?                     @map("retention_claimed_at") @db.Timestamptz(6)
+  retentionClaimExpiresAt DateTime?                     @map("retention_claim_expires_at") @db.Timestamptz(6)
+  retentionDeletedAt      DateTime?                     @map("retention_deleted_at") @db.Timestamptz(6)
+  workspace               Workspace                     @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   sources                 AttachmentDerivativeSource[]
   failures                AttachmentDerivativeFailure[]
 
@@ -589,12 +655,12 @@ model AttachmentDerivativeFailure {
 }
 
 model AnalysisProfile {
-  id        String                   @id
-  workspaceId String                 @map("workspace_id")
-  lifecycle String
-  createdAt DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
-  workspace Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  versions  AnalysisProfileVersion[]
+  id          String                   @id
+  workspaceId String                   @map("workspace_id")
+  lifecycle   String
+  createdAt   DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace   Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  versions    AnalysisProfileVersion[]
 
   @@unique([workspaceId, id])
   @@map("analysis_profiles")
@@ -618,16 +684,16 @@ model AnalysisProfileVersion {
 }
 
 model AnalysisIdentity {
-  id                      String                 @id
-  workspaceId             String                 @map("workspace_id")
-  identityHash            String                 @map("identity_hash")
-  analysisProfileVersionId String                @map("analysis_profile_version_id")
-  caseSnapshotId          String                 @map("case_snapshot_id")
-  createdAt               DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
-  workspace               Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  profileVersion          AnalysisProfileVersion @relation(fields: [workspaceId, analysisProfileVersionId], references: [workspaceId, id], onDelete: Restrict)
-  caseSnapshot            CaseSnapshot           @relation(fields: [workspaceId, caseSnapshotId], references: [workspaceId, id], onDelete: Restrict)
-  jobs                    AnalysisJob[]
+  id                       String                 @id
+  workspaceId              String                 @map("workspace_id")
+  identityHash             String                 @map("identity_hash")
+  analysisProfileVersionId String                 @map("analysis_profile_version_id")
+  caseSnapshotId           String                 @map("case_snapshot_id")
+  createdAt                DateTime               @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace                Workspace              @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  profileVersion           AnalysisProfileVersion @relation(fields: [workspaceId, analysisProfileVersionId], references: [workspaceId, id], onDelete: Restrict)
+  caseSnapshot             CaseSnapshot           @relation(fields: [workspaceId, caseSnapshotId], references: [workspaceId, id], onDelete: Restrict)
+  jobs                     AnalysisJob[]
 
   @@unique([workspaceId, identityHash])
   @@unique([workspaceId, id])
@@ -635,15 +701,15 @@ model AnalysisIdentity {
 }
 
 model AnalysisJob {
-  id                 String             @id
-  workspaceId        String             @map("workspace_id")
-  analysisIdentityId String             @map("analysis_identity_id")
-  runOrdinal         Int                @map("run_ordinal")
+  id                 String              @id
+  workspaceId        String              @map("workspace_id")
+  analysisIdentityId String              @map("analysis_identity_id")
+  runOrdinal         Int                 @map("run_ordinal")
   state              String
-  createdAt          DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt          DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
-  workspace          Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  identity           AnalysisIdentity   @relation(fields: [workspaceId, analysisIdentityId], references: [workspaceId, id], onDelete: Restrict)
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace          Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  identity           AnalysisIdentity    @relation(fields: [workspaceId, analysisIdentityId], references: [workspaceId, id], onDelete: Restrict)
   attempts           AnalysisAttempt[]
   results            AnalysisResult[]
   publicationIntents PublicationIntent[]
@@ -654,35 +720,35 @@ model AnalysisJob {
 }
 
 model AnalysisAttempt {
-  id          String      @id
-  workspaceId String      @map("workspace_id")
-  analysisJobId String    @map("analysis_job_id")
-  attemptOrdinal Int      @map("attempt_ordinal")
-  state       String
-  startedAt   DateTime    @map("started_at") @db.Timestamptz(6)
-  leaseExpiresAt DateTime @map("lease_expires_at") @db.Timestamptz(6)
-  recoveryFencingToken BigInt @default(0) @map("recovery_fencing_token")
-  finishedAt  DateTime?   @map("finished_at") @db.Timestamptz(6)
-  errorCode   String?     @map("error_code")
-  errorRetryable Boolean? @map("error_retryable")
-  stages      Json        @default("[]")
-  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  job         AnalysisJob @relation(fields: [workspaceId, analysisJobId], references: [workspaceId, id], onDelete: Restrict)
+  id                   String      @id
+  workspaceId          String      @map("workspace_id")
+  analysisJobId        String      @map("analysis_job_id")
+  attemptOrdinal       Int         @map("attempt_ordinal")
+  state                String
+  startedAt            DateTime    @map("started_at") @db.Timestamptz(6)
+  leaseExpiresAt       DateTime    @map("lease_expires_at") @db.Timestamptz(6)
+  recoveryFencingToken BigInt      @default(0) @map("recovery_fencing_token")
+  finishedAt           DateTime?   @map("finished_at") @db.Timestamptz(6)
+  errorCode            String?     @map("error_code")
+  errorRetryable       Boolean?    @map("error_retryable")
+  stages               Json        @default("[]")
+  workspace            Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  job                  AnalysisJob @relation(fields: [workspaceId, analysisJobId], references: [workspaceId, id], onDelete: Restrict)
 
   @@unique([analysisJobId, attemptOrdinal])
   @@map("analysis_attempts")
 }
 
 model AnalysisResult {
-  id          String      @id
-  workspaceId String      @map("workspace_id")
-  analysisJobId String    @map("analysis_job_id")
-  resultHash  String      @map("result_hash")
-  record      Json        @default("{}")
-  createdAt   DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
-  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  job         AnalysisJob @relation(fields: [workspaceId, analysisJobId], references: [workspaceId, id], onDelete: Restrict)
-  evidence    Evidence[]
+  id            String      @id
+  workspaceId   String      @map("workspace_id")
+  analysisJobId String      @map("analysis_job_id")
+  resultHash    String      @map("result_hash")
+  record        Json        @default("{}")
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace     Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  job           AnalysisJob @relation(fields: [workspaceId, analysisJobId], references: [workspaceId, id], onDelete: Restrict)
+  evidence      Evidence[]
 
   @@unique([workspaceId, analysisJobId])
   @@unique([workspaceId, id])
@@ -704,26 +770,26 @@ model Evidence {
 }
 
 model PublicationIntent {
-  id            String       @id
-  workspaceId   String       @map("workspace_id")
-  analysisJobId String       @map("analysis_job_id")
-  state         String
-  intentHash    String       @map("intent_hash")
-  publicationProfileVersionId String? @map("publication_profile_version_id")
-  targetConnectorInstanceId String? @map("target_connector_instance_id")
-  targetResourceType String? @map("target_resource_type")
-  targetExternalId String? @map("target_external_id")
-  destinationConnectorInstanceId String? @map("destination_connector_instance_id")
-  publicationMarker String? @map("publication_marker")
-  identityHash String? @map("identity_hash")
-  analysisResultId String? @map("analysis_result_id")
-  approvedByPrincipalId String? @map("approved_by_principal_id")
-  approvedAt DateTime? @map("approved_at") @db.Timestamptz(6)
-  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
-  workspace     Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  job           AnalysisJob  @relation(fields: [workspaceId, analysisJobId], references: [workspaceId, id], onDelete: Restrict)
-  attempts      PublicationAttempt[]
+  id                             String               @id
+  workspaceId                    String               @map("workspace_id")
+  analysisJobId                  String               @map("analysis_job_id")
+  state                          String
+  intentHash                     String               @map("intent_hash")
+  publicationProfileVersionId    String?              @map("publication_profile_version_id")
+  targetConnectorInstanceId      String?              @map("target_connector_instance_id")
+  targetResourceType             String?              @map("target_resource_type")
+  targetExternalId               String?              @map("target_external_id")
+  destinationConnectorInstanceId String?              @map("destination_connector_instance_id")
+  publicationMarker              String?              @map("publication_marker")
+  identityHash                   String?              @map("identity_hash")
+  analysisResultId               String?              @map("analysis_result_id")
+  approvedByPrincipalId          String?              @map("approved_by_principal_id")
+  approvedAt                     DateTime?            @map("approved_at") @db.Timestamptz(6)
+  createdAt                      DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                      DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace                      Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  job                            AnalysisJob          @relation(fields: [workspaceId, analysisJobId], references: [workspaceId, id], onDelete: Restrict)
+  attempts                       PublicationAttempt[]
 
   @@unique([workspaceId, id])
   @@map("publication_intents")
@@ -735,11 +801,11 @@ model PublicationAttempt {
   publicationIntentId String            @map("publication_intent_id")
   attemptOrdinal      Int               @map("attempt_ordinal")
   state               String
-  identityHash        String?          @map("identity_hash")
-  publicationMarker   String?          @map("publication_marker")
+  identityHash        String?           @map("identity_hash")
+  publicationMarker   String?           @map("publication_marker")
   receipt             Json?
-  errorCode           String?          @map("error_code")
-  errorRetryable      Boolean?         @map("error_retryable")
+  errorCode           String?           @map("error_code")
+  errorRetryable      Boolean?          @map("error_retryable")
   createdAt           DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
   finishedAt          DateTime?         @map("finished_at") @db.Timestamptz(6)
   workspace           Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
@@ -778,20 +844,76 @@ model PublicationProfileVersion {
 }
 
 model WebhookInbox {
-  id                  String    @id
-  workspaceId         String    @map("workspace_id")
-  endpointId          String    @map("endpoint_id")
-  connectorInstanceId String    @map("connector_instance_id")
-  analysisTriggerId   String?   @map("analysis_trigger_id")
-  deliveryKey         String    @map("delivery_key")
-  rawBodyDigest       String    @map("raw_body_digest")
-  verification        Json
-  signals             Json
-  receivedAt          DateTime  @map("received_at") @db.Timestamptz(6)
-  workspace           Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  id                     String    @id
+  workspaceId            String    @map("workspace_id")
+  endpointId             String    @map("endpoint_id")
+  configurationVersionId String?   @map("configuration_version_id")
+  connectorInstanceId    String    @map("connector_instance_id")
+  analysisTriggerId      String?   @map("analysis_trigger_id")
+  deliveryKey            String    @map("delivery_key")
+  rawBodyDigest          String    @map("raw_body_digest")
+  verification           Json
+  signals                Json
+  receivedAt             DateTime  @map("received_at") @db.Timestamptz(6)
+  workspace              Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
 
   @@unique([endpointId, deliveryKey])
   @@map("webhook_inbox")
+}
+
+/**
+ * Opaque, workspace-scoped ingress endpoint projection. Its configuration is
+ * immutable in administration_configuration_versions; this row contains only
+ * the active server-selected routing identity and bounded safe limits.
+ */
+model WebhookEndpoint {
+  id                     String   @id
+  workspaceId            String   @map("workspace_id")
+  lifecycle              String
+  connectorInstanceId    String   @map("connector_instance_id")
+  configurationVersionId String   @map("configuration_version_id")
+  verifiedEventTypes     Json     @map("verified_event_types")
+  maximumBodyBytes       Int      @map("maximum_body_bytes")
+  maximumRequestsPerMinute Int    @map("maximum_requests_per_minute")
+  analysisTriggerId      String?  @map("analysis_trigger_id")
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, id])
+  @@index([workspaceId, lifecycle, updatedAt, id])
+  @@map("webhook_endpoints")
+}
+
+/** Database-time fixed windows used before a public endpoint accepts work. */
+model WebhookEndpointRateWindow {
+  workspaceId  String   @map("workspace_id")
+  endpointId   String   @map("endpoint_id")
+  windowStartedAt DateTime @map("window_started_at") @db.Timestamptz(6)
+  acquiredCount Int     @map("acquired_count")
+
+  @@id([workspaceId, endpointId, windowStartedAt])
+  @@map("webhook_endpoint_rate_windows")
+}
+
+/**
+ * Server-created replay request for an already verified inbox row. It never
+ * stores raw request bytes, headers, adapter selection, or secret material.
+ */
+model WebhookReplayRequest {
+  id                   String    @id
+  workspaceId          String    @map("workspace_id")
+  endpointId           String    @map("endpoint_id")
+  webhookInboxId       String    @map("webhook_inbox_id")
+  idempotencyKeyDigest String    @map("idempotency_key_digest") @db.Char(64)
+  state                String
+  outboxEnvelopeId     String?   @map("outbox_envelope_id")
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt          DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, endpointId, webhookInboxId])
+  @@unique([workspaceId, idempotencyKeyDigest])
+  @@index([workspaceId, state, createdAt])
+  @@map("webhook_replay_requests")
 }
 
 model CaseAnalysisSchedule {
@@ -831,51 +953,345 @@ model CaseAnalysisScheduleLease {
 }
 
 model CaseAnalysisScheduleOccurrence {
-  id                   String               @id
-  workspaceId          String               @map("workspace_id")
-  caseAnalysisScheduleId String             @map("case_analysis_schedule_id")
-  occurrenceKey        String               @map("occurrence_key")
-  scheduledFor         DateTime             @map("scheduled_for") @db.Timestamptz(6)
-  createdAt            DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
-  workspace            Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
-  schedule             CaseAnalysisSchedule @relation(fields: [workspaceId, caseAnalysisScheduleId], references: [workspaceId, id], onDelete: Restrict)
+  id                     String               @id
+  workspaceId            String               @map("workspace_id")
+  caseAnalysisScheduleId String               @map("case_analysis_schedule_id")
+  occurrenceKey          String               @map("occurrence_key")
+  scheduledFor           DateTime             @map("scheduled_for") @db.Timestamptz(6)
+  createdAt              DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace              Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  schedule               CaseAnalysisSchedule @relation(fields: [workspaceId, caseAnalysisScheduleId], references: [workspaceId, id], onDelete: Restrict)
 
   @@unique([workspaceId, caseAnalysisScheduleId, occurrenceKey])
   @@map("case_analysis_schedule_occurrences")
 }
 
 model AuditEvent {
-  id               String     @id
-  workspaceId      String     @map("workspace_id")
-  actorPrincipalId String?    @map("actor_principal_id")
-  action           String
-  targetId         String?    @map("target_id")
-  beforeHash       String?    @map("before_hash")
-  afterHash        String?    @map("after_hash")
-  occurredAt       DateTime   @map("occurred_at") @db.Timestamptz(6)
-  workspace        Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  id                   String    @id
+  workspaceId          String    @map("workspace_id")
+  actorPrincipalId     String?   @map("actor_principal_id")
+  action               String
+  targetId             String?   @map("target_id")
+  beforeHash           String?   @map("before_hash")
+  afterHash            String?   @map("after_hash")
+  occurredAt           DateTime  @map("occurred_at") @db.Timestamptz(6)
+  origin               String?   @map("origin")
+  targetType           String?   @map("target_type")
+  outcome              String?   @map("outcome")
+  permission           String?   @map("permission")
+  reasonCode           String?   @map("reason_code")
+  uiActionId           String?   @map("ui_action_id")
+  requestId            String?   @map("request_id")
+  correlationId        String?   @map("correlation_id")
+  traceId              String?   @map("trace_id")
+  idempotencyKeyDigest String?   @map("idempotency_key_digest")
+  clientAddress        String?   @map("client_address")
+  userAgent            String?   @map("user_agent")
+  workspace            Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
 
   @@map("audit_events")
 }
 
+model AdministrationConfiguration {
+  id               String                               @id
+  workspaceId      String                               @map("workspace_id")
+  resourceType     String                               @map("resource_type")
+  lifecycle        String
+  revision         Int                                  @default(1)
+  currentVersionId String?                              @map("current_version_id")
+  createdAt        DateTime                             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime                             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace        Workspace                            @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  versions         AdministrationConfigurationVersion[]
+
+  @@unique([workspaceId, id])
+  @@index([workspaceId, resourceType, updatedAt, id])
+  @@map("administration_configurations")
+}
+
+model AdministrationConfigurationVersion {
+  id               String                      @id
+  workspaceId      String                      @map("workspace_id")
+  configurationId  String                      @map("configuration_id")
+  version          Int
+  settings         Json
+  secretReferences Json                        @map("secret_references")
+  canonicalSettingsSha256 String               @default(dbgenerated()) @map("canonical_settings_sha256")
+  secretReferenceCount Int                     @default(dbgenerated()) @map("secret_reference_count")
+  displayName      String?                     @map("display_name")
+  descriptorKind   String?                     @map("descriptor_kind")
+  descriptorType   String?                     @map("descriptor_type")
+  descriptorVersion String?                    @map("descriptor_version")
+  createdAt        DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  configuration    AdministrationConfiguration @relation(fields: [workspaceId, configurationId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, configurationId, version])
+  @@map("administration_configuration_versions")
+}
+
+/** Safe, composition-registered descriptor snapshots; never user-editable runtime state. */
+model AdministrationDescriptorRevision {
+  kind           String
+  type           String
+  version        String
+  descriptor     Json
+  descriptorHash String    @map("descriptor_hash")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@id([kind, type, version])
+  @@map("administration_descriptor_revisions")
+}
+
+/** Durable cache-invalidation signal created atomically with a configuration version. */
+model AdministrationConfigurationChangeOutbox {
+  id                 String    @id
+  workspaceId        String    @map("workspace_id")
+  resourceType       String    @map("resource_type")
+  configurationId    String    @map("configuration_id")
+  previousVersionId  String?   @map("previous_version_id")
+  currentVersionId   String    @map("current_version_id")
+  cacheScopes        Json      @map("cache_scopes")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  publishedAt        DateTime? @map("published_at") @db.Timestamptz(6)
+  claimToken         String?   @map("claim_token")
+  claimedUntil       DateTime? @map("claimed_until") @db.Timestamptz(6)
+  claimAttempts      Int       @default(0) @map("claim_attempts")
+  workspace          Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@unique([workspaceId, configurationId, currentVersionId])
+  @@index([publishedAt, claimedUntil, createdAt])
+  @@map("administration_configuration_change_outbox")
+}
+
+/**
+ * Short-lived, server-owned confirmations for destructive/control-plane actions.
+ * Stored commands contain only bounded identifiers and parameters—never tokens,
+ * secret values, connector payloads, or provider request data.
+ */
+model AdministrationActionPreview {
+  id                   String    @id
+  workspaceId          String    @map("workspace_id")
+  principalId          String    @map("principal_id")
+  sessionId            String    @map("session_id")
+  action               String
+  command              Json
+  parameterDigest      String    @map("parameter_digest")
+  permission           String
+  confirmation         String
+  impact               String
+  canConfirm           Boolean   @map("can_confirm")
+  estimatedCost        Json?    @map("estimated_cost")
+  expiresAt            DateTime  @map("expires_at") @db.Timestamptz(6)
+  consumedAt           DateTime? @map("consumed_at") @db.Timestamptz(6)
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace            Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, principalId, sessionId, expiresAt])
+  @@map("administration_action_previews")
+}
+
+/**
+ * One-use server-owned confirmations for metered provider capability tests.
+ * No provider request template, response, endpoint, or secret reference is
+ * persisted here; the template digest binds the immutable runtime selection.
+ */
+model AdministrationProviderCapabilityTestConfirmation {
+  id                        String    @id
+  workspaceId               String    @map("workspace_id")
+  principalId               String    @map("principal_id")
+  sessionId                 String    @map("session_id")
+  providerInstanceId        String    @map("provider_instance_id")
+  providerInstanceVersionId String    @map("provider_instance_version_id")
+  bindingVersionId          String    @map("binding_version_id")
+  testOperation             String    @map("test_operation")
+  templateDigest            String    @map("template_digest") @db.Char(64)
+  estimatedAmount           Decimal   @map("estimated_amount") @db.Decimal(38, 18)
+  estimatedCurrency         String    @map("estimated_currency") @db.Char(3)
+  confirmation              String
+  impact                    String
+  expiresAt                 DateTime  @map("expires_at") @db.Timestamptz(6)
+  consumedAt                DateTime? @map("consumed_at") @db.Timestamptz(6)
+  createdAt                 DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, principalId, sessionId, expiresAt, consumedAt])
+  @@map("administration_provider_capability_test_confirmations")
+}
+
+/** Durable idempotency claim retained when post-dispatch auditing cannot commit. */
+model AdministrationProviderCapabilityTestClaim {
+  id                        String    @id
+  workspaceId               String    @map("workspace_id")
+  principalId               String    @map("principal_id")
+  providerInstanceId        String    @map("provider_instance_id")
+  providerInstanceVersionId String    @map("provider_instance_version_id")
+  bindingVersionId          String    @map("binding_version_id")
+  testOperation             String    @map("test_operation")
+  keyDigest                 String    @map("key_digest") @db.Char(64)
+  requestFingerprint        String    @map("request_fingerprint") @db.Char(64)
+  createdAt                 DateTime  @map("created_at") @db.Timestamptz(6)
+  completedAt               DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, keyDigest])
+  @@map("administration_provider_capability_test_claims")
+}
+
+/** Append-only safe outcome projection for one provider capability-test claim. */
+model AdministrationProviderCapabilityTestResult {
+  id                        String    @id
+  claimId                   String    @unique @map("claim_id")
+  workspaceId               String    @map("workspace_id")
+  providerInstanceId        String    @map("provider_instance_id")
+  providerInstanceVersionId String    @map("provider_instance_version_id")
+  bindingVersionId          String    @map("binding_version_id")
+  testOperation             String    @map("test_operation")
+  outcome                   String
+  operationId               String?   @map("operation_id")
+  estimatedAmount           Decimal?  @map("estimated_amount") @db.Decimal(38, 18)
+  estimatedCurrency         String?   @map("estimated_currency") @db.Char(3)
+  actualAmount              Decimal?  @map("actual_amount") @db.Decimal(38, 18)
+  actualCurrency            String?   @map("actual_currency") @db.Char(3)
+  reasonCode                String?   @map("reason_code")
+  completedAt               DateTime  @map("completed_at") @db.Timestamptz(6)
+
+  @@map("administration_provider_capability_test_results")
+}
+
+/** Fixed database-time rate-limit buckets for provider capability tests. */
+model AdministrationProviderCapabilityTestRateWindow {
+  workspaceId               String   @map("workspace_id")
+  principalId               String   @map("principal_id")
+  providerInstanceId        String   @map("provider_instance_id")
+  providerInstanceVersionId String   @map("provider_instance_version_id")
+  windowStartedAt           DateTime @map("window_started_at") @db.Timestamptz(6)
+  acquiredCount             Int      @map("acquired_count")
+
+  @@id([workspaceId, principalId, providerInstanceId, providerInstanceVersionId, windowStartedAt])
+  @@map("administration_provider_capability_test_rate_windows")
+}
+
+/** Server-only state for bounded, redacted diagnostics exports. */
+model AdministrationDiagnosticExport {
+  id                     String    @id
+  workspaceId            String    @map("workspace_id")
+  requestedByPrincipalId String    @map("requested_by_principal_id")
+  status                 String
+  eventCutoffAt          DateTime  @map("event_cutoff_at") @db.Timestamptz(6)
+  maximumEvents          Int       @map("maximum_events")
+  expiresAt              DateTime  @map("expires_at") @db.Timestamptz(6)
+  artifactStorageKey     String?   @map("artifact_storage_key")
+  contentSha256          String?   @map("content_sha256")
+  byteLength             Int?      @map("byte_length")
+  contentType            String?   @map("content_type")
+  eventCount             Int?      @map("event_count")
+  generatedAt            DateTime? @map("generated_at") @db.Timestamptz(6)
+  failureCode            String?   @map("failure_code")
+  generationClaimToken   String?   @map("generation_claim_token")
+  generationClaimedUntil DateTime? @map("generation_claimed_until") @db.Timestamptz(6)
+  generationAttempts     Int       @default(0) @map("generation_attempts")
+  deletionClaimToken     String?   @map("deletion_claim_token")
+  deletionClaimedUntil   DateTime? @map("deletion_claimed_until") @db.Timestamptz(6)
+  deletionAttempts       Int       @default(0) @map("deletion_attempts")
+  deletedAt              DateTime? @map("deleted_at") @db.Timestamptz(6)
+  createdAt              DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace              Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  artifact               AdministrationDiagnosticExportArtifact?
+
+  @@unique([workspaceId, id])
+  @@index([status, expiresAt, createdAt])
+  @@index([status, generationClaimedUntil, createdAt])
+  @@index([status, deletionClaimedUntil, expiresAt])
+  @@map("administration_diagnostic_exports")
+}
+
+/** Bounded private bytes for a diagnostic export; never returned through status DTOs. */
+model AdministrationDiagnosticExportArtifact {
+  workspaceId String                          @map("workspace_id")
+  exportId    String                          @map("export_id")
+  content     Bytes
+  contentSha256 String                        @map("content_sha256")
+  byteLength  Int                             @map("byte_length")
+  contentType String                          @map("content_type")
+  createdAt   DateTime                        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime                        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  export      AdministrationDiagnosticExport @relation(fields: [workspaceId, exportId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@id([workspaceId, exportId])
+  @@map("administration_diagnostic_export_artifacts")
+}
+
+model OidcIdentityMapping {
+  id          String    @id
+  workspaceId String    @map("workspace_id")
+  principalId String    @map("principal_id")
+  issuer      String
+  subject     String
+  displayName String    @map("display_name")
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@unique([workspaceId, issuer, subject])
+  @@unique([workspaceId, principalId])
+  @@map("oidc_identity_mappings")
+}
+
+model AdministrationSession {
+  id                String    @id
+  workspaceId       String    @map("workspace_id")
+  principalId       String    @map("principal_id")
+  sessionDigest     String    @unique @map("session_digest")
+  csrfDigest        String    @map("csrf_digest")
+  csrfCiphertext    String?   @map("csrf_ciphertext")
+  csrfEncryptionKeyId String? @map("csrf_encryption_key_id")
+  issuedAt          DateTime  @map("issued_at") @db.Timestamptz(6)
+  idleExpiresAt     DateTime  @map("idle_expires_at") @db.Timestamptz(6)
+  absoluteExpiresAt DateTime  @map("absolute_expires_at") @db.Timestamptz(6)
+  revokedAt         DateTime? @map("revoked_at") @db.Timestamptz(6)
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@index([sessionDigest, revokedAt, idleExpiresAt])
+  @@map("administration_sessions")
+}
+
+model AdministrationLoginTransaction {
+  id             String     @id
+  workspaceId    String?    @map("workspace_id")
+  stateDigest    String     @unique @map("state_digest")
+  nonceDigest    String     @map("nonce_digest")
+  verifierDigest String     @map("verifier_digest")
+  nonceCiphertext String?   @map("nonce_ciphertext")
+  verifierCiphertext String? @map("verifier_ciphertext")
+  encryptionKeyId String?   @map("encryption_key_id")
+  returnPath     String     @map("return_path")
+  expiresAt      DateTime   @map("expires_at") @db.Timestamptz(6)
+  consumedAt     DateTime?  @map("consumed_at") @db.Timestamptz(6)
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace      Workspace? @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@index([stateDigest, expiresAt, consumedAt])
+  @@map("administration_login_transactions")
+}
+
 model IdempotencyRecord {
-  workspaceId    String   @map("workspace_id")
-  operation      String
-  keyDigest      String   @map("key_digest")
-  requestDigest  String   @map("request_digest")
-  resourceId     String   @map("resource_id")
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  workspaceId   String    @map("workspace_id")
+  operation     String
+  keyDigest     String    @map("key_digest")
+  requestDigest String    @map("request_digest")
+  resourceId    String    @map("resource_id")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
 
   @@id([workspaceId, operation, keyDigest])
   @@map("idempotency_records")
 }
 
 model InboxMessage {
-  id          String   @id
-  workspaceId String   @map("workspace_id")
-  messageHash String   @map("message_hash")
-  receivedAt  DateTime @default(now()) @map("received_at") @db.Timestamptz(6)
+  id          String    @id
+  workspaceId String    @map("workspace_id")
+  messageHash String    @map("message_hash")
+  receivedAt  DateTime  @default(now()) @map("received_at") @db.Timestamptz(6)
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
 
   @@unique([workspaceId, messageHash])
@@ -883,37 +1299,37 @@ model InboxMessage {
 }
 
 model OutboxEnvelope {
-  id             String   @id
-  workspaceId    String   @map("workspace_id")
-  kind           String
-  type           String
-  schemaVersion  Int      @map("schema_version")
-  occurredAt     DateTime @map("occurred_at") @db.Timestamptz(6)
-  correlationId  String   @map("correlation_id")
-  causationId    String   @map("causation_id")
-  traceContext   Json?    @map("trace_context")
-  payload        Json
-  availableAt    DateTime @default(now()) @map("available_at") @db.Timestamptz(6)
-  claimToken     String?  @map("claim_token")
-  claimedUntil   DateTime? @map("claimed_until") @db.Timestamptz(6)
-  claimAttempts  Int      @default(0) @map("claim_attempts")
-  deliveredAt    DateTime? @map("delivered_at") @db.Timestamptz(6)
-  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  id            String    @id
+  workspaceId   String    @map("workspace_id")
+  kind          String
+  type          String
+  schemaVersion Int       @map("schema_version")
+  occurredAt    DateTime  @map("occurred_at") @db.Timestamptz(6)
+  correlationId String    @map("correlation_id")
+  causationId   String    @map("causation_id")
+  traceContext  Json?     @map("trace_context")
+  payload       Json
+  availableAt   DateTime  @default(now()) @map("available_at") @db.Timestamptz(6)
+  claimToken    String?   @map("claim_token")
+  claimedUntil  DateTime? @map("claimed_until") @db.Timestamptz(6)
+  claimAttempts Int       @default(0) @map("claim_attempts")
+  deliveredAt   DateTime? @map("delivered_at") @db.Timestamptz(6)
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
 
   @@index([deliveredAt, availableAt, claimedUntil])
   @@map("outbox_envelopes")
 }
 
 model ResourceLease {
-  id            String   @id
-  workspaceId   String   @map("workspace_id")
-  resourceType  String   @map("resource_type")
-  resourceKey   String   @map("resource_key")
-  fencingToken  BigInt   @map("fencing_token")
-  expiresAt     DateTime @map("expires_at") @db.Timestamptz(6)
-  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  id           String    @id
+  workspaceId  String    @map("workspace_id")
+  resourceType String    @map("resource_type")
+  resourceKey  String    @map("resource_key")
+  fencingToken BigInt    @map("fencing_token")
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(6)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
 
   @@unique([workspaceId, resourceType, resourceKey])
   @@map("resource_leases")
@@ -932,43 +1348,43 @@ model AiCatalogSnapshot {
 }
 
 model AiCatalogModel {
-  id                 String   @id
-  catalogSnapshotId  String   @map("catalog_snapshot_id")
-  canonicalModel     String   @map("canonical_model")
-  provider           String
-  supportedRoles     Json     @map("supported_roles")
-  capabilities       Json
-  maximumInputTokens Int?     @map("maximum_input_tokens")
-  maximumOutputTokens Int?    @map("maximum_output_tokens")
-  rawEntry           Json     @map("raw_entry")
-  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  id                  String   @id
+  catalogSnapshotId   String   @map("catalog_snapshot_id")
+  canonicalModel      String   @map("canonical_model")
+  provider            String
+  supportedRoles      Json     @map("supported_roles")
+  capabilities        Json
+  maximumInputTokens  Int?     @map("maximum_input_tokens")
+  maximumOutputTokens Int?     @map("maximum_output_tokens")
+  rawEntry            Json     @map("raw_entry")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@unique([catalogSnapshotId, canonicalModel])
   @@map("ai_catalog_models")
 }
 
 model AiCatalogPriceComponent {
-  id             String   @id
-  catalogModelId String   @map("catalog_model_id")
-  componentKind  String   @map("component_kind")
-  billingUnit    String   @map("billing_unit")
-  amount         Decimal  @db.Decimal(38, 18)
-  currency       String   @db.Char(3)
-  effectiveFrom  DateTime @map("effective_from") @db.Timestamptz(6)
+  id             String    @id
+  catalogModelId String    @map("catalog_model_id")
+  componentKind  String    @map("component_kind")
+  billingUnit    String    @map("billing_unit")
+  amount         Decimal   @db.Decimal(38, 18)
+  currency       String    @db.Char(3)
+  effectiveFrom  DateTime  @map("effective_from") @db.Timestamptz(6)
   effectiveTo    DateTime? @map("effective_to") @db.Timestamptz(6)
   conditions     Json
-  sourceRevision String   @map("source_revision")
-  rawEntry       Json     @map("raw_entry")
+  sourceRevision String    @map("source_revision")
+  rawEntry       Json      @map("raw_entry")
 
   @@map("ai_catalog_price_components")
 }
 
 model AiProviderInstance {
-  id          String   @id
-  workspaceId String   @map("workspace_id")
-  providerType String  @map("provider_type")
-  lifecycle   String
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  id           String   @id
+  workspaceId  String   @map("workspace_id")
+  providerType String   @map("provider_type")
+  lifecycle    String
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@unique([workspaceId, id])
   @@map("ai_provider_instances")
@@ -991,11 +1407,15 @@ model AiProviderInstanceVersion {
 }
 
 model AiModelBinding {
-  id          String   @id
-  workspaceId String   @map("workspace_id")
-  role        String
-  lifecycle   String
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  id              String   @id
+  workspaceId     String   @map("workspace_id")
+  role            String
+  lifecycle       String
+  revision        Int      @default(1)
+  activeVersionId String?  @map("active_version_id")
+  draftVersionId  String?  @map("draft_version_id")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@unique([workspaceId, id])
   @@map("ai_model_bindings")
@@ -1024,83 +1444,114 @@ model AiModelBindingVersion {
 }
 
 model AiWorkspaceBindingDefault {
-  workspaceId           String   @map("workspace_id")
-  role                  String
-  modelBindingVersionId String   @map("model_binding_version_id")
-  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspaceId              String   @map("workspace_id")
+  role                     String
+  modelBindingVersionId    String   @map("model_binding_version_id")
+  fallbackBindingVersionId String?  @map("fallback_binding_version_id")
+  revision                 Int      @default(0)
+  createdAt                DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@id([workspaceId, role])
   @@map("ai_workspace_binding_defaults")
 }
 
 model AiInstallationPriceOverride {
-  id             String   @id
+  id             String    @id
   provider       String
-  canonicalModel String   @map("canonical_model")
+  canonicalModel String    @map("canonical_model")
   source         String
-  effectiveFrom  DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveFrom  DateTime  @map("effective_from") @db.Timestamptz(6)
   effectiveTo    DateTime? @map("effective_to") @db.Timestamptz(6)
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@map("ai_installation_price_overrides")
 }
 
 model AiWorkspacePriceOverride {
-  id             String   @id
-  workspaceId    String   @map("workspace_id")
+  id             String    @id
+  workspaceId    String    @map("workspace_id")
   provider       String
-  canonicalModel String   @map("canonical_model")
+  canonicalModel String    @map("canonical_model")
   source         String
-  effectiveFrom  DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveFrom  DateTime  @map("effective_from") @db.Timestamptz(6)
   effectiveTo    DateTime? @map("effective_to") @db.Timestamptz(6)
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@unique([workspaceId, id])
   @@map("ai_workspace_price_overrides")
 }
 
 model AiBindingPriceOverride {
-  id                    String   @id
-  workspaceId           String   @map("workspace_id")
-  modelBindingVersionId String   @map("model_binding_version_id")
+  id                    String    @id
+  workspaceId           String    @map("workspace_id")
+  modelBindingVersionId String    @map("model_binding_version_id")
   source                String
-  effectiveFrom         DateTime @map("effective_from") @db.Timestamptz(6)
+  effectiveFrom         DateTime  @map("effective_from") @db.Timestamptz(6)
   effectiveTo           DateTime? @map("effective_to") @db.Timestamptz(6)
-  createdAt             DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@unique([workspaceId, id])
   @@map("ai_binding_price_overrides")
 }
 
 model AiPriceOverrideComponent {
-  id                           String   @id
-  installationPriceOverrideId  String?  @map("installation_price_override_id")
-  workspaceId                  String?  @map("workspace_id")
-  workspacePriceOverrideId     String?  @map("workspace_price_override_id")
-  bindingPriceOverrideId       String?  @map("binding_price_override_id")
-  componentKind                String   @map("component_kind")
-  billingUnit                  String   @map("billing_unit")
-  amount                       Decimal  @db.Decimal(38, 18)
-  currency                     String   @db.Char(3)
-  conditions                   Json
-  rawEntry                     Json     @map("raw_entry")
+  id                          String  @id
+  installationPriceOverrideId String? @map("installation_price_override_id")
+  workspaceId                 String? @map("workspace_id")
+  workspacePriceOverrideId    String? @map("workspace_price_override_id")
+  bindingPriceOverrideId      String? @map("binding_price_override_id")
+  componentKind               String  @map("component_kind")
+  billingUnit                 String  @map("billing_unit")
+  amount                      Decimal @db.Decimal(38, 18)
+  currency                    String  @db.Char(3)
+  conditions                  Json
+  rawEntry                    Json    @map("raw_entry")
 
   @@map("ai_price_override_components")
 }
 
 model AiBudgetPolicy {
-  id          String   @id
-  workspaceId String   @map("workspace_id")
-  scope       String
-  scopeKey    String   @map("scope_key")
-  limitAmount Decimal  @map("limit_amount") @db.Decimal(38, 18)
-  currency    String   @db.Char(3)
-  hard        Boolean
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  id                 String   @id
+  workspaceId        String   @map("workspace_id")
+  scope              String
+  scopeKey           String   @map("scope_key")
+  limitAmount        Decimal  @map("limit_amount") @db.Decimal(38, 18)
+  currency           String   @db.Char(3)
+  hard               Boolean
+  active             Boolean  @default(true)
+  revision           Int      @default(1)
+  supersedesPolicyId String?  @map("supersedes_policy_id")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   @@unique([workspaceId, id])
   @@map("ai_budget_policies")
+}
+
+/**
+ * Durable, safe invalidation notices for AI aggregates that are not backed by
+ * the generic administration-configuration foreign keys. The payload contains
+ * only immutable identifiers and cache scopes, never binding settings, model
+ * requests, secret references, or price values.
+ */
+model AdministrationAiConfigurationChangeOutbox {
+  id               String    @id
+  workspaceId      String    @map("workspace_id")
+  resourceType     String    @map("resource_type")
+  aggregateId      String    @map("aggregate_id")
+  previousVersionId String?  @map("previous_version_id")
+  currentVersionId String    @map("current_version_id")
+  cacheScopes      Json      @map("cache_scopes")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  publishedAt      DateTime? @map("published_at") @db.Timestamptz(6)
+  claimToken       String?   @map("claim_token")
+  claimedUntil     DateTime? @map("claimed_until") @db.Timestamptz(6)
+  claimAttempts    Int       @default(0) @map("claim_attempts")
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@unique([workspaceId, aggregateId, currentVersionId])
+  @@index([publishedAt, claimedUntil, createdAt])
+  @@map("administration_ai_configuration_change_outbox")
 }
 
 model AiBudgetBalance {
@@ -1119,27 +1570,27 @@ model AiBudgetBalance {
 }
 
 model AiOperation {
-  id                        String   @id
-  parentOperationId         String?  @map("parent_operation_id")
-  workspaceId               String   @map("workspace_id")
-  analysisJobId             String?  @map("analysis_job_id")
-  connectorInstanceId       String?  @map("connector_instance_id")
-  sourceId                  String?  @map("source_id")
+  id                        String    @id
+  parentOperationId         String?   @map("parent_operation_id")
+  workspaceId               String    @map("workspace_id")
+  analysisJobId             String?   @map("analysis_job_id")
+  connectorInstanceId       String?   @map("connector_instance_id")
+  sourceId                  String?   @map("source_id")
   role                      String
-  operationKind             String   @map("operation_kind")
-  modelBindingVersionId     String   @map("model_binding_version_id")
-  providerInstanceVersionId String   @map("provider_instance_version_id")
-  catalogSnapshotId         String   @map("catalog_snapshot_id")
-  configuredModel           String   @map("configured_model")
-  effectiveModel            String?  @map("effective_model")
-  providerRequestId         String?  @map("provider_request_id")
-  retryCount                Int      @default(0) @map("retry_count")
-  latencyMs                 Int?     @map("latency_ms")
-  rawRedacted               Json?    @map("raw_redacted")
+  operationKind             String    @map("operation_kind")
+  modelBindingVersionId     String    @map("model_binding_version_id")
+  providerInstanceVersionId String    @map("provider_instance_version_id")
+  catalogSnapshotId         String    @map("catalog_snapshot_id")
+  configuredModel           String    @map("configured_model")
+  effectiveModel            String?   @map("effective_model")
+  providerRequestId         String?   @map("provider_request_id")
+  retryCount                Int       @default(0) @map("retry_count")
+  latencyMs                 Int?      @map("latency_ms")
+  rawRedacted               Json?     @map("raw_redacted")
   status                    String
-  errorCode                 String?  @map("error_code")
-  errorRetryable            Boolean? @map("error_retryable")
-  startedAt                 DateTime @map("started_at") @db.Timestamptz(6)
+  errorCode                 String?   @map("error_code")
+  errorRetryable            Boolean?  @map("error_retryable")
+  startedAt                 DateTime  @map("started_at") @db.Timestamptz(6)
   finishedAt                DateTime? @map("finished_at") @db.Timestamptz(6)
 
   @@unique([workspaceId, id])
@@ -1149,17 +1600,17 @@ model AiOperation {
 }
 
 model AiOperationUsage {
-  id                  String   @id
-  workspaceId         String   @map("workspace_id")
-  operationId         String   @map("operation_id")
-  inputTokens         Int?     @map("input_tokens")
-  outputTokens        Int?     @map("output_tokens")
-  cacheReadInputTokens Int?    @map("cache_read_input_tokens")
-  cacheCreationInputTokens Int? @map("cache_creation_input_tokens")
-  reasoningTokens     Int?     @map("reasoning_tokens")
-  imageUnits          Int?     @map("image_units")
-  audioUnits          Int?     @map("audio_units")
-  rawUsage            Json?    @map("raw_usage")
+  id                       String @id
+  workspaceId              String @map("workspace_id")
+  operationId              String @map("operation_id")
+  inputTokens              Int?   @map("input_tokens")
+  outputTokens             Int?   @map("output_tokens")
+  cacheReadInputTokens     Int?   @map("cache_read_input_tokens")
+  cacheCreationInputTokens Int?   @map("cache_creation_input_tokens")
+  reasoningTokens          Int?   @map("reasoning_tokens")
+  imageUnits               Int?   @map("image_units")
+  audioUnits               Int?   @map("audio_units")
+  rawUsage                 Json?  @map("raw_usage")
 
   @@unique([workspaceId, operationId])
   @@map("ai_operation_usage")
@@ -1184,16 +1635,16 @@ model AiOperationCost {
 }
 
 model AiBudgetReservation {
-  id             String   @id
-  workspaceId    String   @map("workspace_id")
-  operationId    String   @map("operation_id")
-  budgetBalanceId String  @map("budget_balance_id")
-  amount         Decimal? @db.Decimal(38, 18)
-  currency       String   @db.Char(3)
-  status         String
-  overReservationAmount Decimal? @map("over_reservation_amount") @db.Decimal(38, 18)
-  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  reconciledAt   DateTime? @map("reconciled_at") @db.Timestamptz(6)
+  id                    String    @id
+  workspaceId           String    @map("workspace_id")
+  operationId           String    @map("operation_id")
+  budgetBalanceId       String    @map("budget_balance_id")
+  amount                Decimal?  @db.Decimal(38, 18)
+  currency              String    @db.Char(3)
+  status                String
+  overReservationAmount Decimal?  @map("over_reservation_amount") @db.Decimal(38, 18)
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  reconciledAt          DateTime? @map("reconciled_at") @db.Timestamptz(6)
 
   @@index([workspaceId, operationId, status])
   @@map("ai_budget_reservations")

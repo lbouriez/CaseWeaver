@@ -78,6 +78,8 @@ describe("KnowledgeScheduler", () => {
       expect.objectContaining({
         type: "knowledge.synchronize.v1",
         sourceId: "source-1",
+        configurationVersion: "source-config.v1",
+        trigger: "schedule",
       }),
     ]);
   });

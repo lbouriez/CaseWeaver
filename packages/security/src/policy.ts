@@ -28,6 +28,12 @@ export const permissions = [
   "publication.approve",
   "publication.publish",
   "configuration.manage",
+  "configuration.read",
+  "credential.readMetadata",
+  "webhook.manage",
+  "workspace.manage",
+  "identity.manage",
+  "diagnostics.export",
   "audit.read",
   "operations.inspect",
   "operations.retry",
@@ -50,6 +56,10 @@ const rolePermissions: Readonly<Record<WorkspaceRole, readonly Permission[]>> =
       "evidence.read",
       "connector.manage",
       "credential.manage",
+      "credential.readMetadata",
+      "configuration.read",
+      "configuration.manage",
+      "webhook.manage",
       "publication.approve",
       "publication.publish",
       "audit.read",
@@ -58,6 +68,7 @@ const rolePermissions: Readonly<Record<WorkspaceRole, readonly Permission[]>> =
       "operations.recover",
       "cost.read",
       "retention.run",
+      "diagnostics.export",
     ],
     analyst: ["analysis.request", "analysis.read", "evidence.read"],
     viewer: ["analysis.read", "evidence.read"],
@@ -94,6 +105,20 @@ export function can(
   return Object.freeze({ allowed, permission });
 }
 
+/**
+ * Returns the server-owned union for persisted workspace roles. Read models use
+ * this instead of duplicating role policy outside the security package.
+ */
+export function effectivePermissions(
+  roles: readonly WorkspaceRole[],
+): readonly Permission[] {
+  const effective = new Set<Permission>();
+  for (const role of roles) {
+    for (const permission of rolePermissions[role]) effective.add(permission);
+  }
+  return Object.freeze([...effective].sort());
+}
+
 export function requirePermission(
   assignments: readonly WorkspaceRoleAssignment[],
   workspaceId: WorkspaceId,
@@ -122,4 +147,27 @@ export interface AuditRecord {
   readonly beforeHash?: Sha256Digest;
   readonly afterHash?: Sha256Digest;
   readonly occurredAt: UtcInstant;
+  readonly origin?:
+    | "admin_ui"
+    | "api"
+    | "cli"
+    | "scheduler"
+    | "webhook"
+    | "worker";
+  readonly targetType?: string;
+  readonly outcome?:
+    | "attempted"
+    | "succeeded"
+    | "failed"
+    | "denied"
+    | "cancelled";
+  readonly permission?: Permission;
+  readonly reasonCode?: string;
+  readonly uiActionId?: string;
+  readonly requestId?: string;
+  readonly correlationId?: string;
+  readonly traceId?: string;
+  readonly idempotencyKeyDigest?: Sha256Digest;
+  readonly clientAddress?: string;
+  readonly userAgent?: string;
 }

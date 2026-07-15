@@ -206,6 +206,76 @@ export interface AnalysisRequestStore {
   ): Promise<void>;
 }
 
+/**
+ * The source command store deliberately owns only source lifecycle, immutable
+ * configuration resolution, and command idempotency.  It does not expose
+ * connector configuration or credentials to the application layer.
+ */
+export type KnowledgeSourceCommandKind = "synchronize" | "fullRescan";
+
+export interface StoredKnowledgeSourceCommand {
+  readonly requestDigest: Sha256Digest;
+  readonly outboxEnvelopeId: import("@caseweaver/domain").OutboxEnvelopeId;
+  readonly configurationVersion: string;
+  readonly kind: KnowledgeSourceCommandKind;
+}
+
+export interface KnowledgeSourceCommandStore {
+  lockIdempotencyKey(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly workspaceId: WorkspaceId;
+      readonly operation: "knowledgeSource.synchronize";
+      readonly keyDigest: Sha256Digest;
+    },
+  ): Promise<void>;
+  findIdempotency(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly workspaceId: WorkspaceId;
+      readonly operation: "knowledgeSource.synchronize";
+      readonly keyDigest: Sha256Digest;
+    },
+  ): Promise<StoredKnowledgeSourceCommand | undefined>;
+  recordIdempotency(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly workspaceId: WorkspaceId;
+      readonly operation: "knowledgeSource.synchronize";
+      readonly keyDigest: Sha256Digest;
+      readonly requestDigest: Sha256Digest;
+      readonly outboxEnvelopeId: import("@caseweaver/domain").OutboxEnvelopeId;
+      readonly configurationVersion: string;
+      readonly kind: KnowledgeSourceCommandKind;
+      readonly occurredAt: UtcInstant;
+    },
+  ): Promise<void>;
+  findSource(
+    transaction: ApplicationTransaction,
+    input: { readonly workspaceId: WorkspaceId; readonly sourceId: string },
+  ): Promise<
+    | Readonly<{
+        readonly id: string;
+        readonly lifecycle: "enabled" | "disabled";
+        readonly configurationVersion: string;
+      }>
+    | undefined
+  >;
+  /**
+   * Atomically reserves a manual full-rescan slot.  Scheduled rescans never
+   * use this reservation and are governed by their schedule occurrence key.
+   */
+  reserveManualFullRescan(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly workspaceId: WorkspaceId;
+      readonly sourceId: string;
+      readonly occurredAt: UtcInstant;
+      readonly cooldownMs: number;
+    },
+  ): Promise<boolean>;
+}
+
 export interface PublicationTarget {
   readonly connectorInstanceId: string;
   readonly resourceType: string;
