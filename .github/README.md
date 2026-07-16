@@ -14,10 +14,10 @@ operator can understand why a run occurred and which repository settings it need
 | Documentation portal | [`workflows/docs-pages.yml`](workflows/docs-pages.yml) | Documentation pull requests, `main`, or manual dispatch | Cloudflare Pages preview/production deployments. |
 | Documentation portal cleanup | [`workflows/docs-pages-cleanup.yml`](workflows/docs-pages-cleanup.yml) | Closed pull requests, daily schedule, or manual dispatch | Cloudflare Pages preview/old-production deployments. |
 
-The first three workflows are active in the GitHub repository today. The documentation
-workflows become active when their documentation-portal delivery is committed to
-`main`; they are documented here so their privileges and external effects are clear
-before activation.
+All five workflows are active once this documentation-portal delivery reaches `main`.
+The documentation workflow always performs its isolated site verification. Its
+Cloudflare publication and cleanup steps remain safely skipped until the documented
+repository variables and protected-environment secret are configured.
 
 ## CI — source quality and integration verification
 
@@ -98,11 +98,17 @@ and keeps the verified build artifact for seven days.
   `cloudflare-pages-preview` environment deploys a preview to branch `pr-<number>` and
   maintains one bot comment with its HTTPS URL.
 
-Required protected-environment configuration is:
+Cloudflare publishing becomes eligible only after these **repository variables** are
+configured:
 
-- repository variables: `CASEWEAVER_DOCS_SITE_URL` (production),
-  `CLOUDFLARE_ACCOUNT_ID`, and `CLOUDFLARE_PAGES_PROJECT`;
-- secret: `CLOUDFLARE_API_TOKEN`.
+- `CASEWEAVER_DOCS_SITE_URL` — the production HTTPS origin;
+- `CLOUDFLARE_ACCOUNT_ID`;
+- `CLOUDFLARE_PAGES_PROJECT`.
+
+`CLOUDFLARE_API_TOKEN` is a secret in both `cloudflare-pages-preview` and
+`cloudflare-pages-production`; protect the production environment. Without all public
+variables, verification still succeeds but deployment jobs are skipped. Once a
+deployment job is eligible, its environment validates the token before it can upload.
 
 The token is never given to fork pull requests. The production and preview deployment
 jobs use only the artifact created by the verification job, not an unverified checkout.
@@ -115,8 +121,9 @@ and retain only the selected number of newest production deployments. Manual dis
 supports `dry_run` and `keep_production` inputs; use `dry_run: true` first when
 operating it manually.
 
-This workflow needs the same Cloudflare account, token, and project configuration as
-the documentation publisher. It never runs cleanup for a fork pull request.
+This workflow needs the same repository variables and environment secret as the
+documentation publisher. It never runs cleanup for a fork pull request and safely
+skips external deletion when that configuration is absent.
 
 ## Troubleshooting a run
 

@@ -1,0 +1,117 @@
+:global(.navbar) {
+  background: transparent;
+  box-shadow: none;
+  height: auto;
+  padding: 0;
+}
+
+.header {
+  backdrop-filter: blur(14px);
+  background: color-mix(in srgb, var(--ifm-background-color) 90%, transparent);
+  border-bottom: 1px solid var(--ifm-color-emphasis-200);
+  position: sticky;
+  top: 0;
+  width: 100%;
+  z-index: 10;
+}
+
+.container {
+  align-items: center;
+  display: flex;
+  height: 4rem;
+  justify-content: space-between;
+  margin: 0 auto;
+  max-width: 80rem;
+  padding: 0 1.25rem;
+}
+
+.leftSection,
+.rightSection,
+.brand {
+  align-items: center;
+  display: flex;
+}
+
+.leftSection,
+.rightSection {
+  gap: 0.75rem;
+}
+
+.brand {
+  color: var(--ifm-font-color-base);
+  font-size: 1.125rem;
+  font-weight: 750;
+  gap: 0.55rem;
+  text-decoration: none;
+}
+
+.brand:hover {
+  color: var(--ifm-color-primary);
+  text-decoration: none;
+}
+
+.menuButton,
+.repositoryLink,
+.localeSelect {
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 999px;
+  color: var(--ifm-font-color-base);
+  font: inherit;
+  min-height: 2.5rem;
+  padding: 0 0.85rem;
+}
+
+.menuButton,
+.repositoryLink {
+  background: var(--ifm-background-surface-color);
+  cursor: pointer;
+  font-size: 0.875rem;
+  text-decoration: none;
+}
+
+.repositoryLink:hover,
+.menuButton:hover,
+.localeSelect:hover {
+  border-color: var(--ifm-color-primary);
+  color: var(--ifm-color-primary);
+  text-decoration: none;
+}
+
+.localeSelect {
+  background: var(--ifm-background-surface-color);
+  cursor: pointer;
+  font-size: 0.875rem;
+}
+
+.search {
+  display: none;
+}
+
+.visuallyHidden {
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  position: absolute;
+  width: 1px;
+}
+
+@media (min-width: 768px) {
+  .container {
+    height: 4.5rem;
+    padding: 0 2rem;
+  }
+
+  .search {
+    display: block;
+  }
+}
+
+@media (max-width: 460px) {
+  .repositoryLink {
+    display: none;
+  }
+
+  .localeSelect {
+    max-width: 7.25rem;
+  }
+}
