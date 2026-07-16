@@ -17,8 +17,14 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: 22.13.1
-      - name: Enable Corepack
-        run: corepack enable
+      # Node 22.13 ships an older Corepack keyring that cannot verify the
+      # repository-pinned pnpm release. Install the pinned, current Corepack
+      # before any pnpm command, including always-run cleanup steps.
+      - name: Activate the pinned pnpm toolchain
+        run: |
+          npm install --global corepack@0.31.0
+          corepack enable
+          corepack prepare pnpm@11.12.0 --activate
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Check formatting
