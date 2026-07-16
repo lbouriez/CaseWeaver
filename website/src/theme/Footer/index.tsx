@@ -1,4 +1,5 @@
 import Link from "@docusaurus/Link";
+import Translate, { translate } from "@docusaurus/Translate";
 import useDocusaurusContext from "@docusaurus/useDocusaurusContext";
 import type React from "react";
 
@@ -16,20 +17,34 @@ export default function Footer(): React.ReactElement {
           <CaseWeaverMark />
           <span>{siteConfig.title}</span>
         </Link>
-        <nav aria-label="Footer navigation" className={styles.links}>
-          <Link to="/docs/overview">Documentation</Link>
-          <Link to="/docs/architecture">Architecture</Link>
-          <Link to="/docs/operations">Operations status</Link>
-          <Link to="/docs/capability-status">Roadmap and status</Link>
+        <nav
+          aria-label={translate({
+            id: "footer.navigation",
+            message: "Footer navigation",
+          })}
+          className={styles.links}
+        >
+          <Link to="/docs/overview">
+            <Translate id="footer.documentation">Documentation</Translate>
+          </Link>
+          <Link to="/docs/architecture">
+            <Translate id="footer.architecture">Architecture</Translate>
+          </Link>
+          <Link to="/docs/operations">
+            <Translate id="footer.operations">Operations status</Translate>
+          </Link>
+          <Link to="/docs/capability-status">
+            <Translate id="footer.status">Roadmap and status</Translate>
+          </Link>
           <a href={repositoryUrl} rel="noreferrer" target="_blank">
-            Source repository
+            <Translate id="footer.repository">Source repository</Translate>
           </a>
           <a
             href={`${repositoryUrl}/blob/main/LICENSE`}
             rel="noreferrer"
             target="_blank"
           >
-            License
+            <Translate id="footer.license">License</Translate>
           </a>
         </nav>
         <p className={styles.copyright}>

@@ -20,6 +20,36 @@ pnpm --dir website test
 pnpm --dir website build
 ```
 
+## Reviewed translations
+
+English and French are published locales. French pages live under
+`website/i18n/fr/docusaurus-plugin-content-docs/current/`; they are authored and
+reviewed as documentation, not generated in a browser or fetched at site runtime.
+
+CaseWeaver intentionally does not copy Rekindle's direct-provider translation script:
+it reads a local API key and calls a vendor directly, which is incompatible with this
+repository's AI-execution and secret-handling boundaries. Until an approved, metered
+translation binding exists, update translations through human review.
+
+After changing an English page, check whether each reviewed translation is still tied to
+the exact English revision:
+
+```powershell
+pnpm --dir website translations:status
+```
+
+When a reviewer has approved the corresponding locale pages, record their English source
+hashes:
+
+```powershell
+pnpm --dir website translations:manifest
+```
+
+The manifest is a review checkpoint, not an automatic translation mechanism. It never
+sends documentation to an AI provider, stores API credentials, or replaces translated
+content. Use `pnpm --dir website i18n:write -- --locale fr` only to refresh Docusaurus
+message scaffolding, then translate those messages and review them before committing.
+
 The production artifact is `website/build/`. `CASEWEAVER_DOCS_SITE_URL` is optional for
 local builds and must be an HTTPS origin when supplied. Cloudflare production builds set
 it through a repository or protected-environment variable; it is public site metadata,

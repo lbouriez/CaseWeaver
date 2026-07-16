@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "locale": "fr",
+  "sources": {
+    "architecture.md": {
+      "sourceHash": "b9667fd199da5dca55242885774cd7b0428051350fafb33f2084860c6154510a",
+      "translationPath": "architecture.md"
+    },
+    "capability-status.md": {
+      "sourceHash": "65c5207f4878be82d437e50c60bec86aae3b06f2a772fdf0f5327e921769ad4f",
+      "translationPath": "capability-status.md"
+    },
+    "contributing.md": {
+      "sourceHash": "4b19c721db1963214076961b2b2cbe8dd886bf0e27c545c8c6c48e87f9e27f21",
+      "translationPath": "contributing.md"
+    },
+    "operations.md": {
+      "sourceHash": "a593fb098aab15096816b613c08c1a3509690ed246b64083efe8776ba983d0b3",
+      "translationPath": "operations.md"
+    },
+    "overview.md": {
+      "sourceHash": "dac5472bbb1aefae9de1d5023215b8c0cd1436f96a6c3a4fd5794cf35ef02173",
+      "translationPath": "overview.md"
+    }
+  }
+}

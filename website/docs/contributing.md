@@ -20,4 +20,7 @@ the current implementation, configuration validation, and accepted delivery cont
 Mark incomplete behavior as unavailable rather than writing a speculative click path.
 
 Translations are opt-in authoring work. The locale structure is present now; a human
-review is required before a translated page is published.
+review is required before a translated page is published. After editing an English page,
+run `pnpm --dir website translations:status`. Update the locale page, have it reviewed,
+then run `pnpm --dir website translations:manifest` to record the exact English source
+revision that was reviewed. These commands never call an AI provider or read an API key.

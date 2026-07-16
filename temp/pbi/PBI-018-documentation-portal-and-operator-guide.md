@@ -48,8 +48,12 @@ pending until their owners accept the relevant behavior.
 
 **Phase 1 delivery status: complete in the repository.** The standalone portal, its
 independent lockfile, bilingual English/French build, CaseWeaver-owned responsive navigation/footer,
-local search, availability pages, and focused source checks are present. Phase 2 remains
-pending the required accepted contracts.
+local search, availability pages, and focused source checks are present. The French
+locale contains reviewed counterparts of the current English pages, home page, and
+navigation. Its CaseWeaver-owned status/manifest command records the exact English
+revision after human approval and fails review checks when source material changes; it
+does not read a provider credential or make a direct AI call. Phase 2 remains pending
+the required accepted contracts.
 
 PBI-019 separately publishes this static artifact to Cloudflare Pages. Phase 1 produces
 the build output and repository documentation needed by that workflow, but does not own

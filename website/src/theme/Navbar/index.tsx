@@ -1,5 +1,6 @@
 import Link from "@docusaurus/Link";
 import { useLocation } from "@docusaurus/router";
+import Translate, { translate } from "@docusaurus/Translate";
 import {
   useAlternatePageUtils,
   useNavbarMobileSidebar,
@@ -25,12 +26,16 @@ function LocaleChooser(): React.ReactElement {
   const currentLocale = isSupportedLocale(i18n.currentLocale)
     ? i18n.currentLocale
     : "en";
+  const selectLanguage = translate({
+    id: "navbar.language.select",
+    message: "Select language",
+  });
 
   return (
     <label className={styles.localeLabel}>
-      <span className={styles.visuallyHidden}>Select language</span>
+      <span className={styles.visuallyHidden}>{selectLanguage}</span>
       <select
-        aria-label="Select language"
+        aria-label={selectLanguage}
         className={styles.localeSelect}
         onChange={(event) => {
           const locale = event.currentTarget.value;
@@ -57,7 +62,10 @@ function LocaleChooser(): React.ReactElement {
 function NavbarBackdrop({ onClick }: { readonly onClick: () => void }) {
   return (
     <button
-      aria-label="Close documentation navigation"
+      aria-label={translate({
+        id: "navbar.navigation.close",
+        message: "Close documentation navigation",
+      })}
       className="navbar-sidebar__backdrop"
       onClick={onClick}
       type="button"
@@ -74,6 +82,10 @@ export default function Navbar(): React.ReactElement {
   const showMobileNavigation =
     isDocumentationRoute && (windowSize === "mobile" || windowSize === "ssr");
   const repositoryUrl = siteConfig.customFields?.repositoryUrl as string;
+  const toggleNavigation = translate({
+    id: "navbar.navigation.toggle",
+    message: "Toggle documentation navigation",
+  });
 
   return (
     <nav
@@ -87,12 +99,16 @@ export default function Navbar(): React.ReactElement {
             {showMobileNavigation ? (
               <button
                 aria-expanded={mobileSidebar.shown}
-                aria-label="Toggle documentation navigation"
+                aria-label={toggleNavigation}
                 className={`navbar__toggle clean-btn ${styles.menuButton}`}
                 onClick={mobileSidebar.toggle}
                 type="button"
               >
-                {mobileSidebar.shown ? "Close" : "Menu"}
+                {mobileSidebar.shown ? (
+                  <Translate id="navbar.close">Close</Translate>
+                ) : (
+                  <Translate id="navbar.menu">Menu</Translate>
+                )}
               </button>
             ) : null}
             <Link className={styles.brand} to="/">
@@ -111,7 +127,7 @@ export default function Navbar(): React.ReactElement {
               rel="noreferrer"
               target="_blank"
             >
-              Repository
+              <Translate id="navbar.repository">Repository</Translate>
             </a>
           </div>
         </div>

@@ -10,7 +10,9 @@
     "clear": "docusaurus clear",
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/*.test.mjs",
-    "i18n:write": "docusaurus write-translations"
+    "i18n:write": "docusaurus write-translations",
+    "translations:status": "node scripts/translate-docs/status.mjs --check",
+    "translations:manifest": "node scripts/translate-docs/status.mjs --write-manifest"
   },
   "dependencies": {
     "@docusaurus/core": "3.10.2",
