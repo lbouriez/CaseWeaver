@@ -27,15 +27,14 @@ import {
   Resource,
   type ResourceProps,
   useAuthProvider,
-  useLogin,
   usePermissions,
   useRefresh,
 } from "react-admin";
-import { Link, Route } from "react-router-dom";
+import { Link, Route, useNavigate } from "react-router-dom";
 
 import { CaseWeaverApiClient } from "./api/api-client.js";
+import { ApiClientProvider, useApiClient } from "./api/context.js";
 import type { AuthenticatedSession, Session } from "./api/contracts.js";
-import { ApiClientProvider } from "./api/context.js";
 import { createDataProvider } from "./api/data-provider.js";
 import {
   createSessionAuthProvider,
@@ -167,9 +166,124 @@ function OperatorSignInCard({
   );
 }
 
+type LoginPageState =
+  | { readonly phase: "checking" }
+  | {
+      readonly phase: "anonymous";
+      readonly authentication: Extract<
+        Session,
+        { readonly authenticated: false }
+      >["authentication"];
+    }
+  | { readonly phase: "authenticated" }
+  | { readonly phase: "unavailable" };
+
+/**
+ * React-Admin owns `#/login`, but an API-managed session can be established
+ * before the browser returns there (for example after a previously stale auth
+ * check). Recheck the cookie session on that route and leave it immediately
+ * when it is valid. Anonymous visitors receive the same available sign-in
+ * choices as the outer session gate.
+ */
+export function SessionAwareLoginPage({
+  authenticateWithPassword,
+  client,
+  onAuthenticated,
+  onOauthLogin,
+}: {
+  readonly authenticateWithPassword: (
+    login: string,
+    password: string,
+  ) => Promise<AuthenticatedSession>;
+  readonly client: SessionGateClient;
+  readonly onAuthenticated: () => void;
+  readonly onOauthLogin: () => void;
+}) {
+  const [state, setState] = useState<LoginPageState>({ phase: "checking" });
+
+  const checkSession = useCallback(async () => {
+    setState({ phase: "checking" });
+    try {
+      const session = await client.session();
+      setState(
+        session.authenticated
+          ? { phase: "authenticated" }
+          : { phase: "anonymous", authentication: session.authentication },
+      );
+    } catch {
+      setState({ phase: "unavailable" });
+    }
+  }, [client]);
+
+  useEffect(() => {
+    void checkSession();
+  }, [checkSession]);
+
+  useEffect(() => {
+    if (state.phase === "authenticated") onAuthenticated();
+  }, [onAuthenticated, state.phase]);
+
+  if (state.phase === "checking" || state.phase === "authenticated") {
+    return (
+      <Box
+        aria-label="Checking operator session"
+        sx={{
+          alignItems: "center",
+          display: "flex",
+          justifyContent: "center",
+          minHeight: "100vh",
+        }}
+      >
+        <CircularProgress />
+      </Box>
+    );
+  }
+  if (state.phase === "unavailable") {
+    return (
+      <OperatorSignInCard onRetry={() => void checkSession()} unavailable />
+    );
+  }
+  return (
+    <OperatorSignInCard
+      authentication={state.authentication}
+      onOauthLogin={state.authentication.oauth ? onOauthLogin : undefined}
+      onPasswordLogin={
+        state.authentication.password
+          ? async (login, password) => {
+              await authenticateWithPassword(login, password);
+              onAuthenticated();
+            }
+          : undefined
+      }
+    />
+  );
+}
+
 function OperatorLoginPage() {
-  const login = useLogin();
-  return <OperatorSignInCard onOauthLogin={() => void login({})} />;
+  const authProvider = useAuthProvider() as SessionAuthProvider;
+  const client = useApiClient();
+  const navigate = useNavigate();
+  const onAuthenticated = useCallback(
+    () => navigate("/", { replace: true }),
+    [navigate],
+  );
+  const authenticateWithPassword = useCallback(
+    (login: string, password: string) =>
+      authProvider.passwordLogin(login, password),
+    [authProvider],
+  );
+  const onOauthLogin = useCallback(
+    () => void authProvider.login({}),
+    [authProvider],
+  );
+  return (
+    <SessionAwareLoginPage
+      authenticateWithPassword={authenticateWithPassword}
+      client={client}
+      onAuthenticated={onAuthenticated}
+      onOauthLogin={onOauthLogin}
+    />
+  );
 }
 
 function OperatorMenu() {

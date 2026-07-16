@@ -30,6 +30,18 @@ describe("session auth provider", () => {
         "https://ui.example.test",
       ),
     ).toBe("/");
+    expect(
+      sameOriginReturnTo(
+        "https://ui.example.test/control/#/login",
+        "https://ui.example.test",
+      ),
+    ).toBe("/control/");
+    expect(
+      sameOriginReturnTo(
+        "https://ui.example.test/login",
+        "https://ui.example.test",
+      ),
+    ).toBe("/");
   });
 
   it("redirects browser login through the API without persisting a token", async () => {

@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import type { Session } from "./api/contracts.js";
-import { OperatorSessionGate } from "./app.js";
+import { OperatorSessionGate, SessionAwareLoginPage } from "./app.js";
 
 const authenticatedSession = {
   authenticated: true as const,
@@ -16,6 +16,23 @@ const authenticatedSession = {
 };
 
 describe("operator session gate", () => {
+  it("leaves React-Admin's login route when the API cookie session is already authenticated", async () => {
+    const onAuthenticated = vi.fn();
+    const authenticateWithPassword = vi.fn(async () => authenticatedSession);
+    render(
+      <SessionAwareLoginPage
+        authenticateWithPassword={authenticateWithPassword}
+        client={{ session: vi.fn(async () => authenticatedSession) }}
+        onAuthenticated={onAuthenticated}
+        onOauthLogin={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(onAuthenticated).toHaveBeenCalledTimes(1));
+    expect(authenticateWithPassword).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
+  });
+
   it("renders only password authentication when OAuth is not configured and clears the browser-side credential state after sign-in", async () => {
     const passwordLogin = vi.fn(async () => authenticatedSession);
     render(

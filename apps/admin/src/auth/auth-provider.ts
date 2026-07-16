@@ -27,6 +27,13 @@ export function sameOriginReturnTo(
   try {
     const url = new URL(candidate, uiOrigin);
     if (url.origin !== uiOrigin) return "/";
+    // React-Admin reserves this route for the unauthenticated view. Returning
+    // an OAuth callback here creates a valid server session, then immediately
+    // renders that view again. Keep a deployment subpath for hash routing, but
+    // never use the login route itself as an authentication return target.
+    if (/^#\/login(?:[/?]|$)/u.test(url.hash))
+      return `${url.pathname}${url.search}`;
+    if (url.pathname === "/login") return "/";
     return `${url.pathname}${url.search}${url.hash}`;
   } catch {
     return "/";

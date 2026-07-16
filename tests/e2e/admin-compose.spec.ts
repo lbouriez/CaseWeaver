@@ -26,6 +26,16 @@ test.describe("disposable Compose operator journey", () => {
     await expect(
       page.getByRole("link", { name: /Knowledge & Analysis/u }),
     ).toBeVisible();
+
+    // React-Admin owns this route. A valid API-managed session must take the
+    // operator back to the control room rather than leaving them on a stale
+    // unauthenticated page after an OAuth or browser-navigation return.
+    await page.goto(`${origin}/#/login`);
+    await expect(page).toHaveURL(`${origin}/#/`);
+    await expect(
+      page.getByRole("link", { name: /Knowledge & Analysis/u }),
+    ).toBeVisible();
+
     const cookies = await page.context().cookies(origin);
     expect(cookies).toEqual(
       expect.arrayContaining([
