@@ -127,9 +127,13 @@ audit writes, and outcome reconciliation.
   profile and vector dimensions; the console intentionally does not assume a
   provider, model, or dimension.
 - Small circular information controls expose descriptor-owned help and safe
-  examples without hiding input meaning. The external-secret reference form
-  explains the bundled `env:UPPERCASE_NAME` resolver and examples such as
-  `env:GITHUB_TOKEN`; it never offers a secret-value input.
+  examples without hiding input meaning. The same reusable control explains
+  non-routine authoring decisions—policy JSON, AI token/cost/budget limits,
+  source and schedule behavior, webhook ingress limits, public bases, and
+  workspace roles—without adding another client-side policy boundary. The
+  external-secret reference form explains the bundled `env:UPPERCASE_NAME`
+  resolver and examples such as `env:GITHUB_TOKEN`; it never offers a
+  secret-value input.
 - Workspace selection is derived from the API session's memberships and sent through
   the CSRF-protected session-switch endpoint. The browser cannot submit a role,
   permission, or arbitrary workspace grant.

@@ -14,6 +14,7 @@ import type {
   PolicyProfileResource,
 } from "../api/api-client.js";
 import { ApiFailure } from "./api-failure.js";
+import { AuthoringFieldLabel } from "./authoring-field-label.js";
 import { parseSafeConfiguration } from "./safe-configuration-json.js";
 
 const profileCopy: Readonly<
@@ -149,6 +150,10 @@ export function PolicyProfileDraftForm({
             htmlInput: { maxLength: maximumProfileDisplayNameLength },
           }}
           value={displayName}
+        />
+        <AuthoringFieldLabel
+          description="Enter only bounded retrieval or prompt policy settings. The API validates the object, owns immutable versioning, and rejects credential-shaped fields; this form cannot configure an endpoint, model, connector, or secret."
+          label={copy.settingsLabel}
         />
         <TextField
           fullWidth

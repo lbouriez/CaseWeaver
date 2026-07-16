@@ -98,6 +98,17 @@ describe("source and schedule drafts", () => {
         /Collections are created and maintained in Knowledge & Analysis/u,
       ),
     ).not.toBeNull();
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: "Help for Source synchronization policy",
+      }),
+    );
+    expect(
+      screen.getByText(
+        /feature-level JSON policy for when the source may synchronize/u,
+      ),
+    ).not.toBeNull();
+    await userEvent.keyboard("{Escape}");
     await userEvent.type(
       screen.getByLabelText(/Source display name/u),
       "New source",

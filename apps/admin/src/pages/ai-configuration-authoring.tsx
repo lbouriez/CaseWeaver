@@ -11,10 +11,10 @@ import {
   Typography,
 } from "@mui/material";
 import { useCallback, useEffect, useMemo, useState } from "react";
-
-import type { AdminDetail, AdminListItem } from "../api/contracts.js";
 import { useApiClient } from "../api/context.js";
+import type { AdminDetail, AdminListItem } from "../api/contracts.js";
 import { ApiFailure } from "../components/api-failure.js";
+import { AuthoringFieldLabel } from "../components/authoring-field-label.js";
 
 const roles = [
   "embedding",
@@ -292,6 +292,10 @@ export function AiConfigurationAuthoring({
                 </MenuItem>
               ))}
             </TextField>
+            <AuthoringFieldLabel
+              description="A CaseWeaver role describes the capability this immutable binding may serve. The API validates the selected server-discovered provider, catalog model, and role together."
+              label="Binding role"
+            />
             <TextField
               label="Role"
               onChange={(event) => setRole(event.target.value as AiRole)}
@@ -304,11 +308,19 @@ export function AiConfigurationAuthoring({
                 </MenuItem>
               ))}
             </TextField>
+            <AuthoringFieldLabel
+              description="An optional upper bound on input tokens for calls through this binding. Leave it empty only when the server-side binding policy permits an unbounded input limit."
+              label="Maximum input tokens"
+            />
             <TextField
               label="Maximum input tokens (optional)"
               onChange={(event) => setInputTokens(event.target.value)}
               type="number"
               value={inputTokens}
+            />
+            <AuthoringFieldLabel
+              description="An optional upper bound on output tokens for calls through this binding. The server applies the final capability and budget checks at execution time."
+              label="Maximum output tokens"
             />
             <TextField
               label="Maximum output tokens (optional)"
@@ -464,6 +476,10 @@ export function AiConfigurationAuthoring({
         >
           <Stack spacing={2}>
             <Typography variant="h5">Set workspace role default</Typography>
+            <AuthoringFieldLabel
+              description="The workspace default selects which immutable model binding version is used for a CaseWeaver capability when no more specific server policy overrides it."
+              label="Default role"
+            />
             <TextField
               label="Role"
               onChange={(event) => setDefaultRole(event.target.value as AiRole)}
@@ -476,6 +492,10 @@ export function AiConfigurationAuthoring({
                 </MenuItem>
               ))}
             </TextField>
+            <AuthoringFieldLabel
+              description="A binding version is immutable. Selecting it pins the workspace default to that exact reviewed configuration rather than silently following later binding changes."
+              label="Default binding version"
+            />
             <TextField
               label="Binding version"
               onChange={(event) =>
@@ -543,10 +563,19 @@ export function AiConfigurationAuthoring({
                 </MenuItem>
               ))}
             </TextField>
+            <AuthoringFieldLabel
+              description="Enter the price for one input token in the selected currency. The API uses it for cost attribution; unknown pricing is never treated as zero."
+              label="Input token price"
+            />
             <TextField
               label="Input price amount"
               onChange={(event) => setPriceAmount(event.target.value)}
               value={priceAmount}
+            />
+            <AuthoringFieldLabel
+              description="Use the three-letter currency code that matches the entered price. The API validates the policy before it becomes effective."
+              examples={["USD", "CAD"]}
+              label="Price currency"
             />
             <TextField
               label="Currency"
@@ -604,6 +633,10 @@ export function AiConfigurationAuthoring({
                 </MenuItem>
               ))}
             </TextField>
+            <AuthoringFieldLabel
+              description="Scope determines where the API evaluates this cost limit: one operation, one analysis, a day, or the whole workspace."
+              label="Budget scope"
+            />
             <TextField
               label="Scope"
               onChange={(event) =>
@@ -620,15 +653,28 @@ export function AiConfigurationAuthoring({
                 ),
               )}
             </TextField>
+            <AuthoringFieldLabel
+              description="The scope key identifies the server-owned subject within the selected budget scope. It is a budget-policy key, never an authorization grant."
+              label="Budget scope key"
+            />
             <TextField
               label="Scope key"
               onChange={(event) => setBudgetScopeKey(event.target.value)}
               value={budgetScopeKey}
             />
+            <AuthoringFieldLabel
+              description="The maximum monetary amount permitted in this scope and currency. The API attributes actual costs and continues to reject unknown pricing."
+              label="Budget limit amount"
+            />
             <TextField
               label="Limit amount"
               onChange={(event) => setBudgetAmount(event.target.value)}
               value={budgetAmount}
+            />
+            <AuthoringFieldLabel
+              description="Use the three-letter currency code in which the budget limit is expressed."
+              examples={["USD", "CAD"]}
+              label="Budget currency"
             />
             <TextField
               label="Currency"
@@ -637,15 +683,21 @@ export function AiConfigurationAuthoring({
               }
               value={budgetCurrency}
             />
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={budgetHard}
-                  onChange={(event) => setBudgetHard(event.target.checked)}
-                />
-              }
-              label="Hard limit"
-            />
+            <Stack spacing={0.5}>
+              <AuthoringFieldLabel
+                description="A hard limit causes the API to deny work that would exceed the policy. A non-hard policy remains visible for monitoring and server-owned handling."
+                label="Hard budget limit"
+              />
+              <FormControlLabel
+                control={
+                  <Checkbox
+                    checked={budgetHard}
+                    onChange={(event) => setBudgetHard(event.target.checked)}
+                  />
+                }
+                label="Hard limit"
+              />
+            </Stack>
             <Button
               disabled={busy}
               onClick={() =>

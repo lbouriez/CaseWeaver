@@ -95,6 +95,15 @@ describe("control-plane authoring", () => {
 
     await screen.findByRole("checkbox", { name: "Signing reference" });
     await screen.findByDisplayValue("https://api.example.test/v1");
+    await user.click(
+      screen.getByRole("button", { name: "Help for Webhook event types" }),
+    );
+    expect(
+      screen.getByText(
+        /event codes that this endpoint is permitted to receive/u,
+      ),
+    ).not.toBeNull();
+    await user.keyboard("{Escape}");
 
     await user.type(
       screen.getByLabelText(/^Publication profile display name/u),

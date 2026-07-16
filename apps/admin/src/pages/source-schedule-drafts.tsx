@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import { useApiClient } from "../api/context.js";
 import type { AdminDetail, AdminListItem } from "../api/contracts.js";
 import { ApiFailure } from "../components/api-failure.js";
+import { AuthoringFieldLabel } from "../components/authoring-field-label.js";
 import { SourceScheduleLifecycleControl } from "../components/source-schedule-lifecycle-control.js";
 
 type CadenceKind = "interval" | "cron";
@@ -407,6 +408,10 @@ export function SourceScheduleDrafts({
               required
               value={chunkingProfileVersion}
             />
+            <AuthoringFieldLabel
+              description="The maximum number of source chunks included in one metered embedding operation. It controls the size of each operation, while the API remains responsible for budgets and total cost attribution."
+              label="Embedding batch size"
+            />
             <TextField
               fullWidth
               helperText="The maximum number of chunks sent to the metered embedding gateway in one operation."
@@ -435,6 +440,10 @@ export function SourceScheduleDrafts({
                 </MenuItem>
               ))}
             </TextField>
+            <AuthoringFieldLabel
+              description="A bounded, feature-level JSON policy for when the source may synchronize. Connector-specific filters belong only to the selected connector configuration."
+              label="Source synchronization policy"
+            />
             <TextField
               fullWidth
               helperText="JSON object only. Connector-specific filters stay in the connector configuration."
@@ -444,6 +453,10 @@ export function SourceScheduleDrafts({
               onChange={(event) => setSynchronizationPolicy(event.target.value)}
               required
               value={synchronizationPolicy}
+            />
+            <AuthoringFieldLabel
+              description="Tombstone preserves an auditable deletion state for documents removed upstream; retain leaves previously indexed documents in place. The server executes the chosen lifecycle behavior."
+              label="Source deletion behavior"
             />
             <TextField
               fullWidth
@@ -548,6 +561,10 @@ export function SourceScheduleDrafts({
                 </MenuItem>
               ))}
             </TextField>
+            <AuthoringFieldLabel
+              description="Synchronize requests bounded incremental work; full rescan requests a controlled re-evaluation of the selected source. The scheduler only enqueues the work and workers execute it."
+              label="Schedule run kind"
+            />
             <TextField
               fullWidth
               label="Run kind"
@@ -563,6 +580,10 @@ export function SourceScheduleDrafts({
               <MenuItem value="synchronize">Synchronize changes</MenuItem>
               <MenuItem value="fullRescan">Full rescan</MenuItem>
             </TextField>
+            <AuthoringFieldLabel
+              description="Choose a fixed elapsed interval or a cron expression interpreted in the selected IANA timezone. The API validates the final schedule before it is activated."
+              label="Schedule cadence"
+            />
             <TextField
               fullWidth
               label="Cadence"
@@ -577,22 +598,38 @@ export function SourceScheduleDrafts({
               <MenuItem value="cron">Cron expression</MenuItem>
             </TextField>
             {cadenceKind === "interval" ? (
-              <TextField
-                fullWidth
-                label="Interval milliseconds"
-                onChange={(event) => setIntervalMs(event.target.value)}
-                required
-                type="number"
-                value={intervalMs}
-              />
+              <>
+                <AuthoringFieldLabel
+                  description="The positive elapsed time between eligible runs, expressed in milliseconds. The API applies its own jitter, leasing, and overlap safeguards."
+                  label="Schedule interval"
+                />
+                <TextField
+                  fullWidth
+                  label="Interval milliseconds"
+                  onChange={(event) => setIntervalMs(event.target.value)}
+                  required
+                  type="number"
+                  value={intervalMs}
+                />
+              </>
             ) : (
               <>
+                <AuthoringFieldLabel
+                  description="A server-validated cron expression that determines eligible run times. It is interpreted in the IANA timezone below, not in an operator browser timezone."
+                  examples={["0 * * * *"]}
+                  label="Schedule cron expression"
+                />
                 <TextField
                   fullWidth
                   label="Cron expression"
                   onChange={(event) => setCronExpression(event.target.value)}
                   required
                   value={cronExpression}
+                />
+                <AuthoringFieldLabel
+                  description="An IANA timezone used to interpret the cron expression, such as America/Toronto. It makes daylight-saving behavior explicit and server-owned."
+                  examples={["UTC", "America/Toronto"]}
+                  label="Schedule timezone"
                 />
                 <TextField
                   fullWidth
@@ -603,6 +640,10 @@ export function SourceScheduleDrafts({
                 />
               </>
             )}
+            <AuthoringFieldLabel
+              description="Skip avoids concurrent work when an earlier run is still executing. Queue retains due runs for controlled worker processing, subject to server limits."
+              label="Schedule overlap policy"
+            />
             <TextField
               fullWidth
               label="Overlap policy"
@@ -616,6 +657,10 @@ export function SourceScheduleDrafts({
               <MenuItem value="skip">Skip overlapping execution</MenuItem>
               <MenuItem value="queue">Queue overlapping execution</MenuItem>
             </TextField>
+            <AuthoringFieldLabel
+              description="The first eligible UTC instant for this schedule. The API stores the normalized timestamp and later runs remain pinned to the selected immutable source version."
+              label="Schedule first run"
+            />
             <TextField
               fullWidth
               helperText="Stored as UTC by the API."

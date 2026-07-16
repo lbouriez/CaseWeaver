@@ -33,6 +33,13 @@ describe("role assignment editor", () => {
     );
 
     await screen.findByText("Current workspace role revision: 4");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Help for Workspace roles" }),
+    );
+    expect(
+      screen.getByText(/API re-authorizes this replacement atomically/u),
+    ).not.toBeNull();
+    await userEvent.keyboard("{Escape}");
     await userEvent.click(screen.getByRole("checkbox", { name: "analyst" }));
     await userEvent.click(
       screen.getByRole("button", { name: "Replace roles" }),

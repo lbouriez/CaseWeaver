@@ -31,7 +31,9 @@ completed administration control plane and production runtime host:
   workflow for connector candidates, and Knowledge & Analysis collection authoring.
   Collection creation pins an active embedding binding and asks for the deployment's
   documented compatibility profile and vector dimension; it does not assume a provider,
-  model, or dimension.
+  model, or dimension. The same reusable control now covers non-routine policy JSON,
+  AI limits/pricing/budgets, source and schedule behavior, webhook ingress limits,
+  public bases, and workspace-role decisions without adding a client-side policy path.
 - `packages/administration`, PostgreSQL descriptor/configuration/version/outbox/session
   persistence, provider-neutral OIDC/PKCE, API-managed cookies/CSRF, dynamic descriptor
   registration, workspace-scoped redacted reads, mandatory server audit paths, and the

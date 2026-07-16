@@ -17,6 +17,7 @@ import type {
   WorkspaceRoleAssignment,
 } from "../api/contracts.js";
 import { ApiFailure } from "../components/api-failure.js";
+import { AuthoringFieldLabel } from "../components/authoring-field-label.js";
 
 const roles = ["administrator", "operator", "analyst", "viewer"] as const;
 type WorkspaceRole = (typeof roles)[number];
@@ -151,6 +152,10 @@ export function RoleAssignmentEditor() {
             <Typography color="text.secondary" variant="body2">
               Current workspace role revision: {assignment.revision}
             </Typography>
+            <AuthoringFieldLabel
+              description="Roles are workspace permissions, not application-specific labels. The API re-authorizes this replacement atomically, rejects stale revisions, and prevents removal of the final administrator."
+              label="Workspace roles"
+            />
             <Stack
               direction={{ xs: "column", sm: "row" }}
               sx={{ flexWrap: "wrap" }}

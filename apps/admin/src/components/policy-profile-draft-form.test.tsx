@@ -22,6 +22,15 @@ describe("policy profile draft form", () => {
       />,
     );
     const user = userEvent.setup();
+    await user.click(
+      screen.getByRole("button", {
+        name: "Help for Retrieval policy settings",
+      }),
+    );
+    expect(
+      screen.getByText(/bounded retrieval or prompt policy settings/u),
+    ).not.toBeNull();
+    await user.keyboard("{Escape}");
     expect(
       (
         screen.getByLabelText(

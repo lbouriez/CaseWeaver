@@ -123,6 +123,13 @@ describe("AI configuration authoring", () => {
     const user = userEvent.setup();
     await screen.findByText("Create a model binding draft");
     await user.click(
+      screen.getByRole("button", { name: "Help for Budget scope" }),
+    );
+    expect(
+      screen.getByText(/where the API evaluates this cost limit/u),
+    ).not.toBeNull();
+    await user.keyboard("{Escape}");
+    await user.click(
       screen.getByRole("button", { name: "Create binding draft" }),
     );
     await waitFor(() =>

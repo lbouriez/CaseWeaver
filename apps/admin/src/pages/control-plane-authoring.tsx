@@ -16,6 +16,7 @@ import { useCallback, useEffect, useState } from "react";
 import { type CaseWeaverApiClient, PublicApiError } from "../api/api-client.js";
 import type { AdminDetail, AdminListItem } from "../api/contracts.js";
 import { ApiFailure } from "../components/api-failure.js";
+import { AuthoringFieldLabel } from "../components/authoring-field-label.js";
 import { PublicationWebhookLifecycleControl } from "../components/publication-webhook-lifecycle-control.js";
 import {
   parseSafeConfiguration,
@@ -205,6 +206,10 @@ function PublicationProfileDraftForm({
           onChange={(event) => setDisplayName(event.target.value)}
           required
           value={displayName}
+        />
+        <AuthoringFieldLabel
+          description="A bounded publication-policy object. The API validates destinations and policy shape, rejects credential-shaped fields, and creates an inert immutable draft rather than contacting a destination."
+          label="Publication definition"
         />
         <TextField
           fullWidth
@@ -443,6 +448,10 @@ function WebhookEndpointDraftForm({
             </MenuItem>
           ))}
         </TextField>
+        <AuthoringFieldLabel
+          description="The event codes that this endpoint is permitted to receive. They are validated by the selected connector and must be supplied one per line or separated by commas."
+          label="Webhook event types"
+        />
         <TextField
           fullWidth
           helperText="One server-recognized event type per line or separated with commas."
@@ -453,6 +462,10 @@ function WebhookEndpointDraftForm({
           required
           value={eventTypes}
         />
+        <AuthoringFieldLabel
+          description="The largest permitted request body in bytes. The API applies this ingress limit before routing work, protecting the control plane from unexpectedly large payloads."
+          label="Webhook body limit"
+        />
         <TextField
           fullWidth
           label="Maximum body bytes"
@@ -460,6 +473,10 @@ function WebhookEndpointDraftForm({
           required
           type="number"
           value={maximumBodyBytes}
+        />
+        <AuthoringFieldLabel
+          description="The maximum ingress requests allowed per minute for this endpoint. It is a server-enforced safety limit, not a browser-side throttle."
+          label="Webhook request rate"
         />
         <TextField
           fullWidth
@@ -475,6 +492,10 @@ function WebhookEndpointDraftForm({
           label="Analysis trigger ID (optional)"
           onChange={(event) => setAnalysisTriggerId(event.target.value)}
           value={analysisTriggerId}
+        />
+        <AuthoringFieldLabel
+          description="A bounded endpoint policy object. Place only normal endpoint options here; select registered external-secret references separately so neither values nor locators enter this JSON."
+          label="Webhook settings"
         />
         <TextField
           fullWidth
@@ -644,6 +665,10 @@ function PlatformLinksForm({
           required
           value={apiPublicBaseUrl}
         />
+        <AuthoringFieldLabel
+          description="The public base used in links to the CaseWeaver API. The API normalizes this deployment-owned URL and never derives it from an inbound request Host header."
+          label="Public API base URL"
+        />
         <TextField
           autoComplete="url"
           disabled={loading}
@@ -653,6 +678,10 @@ function PlatformLinksForm({
           onChange={(event) => setWebhookPublicBaseUrl(event.target.value)}
           required
           value={webhookPublicBaseUrl}
+        />
+        <AuthoringFieldLabel
+          description="The public ingress base for server-derived webhook URLs. The API appends only opaque endpoint routes; operators cannot supply a webhook path or runtime target here."
+          label="Public webhook base URL"
         />
         <Typography color="text.secondary" variant="caption">
           {revision === undefined
