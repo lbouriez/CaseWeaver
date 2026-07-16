@@ -2,7 +2,7 @@ import { z } from "zod";
 
 const titleSchema = z.string().trim().min(1).max(120);
 
-const apiBaseUrlSchema = z
+const absoluteApiBaseUrlSchema = z
   .string()
   .trim()
   .min(1)
@@ -32,6 +32,11 @@ const apiBaseUrlSchema = z
     "API base URL must not contain a query string or fragment.",
   )
   .transform((value) => value.href.replace(/\/$/u, ""));
+
+/** `/` deliberately means the browser origin that served this static console.
+ * It avoids coupling a loopback/disposable deployment to one hostname while
+ * preserving an explicit absolute URL option for a separately hosted API. */
+const apiBaseUrlSchema = z.union([z.literal("/"), absoluteApiBaseUrlSchema]);
 
 const runtimeConfigSchema = z
   .object({

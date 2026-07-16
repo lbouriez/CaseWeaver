@@ -68,6 +68,25 @@ describe("CaseWeaverApiClient", () => {
     );
   });
 
+  it("uses the browser origin when the deployment selects the same-origin API path", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async () =>
+      jsonResponse({
+        authenticated: false,
+        authentication: { password: true, oauth: false },
+      }),
+    );
+    const client = new CaseWeaverApiClient(
+      { apiBaseUrl: "/", uiTitle: "Control" },
+      { fetchImplementation, createActionId: () => "same-origin-action" },
+    );
+
+    await client.session();
+
+    expect(fetchImplementation.mock.calls[0]?.[0]).toEqual(
+      new URL("/v1/auth/session", window.location.origin),
+    );
+  });
+
   it("submits a password only to the dedicated session endpoint and retains no browser credential", async () => {
     const fetchImplementation = vi.fn<typeof fetch>(async () =>
       jsonResponse({

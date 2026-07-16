@@ -37,6 +37,15 @@ describe("runtime configuration", () => {
     ).toBe("http://localhost:3000");
   });
 
+  it("permits an explicit same-origin API path for a reverse-proxied console", () => {
+    expect(
+      parseRuntimeConfig({
+        apiBaseUrl: "/",
+        uiTitle: "Local control room",
+      }),
+    ).toEqual({ apiBaseUrl: "/", uiTitle: "Local control room" });
+  });
+
   it("does not expose JSON or network parsing failures", async () => {
     await expect(
       loadRuntimeConfig(

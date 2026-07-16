@@ -10,7 +10,7 @@ if [ -z "$api_base_url" ]; then
 fi
 
 case "$api_base_url" in
-  https://* | http://localhost[:/]* | http://127.0.0.1[:/]* | http://\[::1\][:/]*) ;;
+  / | https://* | http://localhost[:/]* | http://127.0.0.1[:/]* | http://\[::1\][:/]*) ;;
   *)
     echo "CASEWEAVER_ADMIN_API_BASE_URL must be an HTTPS URL (HTTP is localhost-only)." >&2
     exit 1

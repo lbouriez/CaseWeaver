@@ -916,6 +916,9 @@ export class CaseWeaverApiClient {
   }
 
   private endpointUrl(endpoint: string): URL {
+    if (this.config.apiBaseUrl === "/") {
+      return new URL(endpoint, window.location.origin);
+    }
     return new URL(endpoint.replace(/^\//u, ""), `${this.config.apiBaseUrl}/`);
   }
 

@@ -20,9 +20,12 @@ proxy, or static-host initialization step **must** place this file at the web ro
 Use [`public/runtime-config.example.json`](public/runtime-config.example.json) as the
 template. It becomes `runtime-config.example.json` in `dist`; deployment must write or
 mount `runtime-config.json` alongside it. The console fetches that asset before React
-boots, with `no-store` caching. `apiBaseUrl` is an absolute credential-free HTTPS URL;
-HTTP is accepted only for `localhost`, `127.0.0.1`, or `::1` development. No API URL,
-OIDC configuration, credential, or secret is compiled into the bundle.
+boots, with `no-store` caching. `apiBaseUrl` is an absolute credential-free HTTPS URL,
+or `/` when the API is served through the exact same origin as the static console. HTTP
+is accepted only for `localhost`, `127.0.0.1`, or `::1` development. The same-origin
+value is preferred for a reverse-proxied deployment because it avoids hostname-dependent
+CORS/preflight behavior. No API URL, OIDC configuration, credential, or secret is
+compiled into the bundle.
 
 For local development, copy the example to `public/runtime-config.json`, substitute a
 local API URL, and do not commit that file.

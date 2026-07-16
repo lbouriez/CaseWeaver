@@ -8,9 +8,12 @@ docker compose -f deploy\docker\compose.local.yml up --build --wait
 
 It starts a disposable PostgreSQL/pgvector database, applies Prisma and pg-boss
 migrations, then runs the API, Admin UI, edge proxy, webhook ingress, scheduler, and
-durable worker. Open `http://localhost:8080`; sign in as `admin` / `admin`. Those
-credentials exist only because this Compose file is a loopback-only development/test
-stack (`NODE_ENV=development`). Stop and remove its data with:
+durable worker. Open `http://localhost:8080` or `http://127.0.0.1:8080`; sign in as
+`admin` / `admin`. The local runtime config uses the edge's exact same origin, so both
+loopback forms work without a CORS preflight; the disposable API allow-list contains
+only those two exact loopback origins. Those credentials exist only because this Compose
+file is a loopback-only development/test stack (`NODE_ENV=development`). Stop and remove
+its data with:
 
 ```powershell
 docker compose -f deploy\docker\compose.local.yml down -v

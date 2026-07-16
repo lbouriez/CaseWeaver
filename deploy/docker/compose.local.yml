@@ -105,7 +105,9 @@ services:
       API_WORKSPACE_ID: local-workspace
       API_PRINCIPAL_ID: local-administrator
       DATABASE_READINESS_TIMEOUT_MS: "5000"
-      ADMIN_ALLOWED_ORIGINS: http://localhost:${CASEWEAVER_LOCAL_PORT:-8080}
+      # Both published loopback spellings are trusted only in this disposable
+      # local topology. Production requires explicit exact HTTPS origins.
+      ADMIN_ALLOWED_ORIGINS: http://localhost:${CASEWEAVER_LOCAL_PORT:-8080},http://127.0.0.1:${CASEWEAVER_LOCAL_PORT:-8080}
       # Local password sign-in defaults to admin/admin. Override these host
       # variables before starting Compose if the loopback UI is shared.
       ADMIN_LOGIN: ${ADMIN_LOGIN:-admin}
@@ -268,8 +270,9 @@ services:
       target: admin
       args: *build-args
     environment:
-      # A browser must use the edge's public same-origin address, never Docker DNS.
-      CASEWEAVER_ADMIN_API_BASE_URL: http://localhost:${CASEWEAVER_LOCAL_PORT:-8080}
+      # Keep the API same-origin with the edge. This accepts either localhost or
+      # 127.0.0.1 in a browser without a CORS/preflight dependency.
+      CASEWEAVER_ADMIN_API_BASE_URL: /
       CASEWEAVER_ADMIN_UI_TITLE: ${CASEWEAVER_ADMIN_UI_TITLE:-CaseWeaver Control Room (local)}
     depends_on:
       api:
