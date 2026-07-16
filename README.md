@@ -130,6 +130,7 @@ pnpm install --frozen-lockfile
 pnpm db:test:up
 $env:DATABASE_URL = "postgresql://caseweaver:caseweaver@localhost:54329/caseweaver_test"
 pnpm --filter @caseweaver/postgres prisma:migrate:deploy
+pnpm build
 pnpm typecheck
 pnpm test
 ```

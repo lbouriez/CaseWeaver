@@ -18,7 +18,7 @@
     "test:e2e": "pnpm --filter @caseweaver/admin build && playwright test",
     "test:integration": "pnpm --filter @caseweaver/postgres run test:integration && pnpm --filter @caseweaver/queue-postgres run test:integration",
     "deps:check": "depcruise --config .dependency-cruiser.cjs apps packages connectors providers infrastructure --output-type err",
-    "ci": "pnpm format:check && pnpm lint && pnpm deps:check && pnpm typecheck && pnpm build && pnpm test",
+    "ci": "pnpm format:check && pnpm lint && pnpm deps:check && pnpm build && pnpm typecheck && pnpm test",
     "db:test:up": "docker compose -f deploy/docker/compose.test.yml up -d --wait",
     "db:test:down": "docker compose -f deploy/docker/compose.test.yml down -v",
     "db:test:reset": "pnpm db:test:down && pnpm db:test:up"

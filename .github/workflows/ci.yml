@@ -33,10 +33,13 @@ jobs:
         run: pnpm lint
       - name: Check dependencies
         run: pnpm deps:check
-      - name: Type check
-        run: pnpm typecheck
       - name: Build
         run: pnpm build
+      # Workspace package exports point to generated declaration files. A clean
+      # checkout must build those declarations before no-emit cross-package
+      # validation can resolve them.
+      - name: Type check
+        run: pnpm typecheck
       - name: Test
         run: pnpm test
       - name: Start integration PostgreSQL
