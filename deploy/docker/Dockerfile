@@ -61,7 +61,7 @@ COPY --from=dependencies --chown=node:node /workspace/node_modules ./node_module
 COPY --from=dependencies --chown=node:node /workspace/infrastructure/postgres/node_modules ./infrastructure/postgres/node_modules
 COPY --from=dependencies --chown=node:node /workspace/infrastructure/postgres/prisma ./infrastructure/postgres/prisma
 COPY --from=dependencies --chown=node:node /workspace/infrastructure/postgres/prisma.config.ts ./infrastructure/postgres/prisma.config.ts
-COPY --chown=node:node deploy/docker/container-entrypoint.sh /usr/local/bin/caseweaver-entrypoint
+COPY --chown=node:node --chmod=755 deploy/docker/container-entrypoint.sh /usr/local/bin/caseweaver-entrypoint
 
 USER node
 ENTRYPOINT ["/usr/local/bin/caseweaver-entrypoint"]
@@ -113,7 +113,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=api-build --chown=node:node /opt/caseweaver/api ./
-COPY --chown=node:node deploy/docker/container-entrypoint.sh /usr/local/bin/caseweaver-entrypoint
+COPY --chown=node:node --chmod=755 deploy/docker/container-entrypoint.sh /usr/local/bin/caseweaver-entrypoint
 
 USER node
 ENTRYPOINT ["/usr/local/bin/caseweaver-entrypoint"]
@@ -160,7 +160,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=worker-build --chown=node:node /opt/caseweaver/worker ./
-COPY --chown=node:node deploy/docker/container-entrypoint.sh /usr/local/bin/caseweaver-entrypoint
+COPY --chown=node:node --chmod=755 deploy/docker/container-entrypoint.sh /usr/local/bin/caseweaver-entrypoint
 
 USER node
 ENTRYPOINT ["/usr/local/bin/caseweaver-entrypoint"]
@@ -200,7 +200,7 @@ ENV NODE_ENV=production
 WORKDIR /opt/caseweaver/scheduler
 
 COPY --from=scheduler-build --chown=node:node /opt/caseweaver/scheduler ./
-COPY --chown=node:node deploy/docker/container-entrypoint.sh /usr/local/bin/caseweaver-entrypoint
+COPY --chown=node:node --chmod=755 deploy/docker/container-entrypoint.sh /usr/local/bin/caseweaver-entrypoint
 
 USER node
 ENTRYPOINT ["/usr/local/bin/caseweaver-entrypoint"]
@@ -242,7 +242,7 @@ WORKDIR /opt/caseweaver/webhook
 EXPOSE 8081
 
 COPY --from=webhook-build --chown=node:node /opt/caseweaver/webhook ./
-COPY --chown=node:node deploy/docker/container-entrypoint.sh /usr/local/bin/caseweaver-entrypoint
+COPY --chown=node:node --chmod=755 deploy/docker/container-entrypoint.sh /usr/local/bin/caseweaver-entrypoint
 
 USER node
 ENTRYPOINT ["/usr/local/bin/caseweaver-entrypoint"]
@@ -288,7 +288,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=standalone-build --chown=node:node /opt/caseweaver/standalone ./
-COPY --chown=node:node deploy/docker/container-entrypoint.sh /usr/local/bin/caseweaver-entrypoint
+COPY --chown=node:node --chmod=755 deploy/docker/container-entrypoint.sh /usr/local/bin/caseweaver-entrypoint
 
 USER node
 ENTRYPOINT ["/usr/local/bin/caseweaver-entrypoint"]
@@ -316,7 +316,7 @@ LABEL org.opencontainers.image.title="CaseWeaver Admin" \
 # connector credential, or source tree.
 EXPOSE 8080
 COPY --chown=101:101 deploy/docker/admin-nginx.conf /etc/nginx/conf.d/default.conf
-COPY --chown=101:101 deploy/docker/admin-runtime-config.sh /usr/local/bin/admin-runtime-config
+COPY --chown=101:101 --chmod=755 deploy/docker/admin-runtime-config.sh /usr/local/bin/admin-runtime-config
 COPY --from=admin-build --chown=101:101 /workspace/apps/admin/dist /usr/share/nginx/static
 
 USER 101:101
