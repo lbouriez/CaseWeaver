@@ -297,12 +297,27 @@ describe("administration API routes", () => {
     });
 
     expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store, private");
     expect(response.headers["set-cookie"]).toContain("caseweaver-session=");
     expect(built.operations.passwordLogin).toHaveBeenCalledWith(
       expect.anything(),
       { login: "admin", password: "admin" },
     );
     expect(response.body).not.toContain("admin");
+    await built.app.close();
+  });
+
+  it("does not cache principal-specific session state", async () => {
+    const built = createApp();
+    const response = await built.app.inject({
+      method: "GET",
+      url: "/v1/auth/session",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("no-store, private");
+    expect(response.headers.vary).toBe("Cookie");
+    expect(built.operations.session).toHaveBeenCalledWith(expect.anything());
     await built.app.close();
   });
 

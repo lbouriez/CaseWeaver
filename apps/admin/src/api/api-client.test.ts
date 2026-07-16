@@ -55,6 +55,7 @@ describe("CaseWeaverApiClient", () => {
     expect(fetchImplementation).toHaveBeenCalledWith(
       new URL("https://api.example.test/v1/auth/session"),
       expect.objectContaining({
+        cache: "no-store",
         credentials: "include",
         headers: expect.any(Headers),
       }),

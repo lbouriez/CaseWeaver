@@ -27,6 +27,9 @@ OIDC. `ADMIN_DISABLE_LOGIN_AUTHENTICATION=true` explicitly selects OIDC-only log
 surface consumed by `apps/admin`; it validates descriptors server-side, scopes all
 records to the session workspace, uses persistent one-use action previews, and composes
 existing publication/operations use cases rather than duplicating their policy.
+Authentication redirects and session responses are `Cache-Control: no-store, private`;
+the session response also varies by cookie. This prevents an anonymous response from
+being replayed after the API has established an HttpOnly session.
 
 Descriptor revisions are immutable. The descriptor discovery routes expose only the
 newest registered revision of each type for new authoring, while historical revisions

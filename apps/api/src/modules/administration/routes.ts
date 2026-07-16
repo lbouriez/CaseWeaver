@@ -691,6 +691,9 @@ export function registerAdministrationRoutes(
 ): void {
   app.get("/v1/auth/login", async (request, reply) => {
     const response = await operations.login(request);
+    // The redirect contains an opaque, one-use OIDC state value. Do not let a
+    // browser replay a cached redirect after the transaction has been used.
+    reply.header("cache-control", "no-store, private");
     return reply.redirect(response.redirectTo);
   });
   app.post("/v1/auth/login/password", async (request, reply) => {
@@ -706,17 +709,27 @@ export function registerAdministrationRoutes(
     if (!body.success)
       return rejectInvalidPasswordLogin(operations, request, reply);
     const response = await operations.passwordLogin(request, body.data);
+    // This response contains session/CSRF metadata and establishes a cookie.
+    reply.header("cache-control", "no-store, private");
     reply.header("set-cookie", response.setCookie);
     return response.session;
   });
   app.get("/v1/auth/callback", async (request, reply) => {
     const response = await operations.callback(request);
+    // The callback consumes a one-use state and may establish a session.
+    reply.header("cache-control", "no-store, private");
     if ("setCookie" in response && typeof response.setCookie === "string") {
       reply.header("set-cookie", response.setCookie);
     }
     return reply.redirect(response.redirectTo);
   });
-  app.get("/v1/auth/session", async (request) => operations.session(request));
+  app.get("/v1/auth/session", async (request, reply) => {
+    // A session response is principal-specific and includes CSRF material. In
+    // particular, an earlier anonymous response must not win after login.
+    reply.header("cache-control", "no-store, private");
+    reply.header("vary", "Cookie");
+    return operations.session(request);
+  });
 
   app.post("/v1/auth/logout", async (request, reply) => {
     const audit = invalidMutationAudit(

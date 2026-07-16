@@ -305,7 +305,11 @@ export class CaseWeaverApiClient {
   public async session(signal?: AbortSignal): Promise<Session> {
     const session = await this.requestJson(
       "/v1/auth/session",
-      { method: "GET", signal },
+      // A stale anonymous response would strand an operator on the sign-in
+      // screen immediately after the API creates its HttpOnly session cookie.
+      // Sessions also contain CSRF material, so they must never use a browser
+      // or intermediary cache.
+      { method: "GET", signal, cache: "no-store" },
       sessionSchema,
       "user",
     );
