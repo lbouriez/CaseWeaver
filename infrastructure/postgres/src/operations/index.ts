@@ -67,6 +67,7 @@ interface StoredWorkItemRow {
   readonly id: string;
   readonly workspace_id: string;
   readonly storage_key: string | null;
+  readonly storage_backend_id: string | null;
 }
 
 interface ClaimedWorkItemRow extends StoredWorkItemRow {
@@ -74,7 +75,10 @@ interface ClaimedWorkItemRow extends StoredWorkItemRow {
 }
 
 interface CompletedWorkItemRow {
-  readonly target_kind: "attachmentBlob" | "attachmentDerivative";
+  readonly target_kind:
+    | "attachmentReference"
+    | "attachmentBlob"
+    | "attachmentDerivative";
   readonly target_id: string;
 }
 
@@ -125,10 +129,21 @@ function stringField(
 }
 
 function toWorkItem(row: StoredWorkItemRow): RetentionWorkItem {
+  const objectReference =
+    row.storage_key !== null && row.storage_backend_id !== null
+      ? {
+          workspaceId: workspaceId(row.workspace_id),
+          storageBackendId: row.storage_backend_id,
+          key: row.storage_key,
+        }
+      : undefined;
   return Object.freeze({
     id: row.id,
     workspaceId: workspaceId(row.workspace_id),
-    ...(row.storage_key === null ? {} : { storageKey: row.storage_key }),
+    ...(objectReference === undefined ? {} : { objectReference }),
+    ...(row.storage_key === null || objectReference !== undefined
+      ? {}
+      : { storageKey: row.storage_key }),
   });
 }
 
@@ -558,9 +573,13 @@ export class PostgresOperationsStore implements OperationsStore {
     `;
 
     const blobs = await database.$queryRaw<
-      readonly { readonly id: string; readonly storage_key: string | null }[]
+      readonly {
+        readonly id: string;
+        readonly storage_key: string | null;
+        readonly storage_backend_id: string | null;
+      }[]
     >`
-      SELECT blob.id, blob.storage_key
+      SELECT blob.id, blob.storage_key, blob.storage_backend_id
       FROM attachments AS attachment
       JOIN attachment_blobs AS blob
         ON blob.workspace_id = attachment.workspace_id
@@ -569,9 +588,16 @@ export class PostgresOperationsStore implements OperationsStore {
         AND attachment.external_reference_id = ${snapshot.external_reference_id}
     `;
     const derivatives = await database.$queryRaw<
-      readonly { readonly id: string; readonly storage_key: string | null }[]
+      readonly {
+        readonly id: string;
+        readonly storage_key: string | null;
+        readonly storage_backend_id: string | null;
+      }[]
     >`
-      SELECT DISTINCT derivative.id, derivative.output_storage_key AS storage_key
+      SELECT DISTINCT
+        derivative.id,
+        derivative.output_storage_key AS storage_key,
+        derivative.output_storage_backend_id AS storage_backend_id
       FROM attachment_derivative_sources AS source
       JOIN attachments AS attachment
         ON attachment.workspace_id = source.workspace_id
@@ -586,30 +612,32 @@ export class PostgresOperationsStore implements OperationsStore {
     for (const blob of blobs) {
       const rows = await database.$queryRaw<readonly StoredWorkItemRow[]>`
         INSERT INTO retention_work_items (
-          id, workspace_id, target_kind, target_id, storage_key, reason, state
+          id, workspace_id, target_kind, target_id, storage_key,
+          storage_backend_id, reason, state
         )
         VALUES (
           ${`privacy:attachmentBlob:${blob.id}`},
           ${input.workspaceId}, 'attachmentBlob', ${blob.id},
-          ${blob.storage_key}, 'privacy', 'queued'
+          ${blob.storage_key}, ${blob.storage_backend_id}, 'privacy', 'queued'
         )
         ON CONFLICT (workspace_id, target_kind, target_id) DO NOTHING
-        RETURNING id, workspace_id, storage_key
+        RETURNING id, workspace_id, storage_key, storage_backend_id
       `;
       if (rows[0] !== undefined) workItems.push(toWorkItem(rows[0]));
     }
     for (const derivative of derivatives) {
       const rows = await database.$queryRaw<readonly StoredWorkItemRow[]>`
         INSERT INTO retention_work_items (
-          id, workspace_id, target_kind, target_id, storage_key, reason, state
+          id, workspace_id, target_kind, target_id, storage_key,
+          storage_backend_id, reason, state
         )
         VALUES (
           ${`privacy:attachmentDerivative:${derivative.id}`},
           ${input.workspaceId}, 'attachmentDerivative', ${derivative.id},
-          ${derivative.storage_key}, 'privacy', 'queued'
+          ${derivative.storage_key}, ${derivative.storage_backend_id}, 'privacy', 'queued'
         )
         ON CONFLICT (workspace_id, target_kind, target_id) DO NOTHING
-        RETURNING id, workspace_id, storage_key
+        RETURNING id, workspace_id, storage_key, storage_backend_id
       `;
       if (rows[0] !== undefined) workItems.push(toWorkItem(rows[0]));
     }
@@ -636,12 +664,12 @@ export class PostgresOperationsStore implements OperationsStore {
     input: Parameters<OperationsStore["queueExpiredRetention"]>[1],
   ): Promise<readonly RetentionWorkItem[]> {
     const database = this.transactions.get(transaction);
-    const remainingDerivativeLimit = Math.max(0, input.limit);
-    const blobs = await database.$queryRaw<
-      readonly { readonly id: string; readonly storage_key: string | null }[]
+    const workItems: RetentionWorkItem[] = [];
+    const references = await database.$queryRaw<
+      readonly { readonly id: string }[]
     >`
-      SELECT id, storage_key
-      FROM attachment_blobs
+      SELECT id
+      FROM attachments
       WHERE workspace_id = ${input.workspaceId}
         AND retention_state = 'active'
         AND retention_expires_at IS NOT NULL
@@ -650,31 +678,35 @@ export class PostgresOperationsStore implements OperationsStore {
       LIMIT ${input.limit}
       FOR UPDATE SKIP LOCKED
     `;
-    const workItems: RetentionWorkItem[] = [];
-    for (const blob of blobs) {
+    for (const reference of references) {
       const rows = await database.$queryRaw<readonly StoredWorkItemRow[]>`
         INSERT INTO retention_work_items (
-          id, workspace_id, target_kind, target_id, storage_key, reason, state
+          id, workspace_id, target_kind, target_id, storage_key,
+          storage_backend_id, reason, state
         )
         VALUES (
-          ${`retention:attachmentBlob:${blob.id}`},
-          ${input.workspaceId}, 'attachmentBlob', ${blob.id},
-          ${blob.storage_key}, 'retention', 'queued'
+          ${`retention:attachmentReference:${reference.id}`},
+          ${input.workspaceId}, 'attachmentReference', ${reference.id},
+          NULL, NULL, 'retention', 'queued'
         )
         ON CONFLICT (workspace_id, target_kind, target_id) DO NOTHING
-        RETURNING id, workspace_id, storage_key
+        RETURNING id, workspace_id, storage_key, storage_backend_id
       `;
       if (rows[0] !== undefined) workItems.push(toWorkItem(rows[0]));
     }
-    const derivativeLimit = Math.max(
-      0,
-      remainingDerivativeLimit - blobs.length,
-    );
+    const derivativeLimit = Math.max(0, input.limit - references.length);
     if (derivativeLimit > 0) {
       const derivatives = await database.$queryRaw<
-        readonly { readonly id: string; readonly storage_key: string | null }[]
+        readonly {
+          readonly id: string;
+          readonly storage_key: string | null;
+          readonly storage_backend_id: string | null;
+        }[]
       >`
-        SELECT id, output_storage_key AS storage_key
+        SELECT
+          id,
+          output_storage_key AS storage_key,
+          output_storage_backend_id AS storage_backend_id
         FROM attachment_derivatives
         WHERE workspace_id = ${input.workspaceId}
           AND retention_state = 'active'
@@ -687,15 +719,59 @@ export class PostgresOperationsStore implements OperationsStore {
       for (const derivative of derivatives) {
         const rows = await database.$queryRaw<readonly StoredWorkItemRow[]>`
           INSERT INTO retention_work_items (
-            id, workspace_id, target_kind, target_id, storage_key, reason, state
+            id, workspace_id, target_kind, target_id, storage_key,
+            storage_backend_id, reason, state
           )
           VALUES (
             ${`retention:attachmentDerivative:${derivative.id}`},
             ${input.workspaceId}, 'attachmentDerivative', ${derivative.id},
-            ${derivative.storage_key}, 'retention', 'queued'
+            ${derivative.storage_key}, ${derivative.storage_backend_id}, 'retention', 'queued'
           )
           ON CONFLICT (workspace_id, target_kind, target_id) DO NOTHING
-          RETURNING id, workspace_id, storage_key
+          RETURNING id, workspace_id, storage_key, storage_backend_id
+        `;
+        if (rows[0] !== undefined) workItems.push(toWorkItem(rows[0]));
+      }
+    }
+    const blobLimit = Math.max(0, input.limit - workItems.length);
+    if (blobLimit > 0) {
+      const blobs = await database.$queryRaw<
+        readonly {
+          readonly id: string;
+          readonly storage_key: string | null;
+          readonly storage_backend_id: string | null;
+        }[]
+      >`
+        SELECT blob.id, blob.storage_key, blob.storage_backend_id
+        FROM attachment_blobs AS blob
+        WHERE blob.workspace_id = ${input.workspaceId}
+          AND blob.retention_state = 'active'
+          AND blob.retention_expires_at IS NOT NULL
+          AND blob.retention_expires_at <= NOW()
+          AND NOT EXISTS (
+            SELECT 1
+            FROM attachments AS attachment
+            WHERE attachment.workspace_id = blob.workspace_id
+              AND attachment.blob_id = blob.id
+              AND attachment.retention_state <> 'deleted'
+          )
+        ORDER BY blob.retention_expires_at, blob.id
+        LIMIT ${blobLimit}
+        FOR UPDATE SKIP LOCKED
+      `;
+      for (const blob of blobs) {
+        const rows = await database.$queryRaw<readonly StoredWorkItemRow[]>`
+          INSERT INTO retention_work_items (
+            id, workspace_id, target_kind, target_id, storage_key,
+            storage_backend_id, reason, state
+          )
+          VALUES (
+            ${`retention:attachmentBlob:${blob.id}`},
+            ${input.workspaceId}, 'attachmentBlob', ${blob.id},
+            ${blob.storage_key}, ${blob.storage_backend_id}, 'retention', 'queued'
+          )
+          ON CONFLICT (workspace_id, target_kind, target_id) DO NOTHING
+          RETURNING id, workspace_id, storage_key, storage_backend_id
         `;
         if (rows[0] !== undefined) workItems.push(toWorkItem(rows[0]));
       }
@@ -721,7 +797,7 @@ export class PostgresOperationsStore implements OperationsStore {
           state = 'queued'
           OR (state = 'running' AND claimed_until <= NOW())
         )
-      RETURNING id, workspace_id, storage_key, fencing_token
+      RETURNING id, workspace_id, storage_key, storage_backend_id, fencing_token
     `;
     const claimed = rows[0];
     return claimed === undefined
@@ -751,11 +827,28 @@ export class PostgresOperationsStore implements OperationsStore {
     `;
     const completed = rows[0];
     if (completed === undefined) return false;
-    if (completed.target_kind === "attachmentBlob") {
+    if (completed.target_kind === "attachmentReference") {
+      await database.$executeRaw`
+        UPDATE attachments
+        SET
+          blob_id = NULL,
+          content_hash = NULL,
+          byte_length = NULL,
+          sanitized_filename = NULL,
+          retention_state = 'deleted',
+          retention_claim_id = NULL,
+          retention_claimed_at = NULL,
+          retention_claim_expires_at = NULL,
+          retention_deleted_at = ${asDate(input.occurredAt)}
+        WHERE workspace_id = ${input.workspaceId}
+          AND id = ${completed.target_id}
+      `;
+    } else if (completed.target_kind === "attachmentBlob") {
       await database.$executeRaw`
         UPDATE attachment_blobs
         SET
           storage_key = NULL,
+          storage_backend_id = NULL,
           retention_state = 'deleted',
           retention_claim_id = NULL,
           retention_claimed_at = NULL,
@@ -769,6 +862,7 @@ export class PostgresOperationsStore implements OperationsStore {
         UPDATE attachment_derivatives
         SET
           output_storage_key = NULL,
+          output_storage_backend_id = NULL,
           retention_state = 'deleted',
           retention_claim_id = NULL,
           retention_claimed_at = NULL,

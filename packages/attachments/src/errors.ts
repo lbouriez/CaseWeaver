@@ -7,8 +7,11 @@ export type AttachmentFailureCode =
   | "attachment.invalidText"
   | "attachment.mimeMismatch"
   | "attachment.outputTooLarge"
+  | "attachment.outputNotNormalized"
   | "attachment.runtimeAttestation"
   | "attachment.runtimeTimeout"
+  | "attachment.storageLengthMismatch"
+  | "attachment.visionInputTooLarge"
   | "attachment.unsupportedMime";
 
 export class AttachmentError extends Error {

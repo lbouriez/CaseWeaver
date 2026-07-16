@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@caseweaver/administration": "workspace:*",
+    "@caseweaver/connector-runtime": "workspace:*",
     "@caseweaver/connector-sdk": "workspace:*",
     "zod": "^4.0.0"
   },

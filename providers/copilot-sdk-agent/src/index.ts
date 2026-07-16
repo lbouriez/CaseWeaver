@@ -1,21 +1,27 @@
 import {
   AiConfigurationError,
   type AiProviderBinding,
+  type AiProviderDispatcher,
   AiProviderError,
-  type ConfiguredRepository,
+  type EmbeddingRequest,
+  type EmbeddingResult,
+  type GenerationRequest,
+  type GenerationResult,
   type NormalizedUsage,
+  type PinnedRepositoryAgentRuntimeResolver,
   type ProviderInvocation,
   type ProviderResult,
-  type RepositoryAgentProvider,
   type RepositoryAgentRequest,
   type RepositoryAgentResult,
-  type RepositoryAgentRuntime,
+  type RepositoryAgentRuntimePin,
   type RepositoryAgentRuntimeResult,
+  type RepositoryAgentSandboxLimits,
   type RepositoryAgentToolGateway,
-  type RepositoryReadOnlyTool,
+  type RerankerRequest,
+  type RerankerResult,
+  type VisionRequest,
+  type VisionResult,
 } from "@caseweaver/ai-sdk";
-
-export * from "./administration-descriptor.js";
 
 export type {
   ConfiguredRepository as AdministratorRepositorySelection,
@@ -25,6 +31,8 @@ export type {
   RepositoryAgentToolGateway,
   RepositoryReadOnlyTool as ReadOnlyRepositoryTool,
 } from "@caseweaver/ai-sdk";
+export * from "./administration-descriptor.js";
+export * from "./copilot-sdk-byok-client.js";
 
 export interface CopilotSdkByokClient {
   run(input: {
@@ -39,6 +47,7 @@ export interface CopilotSdkByokClient {
     readonly maximumOutputTokensPerTurn: number;
     readonly maximumAggregateInputTokens: number;
     readonly maximumAggregateOutputTokens: number;
+    readonly maximumOutputBytes: number;
     readonly tools: RepositoryAgentToolGateway;
     readonly signal: AbortSignal;
   }): Promise<CopilotSdkByokResult>;
@@ -68,11 +77,10 @@ export interface CopilotSdkAgentLimits {
 }
 
 export interface CopilotSdkAgentProviderOptions {
-  readonly runtime: RepositoryAgentRuntime;
   readonly client: CopilotSdkByokClient;
-  readonly repository: ConfiguredRepository;
+  /** Resolves one immutable server-created runtime pin for every invocation. */
+  readonly runtimeResolver: PinnedRepositoryAgentRuntimeResolver;
   readonly limits: CopilotSdkAgentLimits;
-  readonly allowedTools?: readonly RepositoryReadOnlyTool[];
   readonly now?: () => number;
 }
 
@@ -86,6 +94,86 @@ function assertLimits(limits: CopilotSdkAgentLimits): void {
   for (const [label, value] of Object.entries(limits)) {
     assertPositiveInteger(value, label);
   }
+}
+
+function assertRuntimePin(pin: RepositoryAgentRuntimePin): void {
+  for (const [name, value] of Object.entries({
+    workspaceId: pin.workspaceId,
+    runtimeVersionId: pin.runtimeVersionId,
+    repositoryId: pin.repositoryId,
+  })) {
+    if (
+      typeof value !== "string" ||
+      value.length === 0 ||
+      value.length > 200 ||
+      [...value].some((character) => {
+        const code = character.codePointAt(0);
+        return code === undefined || code < 32 || code === 127;
+      })
+    ) {
+      throw new AiConfigurationError(`Repository runtime ${name} is invalid.`);
+    }
+  }
+  if (!/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/iu.test(pin.pinnedCommit)) {
+    throw new AiConfigurationError("Repository runtime commit is invalid.");
+  }
+}
+
+function assertResolvedRuntime(
+  pin: RepositoryAgentRuntimePin,
+  resolved: Awaited<
+    ReturnType<PinnedRepositoryAgentRuntimeResolver["resolve"]>
+  >,
+): void {
+  if (
+    resolved.repository.repositoryId !== pin.repositoryId ||
+    resolved.repository.pinnedCommit.toLowerCase() !==
+      pin.pinnedCommit.toLowerCase()
+  ) {
+    throw new AiConfigurationError(
+      "Repository runtime resolver did not return the immutable pinned repository.",
+    );
+  }
+  if (
+    resolved.allowedTools.length === 0 ||
+    new Set(resolved.allowedTools).size !== resolved.allowedTools.length ||
+    resolved.allowedTools.some(
+      (tool) =>
+        tool !== "listFiles" && tool !== "readFile" && tool !== "searchFiles",
+    )
+  ) {
+    throw new AiConfigurationError(
+      "Repository runtime resolver returned an invalid read-only tool allowlist.",
+    );
+  }
+  for (const [name, value] of Object.entries(resolved.limits)) {
+    assertPositiveInteger(value, `repository runtime ${name}`);
+  }
+}
+
+function constrainedSandboxLimits(input: {
+  readonly resolved: RepositoryAgentSandboxLimits;
+  readonly configured: CopilotSdkAgentLimits;
+}): RepositoryAgentSandboxLimits {
+  return Object.freeze({
+    timeoutMs: Math.min(input.resolved.timeoutMs, input.configured.timeoutMs),
+    maximumCpuMilliseconds: Math.min(
+      input.resolved.maximumCpuMilliseconds,
+      input.configured.maximumCpuMilliseconds,
+    ),
+    maximumMemoryBytes: Math.min(
+      input.resolved.maximumMemoryBytes,
+      input.configured.maximumMemoryBytes,
+    ),
+    maximumOutputBytes: Math.min(
+      input.resolved.maximumOutputBytes,
+      input.configured.maximumOutputBytes,
+    ),
+    maximumToolCalls: Math.min(
+      input.resolved.maximumToolCalls,
+      input.configured.maximumToolCalls,
+    ),
+  });
 }
 
 function safeBaseUrl(endpoint: string): string {
@@ -182,31 +270,59 @@ function aggregateTokenLimit(
  * Copilot SDK, while this class intentionally exposes no GitHub authentication,
  * subscription, checkout, or fallback configuration.
  */
-export class CopilotSdkAgentProvider implements RepositoryAgentProvider {
-  private readonly allowedTools: readonly RepositoryReadOnlyTool[];
+export class CopilotSdkAgentProvider implements AiProviderDispatcher {
   private readonly now: () => number;
 
   public constructor(private readonly options: CopilotSdkAgentProviderOptions) {
     assertLimits(options.limits);
-    this.allowedTools = options.allowedTools ?? [
-      "listFiles",
-      "readFile",
-      "searchFiles",
-    ];
-    if (
-      this.allowedTools.length === 0 ||
-      new Set(this.allowedTools).size !== this.allowedTools.length
-    ) {
-      throw new AiConfigurationError(
-        "Copilot SDK agent requires a non-empty unique read-only tool allowlist.",
-      );
-    }
     this.now = options.now ?? Date.now;
   }
 
   public async runRepositoryAgent(
     invocation: ProviderInvocation<RepositoryAgentRequest>,
   ): Promise<ProviderResult<RepositoryAgentResult>> {
+    return this.runPinnedRepositoryAgent(invocation);
+  }
+
+  public embed(
+    _invocation: ProviderInvocation<EmbeddingRequest>,
+  ): Promise<ProviderResult<EmbeddingResult>> {
+    return this.unsupported();
+  }
+
+  public analyzeVision(
+    _invocation: ProviderInvocation<VisionRequest>,
+  ): Promise<ProviderResult<VisionResult>> {
+    return this.unsupported();
+  }
+
+  public generate(
+    _invocation: ProviderInvocation<GenerationRequest>,
+  ): Promise<ProviderResult<GenerationResult>> {
+    return this.unsupported();
+  }
+
+  public rerank(
+    _invocation: ProviderInvocation<RerankerRequest>,
+  ): Promise<ProviderResult<RerankerResult>> {
+    return this.unsupported();
+  }
+
+  private unsupported(): never {
+    throw new AiConfigurationError(
+      "Copilot SDK agent only supports repository-agent execution.",
+    );
+  }
+
+  /**
+   * Reads only the required immutable request pin, so no fixed repository or
+   * mutable-current configuration can enter the provider path.
+   */
+  private async runPinnedRepositoryAgent(
+    invocation: ProviderInvocation<RepositoryAgentRequest>,
+  ): Promise<ProviderResult<RepositoryAgentResult>> {
+    const runtimePin = invocation.request.runtimePin;
+    assertRuntimePin(runtimePin);
     assertBinding(invocation.binding);
     assertPositiveInteger(invocation.request.maximumTurns, "maximumTurns");
     assertPositiveInteger(
@@ -245,21 +361,24 @@ export class CopilotSdkAgentProvider implements RepositoryAgentProvider {
     if (invocation.secret.value.length === 0) {
       throw new AiConfigurationError("Copilot BYOK credential is empty.");
     }
+    const resolvedRuntime = await this.options.runtimeResolver.resolve(
+      runtimePin,
+      invocation.signal,
+    );
+    assertResolvedRuntime(runtimePin, resolvedRuntime);
+    const sandboxLimits = constrainedSandboxLimits({
+      resolved: resolvedRuntime.limits,
+      configured: this.options.limits,
+    });
     const started = this.now();
     try {
       let clientResult: CopilotSdkByokResult | undefined;
-      const result = await this.options.runtime.run(
+      const result = await resolvedRuntime.runtime.run(
         {
-          repository: this.options.repository,
+          repository: resolvedRuntime.repository,
           instruction: invocation.request.instruction,
-          allowedTools: this.allowedTools,
-          limits: {
-            timeoutMs: this.options.limits.timeoutMs,
-            maximumCpuMilliseconds: this.options.limits.maximumCpuMilliseconds,
-            maximumMemoryBytes: this.options.limits.maximumMemoryBytes,
-            maximumOutputBytes: this.options.limits.maximumOutputBytes,
-            maximumToolCalls: this.options.limits.maximumToolCalls,
-          },
+          allowedTools: resolvedRuntime.allowedTools,
+          limits: sandboxLimits,
           signal: invocation.signal,
         },
         async (context) => {
@@ -277,6 +396,7 @@ export class CopilotSdkAgentProvider implements RepositoryAgentProvider {
               invocation.request.maximumOutputTokensPerTurn,
             maximumAggregateInputTokens,
             maximumAggregateOutputTokens,
+            maximumOutputBytes: sandboxLimits.maximumOutputBytes,
             tools: context.tools,
             signal: invocation.signal,
           });
@@ -294,7 +414,11 @@ export class CopilotSdkAgentProvider implements RepositoryAgentProvider {
         maximumAggregateOutputTokens,
       );
       return {
-        value: { summary: result.summary, metering: clientResult.metering },
+        value: {
+          summary: result.summary,
+          evidence: Object.freeze([...result.evidence]),
+          metering: clientResult.metering,
+        },
         usage,
         metadata: {
           ...(clientResult.requestId === undefined

@@ -24,7 +24,7 @@ if (!new URL(databaseUrl).pathname.toLowerCase().includes("test")) {
 }
 
 const pool = new Pool({ connectionString: databaseUrl });
-const repository = new PostgresAttachmentRepository(pool, 60_000, 60_000);
+const repository = new PostgresAttachmentRepository(pool, 60_000);
 
 function identity(
   input: {
@@ -59,8 +59,14 @@ function derivative(
     id: `attachment-derivative:${value.key}`,
     identity: value,
     status: "completed",
-    output: { workspaceId: value.workspaceId, key: outputKey },
+    output: {
+      workspaceId: value.workspaceId,
+      storageBackendId: "storage-test",
+      key: outputKey,
+    },
     mimeType: "text/plain",
+    outputContentHash: "b".repeat(64),
+    outputByteLength: 42,
     ...(operationId === undefined ? {} : { operationId }),
   });
 }
@@ -134,7 +140,11 @@ describe("PostgreSQL attachment persistence", () => {
       id: "attachment-a",
       workspaceId: value.workspaceId,
       sourceReferenceId,
-      storage: { workspaceId: value.workspaceId, key: "source-blob:a" },
+      storage: {
+        workspaceId: value.workspaceId,
+        storageBackendId: "storage-test",
+        key: "source-blob:a",
+      },
       sha256: value.contentSha256,
       byteLength: 42,
       declaredMimeType: "image/png",
@@ -170,6 +180,33 @@ describe("PostgreSQL attachment persistence", () => {
         operationId: "ai-operation-1",
       },
     ]);
+    await expect(
+      repository.findDerivativeEvidenceRecord({
+        workspaceId: value.workspaceId,
+        attachmentId: "attachment-a",
+        derivativeId: `attachment-derivative:${value.key}`,
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toEqual({
+      workspaceId: value.workspaceId,
+      attachmentId: "attachment-a",
+      derivativeId: `attachment-derivative:${value.key}`,
+      output: {
+        workspaceId: value.workspaceId,
+        storageBackendId: "storage-test",
+        key: "derivative-output:vision",
+      },
+      outputContentHash: "b".repeat(64),
+      outputByteLength: 42,
+    });
+    await expect(
+      repository.findDerivativeEvidenceRecord({
+        workspaceId: "attachment-workspace-b",
+        attachmentId: "attachment-a",
+        derivativeId: `attachment-derivative:${value.key}`,
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toBeUndefined();
   });
 
   it("allows one concurrent claim, retries only retryable terminal failures, and enforces ownership", async () => {
@@ -236,7 +273,7 @@ describe("PostgreSQL attachment persistence", () => {
     expect(count.rows).toEqual([{ count: "3" }]);
   });
 
-  it("claims and transitions expired derivatives, references, and blob handles without deleting storage", async () => {
+  it("persists the immutable storage backend with attachment and derivative metadata", async () => {
     const sourceReferenceId = await seedWorkspace("attachment-workspace-a");
     const value = identity({ processor: "text" });
     const claim = await repository.claimDerivative(value);
@@ -254,7 +291,11 @@ describe("PostgreSQL attachment persistence", () => {
       id: "attachment-retention",
       workspaceId: value.workspaceId,
       sourceReferenceId,
-      storage: { workspaceId: value.workspaceId, key: "source-blob:retention" },
+      storage: {
+        workspaceId: value.workspaceId,
+        storageBackendId: "storage-test",
+        key: "source-blob:retention",
+      },
       sha256: value.contentSha256,
       byteLength: 7,
       detectedMimeType: "text/plain",
@@ -263,65 +304,22 @@ describe("PostgreSQL attachment persistence", () => {
       retentionExpiresAt: "2020-01-01T00:00:00.000Z",
     });
 
-    const expiredDerivative = await repository.claimExpiredRetention({
-      limit: 1,
-    });
-    expect(expiredDerivative).toMatchObject([
-      {
-        kind: "derivative",
-        storage: {
-          workspaceId: value.workspaceId,
-          key: "derivative-output:retention",
-        },
-      },
-    ]);
-    const derivativeCandidate = expiredDerivative[0];
-    if (derivativeCandidate === undefined) {
-      throw new Error("Expected an expired derivative candidate.");
-    }
-    await repository.completeRetentionCleanup(derivativeCandidate);
-
-    const expiredReference = await repository.claimExpiredRetention({
-      limit: 1,
-    });
-    expect(expiredReference).toMatchObject([
-      { kind: "attachmentReference", id: "attachment-retention" },
-    ]);
-    const referenceCandidate = expiredReference[0];
-    if (referenceCandidate === undefined) {
-      throw new Error("Expected an expired reference candidate.");
-    }
-    await repository.completeRetentionCleanup(referenceCandidate);
-
-    const expiredBlob = await repository.claimExpiredRetention({ limit: 1 });
-    expect(expiredBlob).toMatchObject([
-      {
-        kind: "blob",
-        storage: {
-          workspaceId: value.workspaceId,
-          key: "source-blob:retention",
-        },
-      },
-    ]);
-    const blobCandidate = expiredBlob[0];
-    if (blobCandidate === undefined) {
-      throw new Error("Expected an expired blob candidate.");
-    }
-    await repository.completeRetentionCleanup(blobCandidate);
-
     const retained = await pool.query<{
-      derivative_state: string;
-      reference_state: string;
-      blob_state: string;
-      derivative_key: string | null;
-      blob_key: string | null;
+      derivative_backend: string | null;
+      reference_backend: string | null;
+      blob_backend: string | null;
+      derivative_expiry: Date | null;
+      blob_expiry: Date | null;
     }>(
       `SELECT
-         derivative.retention_state AS derivative_state,
-         attachment.retention_state AS reference_state,
-         blob.retention_state AS blob_state,
-         derivative.output_storage_key AS derivative_key,
-         blob.storage_key AS blob_key
+         derivative.output_storage_backend_id AS derivative_backend,
+         (SELECT blob.storage_backend_id
+          FROM attachment_blobs AS blob
+          WHERE blob.workspace_id = attachment.workspace_id
+            AND blob.id = attachment.blob_id) AS reference_backend,
+         blob.storage_backend_id AS blob_backend,
+         derivative.retention_expires_at AS derivative_expiry,
+         blob.retention_expires_at AS blob_expiry
        FROM attachment_derivatives AS derivative
        JOIN attachments AS attachment ON attachment.workspace_id = derivative.workspace_id
        JOIN attachment_blobs AS blob
@@ -330,11 +328,11 @@ describe("PostgreSQL attachment persistence", () => {
     );
     expect(retained.rows).toEqual([
       {
-        derivative_state: "deleted",
-        reference_state: "deleted",
-        blob_state: "deleted",
-        derivative_key: null,
-        blob_key: null,
+        derivative_backend: "storage-test",
+        reference_backend: "storage-test",
+        blob_backend: "storage-test",
+        derivative_expiry: new Date("2020-01-01T00:00:00.000Z"),
+        blob_expiry: new Date("2020-01-01T00:00:00.000Z"),
       },
     ]);
   });

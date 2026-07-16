@@ -97,4 +97,77 @@ export async function ensureBootstrapAdministrator(
     }
   });
 }
+
+/**
+ * Creates the deployment-owned administrator used only by local password
+ * authentication. It intentionally has no external-identity mapping: the
+ * configured credential remains the sole way to create this session type.
+ */
+export async function ensureBootstrapPasswordAdministrator(
+  input: Readonly<{
+    readonly unitOfWork: UnitOfWork & PostgresTransactionLookup;
+    readonly auditStore: AuditStore;
+    readonly workspaceId: string;
+    readonly principalId: string;
+    readonly now?: () => Date;
+    readonly id?: () => string;
+  }>,
+): Promise<void> {
+  await input.unitOfWork.transaction(async (transaction) => {
+    const database = input.unitOfWork.get(transaction);
+    const existing = await database.principal.findUnique({
+      where: {
+        workspaceId_id: {
+          workspaceId: input.workspaceId,
+          id: input.principalId,
+        },
+      },
+      select: { id: true },
+    });
+    await database.workspace.upsert({
+      where: { id: input.workspaceId },
+      create: { id: input.workspaceId },
+      update: {},
+    });
+    await database.principal.upsert({
+      where: {
+        workspaceId_id: {
+          workspaceId: input.workspaceId,
+          id: input.principalId,
+        },
+      },
+      create: { id: input.principalId, workspaceId: input.workspaceId },
+      update: {},
+    });
+    await database.workspaceRoleAssignment.upsert({
+      where: {
+        workspaceId_principalId_role: {
+          workspaceId: input.workspaceId,
+          principalId: input.principalId,
+          role: "administrator",
+        },
+      },
+      create: {
+        workspaceId: input.workspaceId,
+        principalId: input.principalId,
+        role: "administrator",
+      },
+      update: {},
+    });
+    if (existing === null) {
+      await input.auditStore.append(transaction, {
+        id: auditEventId((input.id ?? randomUUID)()),
+        workspaceId: workspaceId(input.workspaceId),
+        actorPrincipalId: principalId(input.principalId),
+        action: "admin.bootstrap.password.administrator.created",
+        targetType: "principal",
+        targetId: input.principalId,
+        permission: "identity.manage",
+        outcome: "succeeded",
+        origin: "api",
+        occurredAt: utcInstant(input.now?.() ?? new Date()),
+      });
+    }
+  });
+}
 import { randomUUID } from "node:crypto";

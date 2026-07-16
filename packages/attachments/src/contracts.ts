@@ -5,11 +5,14 @@ import type {
 
 export interface BlobHandle {
   readonly workspaceId: string;
+  /** Deployment-selected storage namespace; never a bucket, endpoint, or credential. */
+  readonly storageBackendId: string;
   readonly key: string;
 }
 
 export interface BlobStagingHandle {
   readonly workspaceId: string;
+  readonly storageBackendId: string;
   readonly id: string;
 }
 
@@ -30,7 +33,6 @@ export interface BlobStore {
     signal: AbortSignal,
   ): Promise<BlobHandle>;
   abort(staging: BlobStagingHandle): Promise<void>;
-  privateUrl(handle: BlobHandle, workspaceId: string): Promise<string>;
   open(
     handle: BlobHandle,
     workspaceId: string,
@@ -147,6 +149,10 @@ export interface AttachmentDerivative {
   readonly status: "completed";
   readonly output: BlobHandle;
   readonly mimeType: "text/plain";
+  /** SHA-256 of the exact canonical UTF-8 bytes in `output`. */
+  readonly outputContentHash: string;
+  /** Exact byte length of the canonical UTF-8 bytes in `output`. */
+  readonly outputByteLength: number;
   readonly operationId?: string;
 }
 
@@ -177,10 +183,39 @@ export interface AttachmentRepository {
   }): Promise<void>;
 }
 
+/**
+ * A server-private storage record for frozen analysis evidence. This is an
+ * infrastructure boundary, not an API DTO: callers must never serialize the
+ * opaque storage handle outside trusted server composition.
+ */
+export interface AttachmentDerivativeEvidenceRecord {
+  readonly workspaceId: string;
+  readonly attachmentId: string;
+  readonly derivativeId: string;
+  readonly output: BlobHandle;
+  readonly outputContentHash: string;
+  readonly outputByteLength: number;
+}
+
+/**
+ * Resolves one retention-active, completed derivative only when it is linked
+ * to the requested attachment in the requested workspace.
+ */
+export interface AttachmentDerivativeEvidenceRecordStore {
+  findDerivativeEvidenceRecord(input: {
+    readonly workspaceId: string;
+    readonly attachmentId: string;
+    readonly derivativeId: string;
+    readonly signal: AbortSignal;
+  }): Promise<AttachmentDerivativeEvidenceRecord | undefined>;
+}
+
 export interface VisionPolicy {
   readonly prompt: string;
   readonly promptVersion: string;
   readonly bindingVersionId: string;
+  /** Server-configured cap for bytes held while constructing a vision request. */
+  readonly maximumInlineBytes: number;
   readonly maximumInputTokens: number;
   readonly maximumOutputTokens: number;
   readonly budget: {

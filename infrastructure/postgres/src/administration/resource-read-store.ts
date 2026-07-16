@@ -484,7 +484,7 @@ export class PostgresAdministrationResourceReadStore
           select: {
             id: true,
             lifecycle: true,
-            configurationVersionId: true,
+            endpointConfigurationVersionId: true,
             updatedAt: true,
             connectorInstanceId: true,
           },
@@ -494,7 +494,7 @@ export class PostgresAdministrationResourceReadStore
             id: row.id,
             label: row.id,
             status: row.lifecycle,
-            version: row.configurationVersionId,
+            version: row.endpointConfigurationVersionId,
             updatedAt: row.updatedAt,
             summary: `connector ${row.connectorInstanceId}`,
           }),

@@ -11,6 +11,7 @@ const validEnvironment = {
   DATABASE_READINESS_TIMEOUT_MS: "500",
   DATABASE_URL: "postgresql://caseweaver:password@localhost:5432/caseweaver",
   PORT: "3000",
+  ADMIN_ALLOWED_ORIGINS: "https://admin.example",
 };
 
 describe("parseApiConfig", () => {
@@ -30,8 +31,14 @@ describe("parseApiConfig", () => {
       port: 3000,
       principalId: "principal-test",
       workspaceId: "workspace-test",
-      allowedAdminOrigins: [],
+      allowedAdminOrigins: ["https://admin.example"],
       trustedProxyCidrs: [],
+      localAuthentication: {
+        login: "admin",
+        password: "admin",
+        principalId: "local-password-administrator",
+        displayName: "Local administrator",
+      },
     });
   });
 
@@ -79,7 +86,7 @@ describe("parseApiConfig", () => {
     ).toThrow(ApiConfigurationError);
   });
 
-  it("requires an explicit trusted UI origin whenever OIDC sessions are enabled", () => {
+  it("requires an explicit trusted UI origin whenever interactive administration authentication is enabled", () => {
     const oidc = {
       OIDC_ISSUER: "https://issuer.example",
       OIDC_CLIENT_ID: "admin-client",
@@ -87,9 +94,13 @@ describe("parseApiConfig", () => {
       OIDC_EPHEMERAL_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64url"),
       OIDC_EPHEMERAL_KEY_ID: "key-1",
     };
-    expect(() => parseApiConfig({ ...validEnvironment, ...oidc })).toThrow(
-      ApiConfigurationError,
-    );
+    expect(() =>
+      parseApiConfig({
+        ...validEnvironment,
+        ...oidc,
+        ADMIN_ALLOWED_ORIGINS: undefined,
+      }),
+    ).toThrow(ApiConfigurationError);
     expect(
       parseApiConfig({
         ...validEnvironment,
@@ -97,6 +108,89 @@ describe("parseApiConfig", () => {
         ADMIN_ALLOWED_ORIGINS: "https://admin.example",
       }).allowedAdminOrigins,
     ).toEqual(["https://admin.example"]);
+  });
+
+  it("limits default password authentication to development and test, while allowing OAuth-only deployments", () => {
+    expect(parseApiConfig(validEnvironment).localAuthentication).toEqual({
+      login: "admin",
+      password: "admin",
+      principalId: "local-password-administrator",
+      displayName: "Local administrator",
+    });
+    expect(
+      parseApiConfig({
+        ...validEnvironment,
+        ADMIN_LOGIN: "operator",
+        ADMIN_PASSWORD: "local-only-password",
+      }).localAuthentication,
+    ).toMatchObject({ login: "operator", password: "local-only-password" });
+    expect(() =>
+      parseApiConfig({
+        ...validEnvironment,
+        ADMIN_DISABLE_LOGIN_AUTHENTICATION: "true",
+      }),
+    ).toThrow(ApiConfigurationError);
+    expect(
+      parseApiConfig({
+        ...validEnvironment,
+        ADMIN_DISABLE_LOGIN_AUTHENTICATION: "true",
+        OIDC_ISSUER: "https://issuer.example",
+        OIDC_CLIENT_ID: "admin-client",
+        OIDC_CALLBACK_URL: "https://caseweaver.example/v1/auth/callback",
+        OIDC_EPHEMERAL_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString(
+          "base64url",
+        ),
+        OIDC_EPHEMERAL_KEY_ID: "key-1",
+      }).localAuthentication,
+    ).toBeUndefined();
+  });
+
+  it("requires an explicit non-default production password-login configuration", () => {
+    const oidc = {
+      OIDC_ISSUER: "https://issuer.example",
+      OIDC_CLIENT_ID: "admin-client",
+      OIDC_CALLBACK_URL: "https://caseweaver.example/v1/auth/callback",
+      OIDC_EPHEMERAL_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64url"),
+      OIDC_EPHEMERAL_KEY_ID: "key-1",
+    };
+    expect(
+      parseApiConfig({
+        ...validEnvironment,
+        ...oidc,
+        NODE_ENV: "production",
+      }).localAuthentication,
+    ).toBeUndefined();
+    expect(() =>
+      parseApiConfig({
+        ...validEnvironment,
+        ...oidc,
+        NODE_ENV: "production",
+        ADMIN_ENABLE_PASSWORD_AUTHENTICATION: "true",
+      }),
+    ).toThrow(ApiConfigurationError);
+    expect(() =>
+      parseApiConfig({
+        ...validEnvironment,
+        ...oidc,
+        NODE_ENV: "production",
+        ADMIN_ENABLE_PASSWORD_AUTHENTICATION: "true",
+        ADMIN_LOGIN: "admin",
+        ADMIN_PASSWORD: "admin",
+      }),
+    ).toThrow(ApiConfigurationError);
+    expect(
+      parseApiConfig({
+        ...validEnvironment,
+        ...oidc,
+        NODE_ENV: "production",
+        ADMIN_ENABLE_PASSWORD_AUTHENTICATION: "true",
+        ADMIN_LOGIN: "operator",
+        ADMIN_PASSWORD: "production-only-password",
+      }).localAuthentication,
+    ).toMatchObject({
+      login: "operator",
+      password: "production-only-password",
+    });
   });
 
   it("accepts a complete deployment-only first-administrator bootstrap and rejects partial values", () => {

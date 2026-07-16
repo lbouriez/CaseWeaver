@@ -14,6 +14,7 @@ export * from "./ports.js";
 export * from "./provider-capability-test.js";
 export * from "./publication-profile-configuration.js";
 export * from "./resource-policy.js";
+export * from "./runtime-connector-configuration.js";
 export * from "./source-schedule-configuration.js";
 export * from "./webhook-endpoint-configuration.js";
 export * from "./workspace-role-assignment.js";

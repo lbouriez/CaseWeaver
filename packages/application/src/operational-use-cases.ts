@@ -3,6 +3,7 @@ import {
   auditEventId,
   causationId,
   createEnvelope,
+  type EnvelopeFor,
   IdempotencyConflictError,
   outboxEnvelopeId,
   type Sha256Digest,
@@ -19,6 +20,7 @@ import type {
   OperationsStore,
   OutboxStore,
   ResourceLeaseStore,
+  RetentionObjectReference,
   UnitOfWork,
 } from "./ports.js";
 
@@ -442,30 +444,23 @@ export class QueueExpiredRetention {
         return { queued: 0, replayed: true };
       }
       const occurredAt = this.clock.now();
-      const workItems = await this.store.queueExpiredRetention(transaction, {
-        workspaceId: context.workspaceId,
-        limit,
-        occurredAt,
-      });
-      for (const workItem of workItems) {
-        await this.outbox.append(
-          transaction,
-          createEnvelope({
-            id: outboxEnvelopeId(this.ids.next("outboxEnvelope")),
-            kind: "command",
-            type: "retention.purge.v1",
-            schemaVersion: 1,
-            workspaceId: context.workspaceId,
-            occurredAt,
-            correlationId: context.correlationId,
-            causationId: causationId(context.requestId),
-            ...(context.traceContext === undefined
-              ? {}
-              : { traceContext: context.traceContext }),
-            payload: { workItemId: workItem.id },
-          }),
-        );
-      }
+      await this.outbox.append(
+        transaction,
+        createEnvelope({
+          id: outboxEnvelopeId(this.ids.next("outboxEnvelope")),
+          kind: "command",
+          type: "retention.reap.v1",
+          schemaVersion: 1,
+          workspaceId: context.workspaceId,
+          occurredAt,
+          correlationId: context.correlationId,
+          causationId: causationId(context.requestId),
+          ...(context.traceContext === undefined
+            ? {}
+            : { traceContext: context.traceContext }),
+          payload: { reason: "operator", limit },
+        }),
+      );
       await this.store.recordAction(transaction, {
         ...idempotency,
         requestDigest: mutation.requestDigest,
@@ -480,13 +475,142 @@ export class QueueExpiredRetention {
         afterHash: mutation.requestDigest,
         occurredAt,
       });
-      return { queued: workItems.length, replayed: false };
+      return { queued: 1, replayed: false };
     });
   }
 }
 
+/**
+ * The reaper is the producer of purge commands for expired retention work. It
+ * finds durable expired work, then atomically writes one command and one audit
+ * record for its batch. Object deletion happens only later, after a fenced
+ * claim.
+ */
+export class ReapExpiredRetentionWork {
+  public constructor(
+    private readonly unitOfWork: UnitOfWork,
+    private readonly store: OperationsStore,
+    private readonly outbox: OutboxStore,
+    private readonly audit: AuditStore,
+    private readonly ids: IdGenerator,
+    private readonly clock: Clock,
+    private readonly maximumBatch = 100,
+  ) {
+    if (
+      !Number.isInteger(maximumBatch) ||
+      maximumBatch < 1 ||
+      maximumBatch > 1_000
+    ) {
+      throw new RangeError("Retention batch limit must be between 1 and 1000.");
+    }
+  }
+
+  public async execute(
+    command: EnvelopeFor<"retention.reap.v1">,
+    signal: AbortSignal,
+  ): Promise<{ readonly queued: number }> {
+    throwIfAborted(signal);
+    const limit = command.payload.limit ?? this.maximumBatch;
+    return this.unitOfWork.transaction(async (transaction) => {
+      const occurredAt = this.clock.now();
+      const workItems = await this.store.queueExpiredRetention(transaction, {
+        workspaceId: command.workspaceId,
+        limit,
+        occurredAt,
+      });
+      for (const workItem of workItems) {
+        await this.outbox.append(
+          transaction,
+          createEnvelope({
+            id: outboxEnvelopeId(this.ids.next("outboxEnvelope")),
+            kind: "command",
+            type: "retention.purge.v1",
+            schemaVersion: 1,
+            workspaceId: command.workspaceId,
+            occurredAt,
+            correlationId: command.correlationId,
+            causationId: causationId(command.id),
+            ...(command.traceContext === undefined
+              ? {}
+              : { traceContext: command.traceContext }),
+            payload: { workItemId: workItem.id },
+          }),
+        );
+      }
+      await this.audit.append(transaction, {
+        id: auditEventId(this.ids.next("auditEvent")),
+        workspaceId: command.workspaceId,
+        action: "retention.reap.processed",
+        targetId: "retention",
+        targetType: "retentionWork",
+        outcome: "succeeded",
+        origin: "worker",
+        reasonCode: command.payload.reason,
+        occurredAt,
+      });
+      return { queued: workItems.length };
+    });
+  }
+}
+
+export class RetentionObjectReferenceUnavailableError extends Error {
+  public readonly code = "retention.objectReferenceUnavailable";
+  public readonly retryable = false;
+
+  public constructor() {
+    super("Retention object reference is unavailable.");
+    this.name = "RetentionObjectReferenceUnavailableError";
+  }
+}
+
+function isNonEmptyBoundedString(
+  value: unknown,
+  maximumLength: number,
+): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= maximumLength &&
+    !value.includes("\0") &&
+    !value.includes("\r") &&
+    !value.includes("\n")
+  );
+}
+
+/**
+ * Reject malformed or incomplete identities without including storage data in
+ * errors. Backend adapters additionally enforce backend and workspace scope.
+ */
+export function assertRetentionObjectReference(
+  value: unknown,
+): RetentionObjectReference {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !isNonEmptyBoundedString(
+      (value as { readonly workspaceId?: unknown }).workspaceId,
+      200,
+    ) ||
+    !/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/u.test(
+      (value as { readonly storageBackendId?: unknown })
+        .storageBackendId as string,
+    ) ||
+    !isNonEmptyBoundedString((value as { readonly key?: unknown }).key, 2_048)
+  ) {
+    throw new RetentionObjectReferenceUnavailableError();
+  }
+  return Object.freeze({
+    workspaceId: (value as RetentionObjectReference).workspaceId,
+    storageBackendId: (value as RetentionObjectReference).storageBackendId,
+    key: (value as RetentionObjectReference).key,
+  });
+}
+
 export interface RetentionObjectStore {
-  delete(storageKey: string, signal: AbortSignal): Promise<void>;
+  delete(
+    objectReference: RetentionObjectReference,
+    signal: AbortSignal,
+  ): Promise<void>;
 }
 
 export class PurgeRetentionWorkItem {
@@ -494,6 +618,8 @@ export class PurgeRetentionWorkItem {
     private readonly unitOfWork: UnitOfWork,
     private readonly store: OperationsStore,
     private readonly objects: RetentionObjectStore,
+    private readonly audit: AuditStore,
+    private readonly ids: IdGenerator,
     private readonly clock: Clock,
   ) {}
 
@@ -508,17 +634,40 @@ export class PurgeRetentionWorkItem {
     );
     if (claimed === undefined) return;
     try {
-      if (claimed.storageKey !== undefined) {
-        await this.objects.delete(claimed.storageKey, signal);
+      const objectReference = claimed.objectReference;
+      if (objectReference === undefined && claimed.storageKey !== undefined) {
+        throw new RetentionObjectReferenceUnavailableError();
       }
-      await this.unitOfWork.transaction((transaction) =>
-        this.store.completeRetentionWork(transaction, {
+      if (objectReference !== undefined) {
+        const validated = assertRetentionObjectReference(objectReference);
+        if (
+          validated.workspaceId !== workspaceId ||
+          claimed.workspaceId !== workspaceId
+        ) {
+          throw new RetentionObjectReferenceUnavailableError();
+        }
+        await this.objects.delete(validated, signal);
+      }
+      await this.unitOfWork.transaction(async (transaction) => {
+        const completed = await this.store.completeRetentionWork(transaction, {
           workspaceId,
           workItemId,
           fencingToken: claimed.fencingToken,
           occurredAt: this.clock.now(),
-        }),
-      );
+        });
+        if (completed) {
+          await this.audit.append(transaction, {
+            id: auditEventId(this.ids.next("auditEvent")),
+            workspaceId,
+            action: "retention.work.completed",
+            targetId: `retention:${workItemId}`,
+            targetType: "retentionWork",
+            outcome: "succeeded",
+            origin: "worker",
+            occurredAt: this.clock.now(),
+          });
+        }
+      });
     } catch (error) {
       await this.unitOfWork.transaction((transaction) =>
         this.store.releaseRetentionWork(transaction, {

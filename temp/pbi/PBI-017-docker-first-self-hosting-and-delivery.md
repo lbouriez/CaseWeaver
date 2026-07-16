@@ -8,10 +8,35 @@ run the required migration deliberately, use either standalone or distributed to
 serve the PBI-016 administration console over TLS, monitor readiness, upgrade safely,
 and restore a tested backup without needing a cloud-vendor control plane.
 
-This PBI depends on **PBI-013** and **PBI-016**. PBI-016 is not yet implemented: its
+This PBI depends on **PBI-013** and **PBI-016**. PBI-016 is accepted: its
 administration APIs, OIDC/session boundary, `apps/admin` artifact, and runtime public
-configuration contract are prerequisites and are the largest delivery risk. PBI-017
-must not invent substitute browser authorization, API, or configuration behavior.
+configuration contract are prerequisites for packaging. PBI-017 must not invent
+substitute browser authorization, API, or configuration behavior.
+
+## Delivery status
+
+**In progress.** The repository now builds non-root API-control-plane and static-Admin
+OCI targets, runs a disposable same-origin local stack with a real PostgreSQL migration,
+and verifies/tag-publishes those two images in GitHub Actions. The PBI-013 runtime image
+now supplies the standalone, API, webhook, scheduler, and worker entrypoints. This is
+intentionally not the complete PBI outcome: production TLS and secret/database-role
+topology, backup/restore drills, image scanning, attestation verification, and
+release-profile OIDC-through-edge acceptance remain before production self-hosting can
+be accepted.
+
+### Remaining work before completion
+
+- **Production TLS:** deliver and validate the TLS edge, certificate interface,
+  trusted-proxy contract, and production network/secret topology.
+- **Release-profile runtime exercise:** run the already-implemented standalone, API,
+  webhook, scheduler, and worker commands from digest-pinned release images through the
+  production TLS edge with the least-privilege production database roles.
+- **Backup and restore:** document and automate a bounded PostgreSQL/object-store backup
+  and isolated restore drill, including durable-work recovery validation.
+- **Vulnerability scanning:** scan final immutable images and SBOMs, enforce the defined
+  severity/exception gate, and retain reports with the release.
+- **Attestation verification:** produce and verify registry-neutral provenance/SBOM
+  attestations (and the optional signing policy) against the digest before release.
 
 ## Goals
 
@@ -50,14 +75,14 @@ The implementation must start from these facts, not assumptions:
 
 | Area | Current evidence | Delivery consequence |
 |---|---|---|
-| Release image | `deploy/docker/compose.production.yml` requires an externally supplied immutable `CASEWEAVER_IMAGE`, but the repository has no Dockerfile or image build assets. | Add a reproducible build contract before treating the Compose file as installable. |
+| Release image | `deploy/docker/Dockerfile` now builds digest-pinned non-root runtime and Admin targets, including standalone, API, webhook, scheduler, and worker commands. | Exercise those commands from immutable release images in the production TLS/least-privilege topology before representing delivery as complete. |
 | Runtime topology | The production Compose file has mutually exclusive `standalone` and `distributed` profiles, a one-shot `migrate` profile, PostgreSQL/pgvector, named database volume, and durable-mode warning in `deploy/docker/README.md`. | Retain profile semantics and persistent queue/database state; never run both runtime profiles together. |
 | Networking | PostgreSQL is on an internal `caseweaver-data` network; every runtime service also shares `caseweaver-egress`; API and webhook bind host ports to loopback. | Separate ingress, application/data, and egress responsibilities more narrowly and add an explicit TLS edge boundary. |
-| Secrets and entrypoint | `entrypoint.sh` requires `DATABASE_URL_FILE`, exports it only to the launched process, and the Compose file bind-mounts that script plus two local secret files. | Keep secret files, but bake a versioned entrypoint into the image; remove runtime executable bind mounts and split migration/runtime database privileges. |
+| Secrets and entrypoint | The runtime image bakes `container-entrypoint.sh`, which accepts a readable `DATABASE_URL_FILE` or the local disposable direct URL without logging either. | Production still needs secret separation, least-privilege database roles, and release-profile validation of the entrypoint contract. |
 | Health | PostgreSQL has a pgvector-aware healthcheck. `apps/api/src/health.routes.ts` already exposes `/health/live` and database-backed `/health/ready`; no runtime Compose service has a healthcheck. | Standardize authenticated-service-safe liveness/readiness endpoints and consume them in Compose, smoke tests, and the proxy. |
-| Admin console | The tracked baseline at audit has no `apps/admin` path; `apps/web/README.md` says the web client is future work. PBI-016 requires `apps/admin`, typed admin APIs, cookie sessions, and deployment-injected public runtime configuration. | Do not package a fictitious SPA. Define the image/interface now, then build it only after PBI-016 delivers its artifact and API contract. |
-| CI | `.github/workflows/ci.yml` is one Ubuntu job triggered by pull requests and `main`, with `contents: read`; it runs pnpm quality/build/tests and the database integration suite only. Its third-party actions are tag-pinned rather than immutable-SHA-pinned. | Preserve existing checks while adding staged Docker/release work, action pinning, least privilege, caches, concurrency, scans, attestations, and release rules. |
-| Toolchain | `package.json` specifies pnpm 11.12.0 and Node >=22.12.0; CI currently uses Node 22.12.0. | The container build must use the lockfile, Corepack/pinned pnpm, and a Node 22.12-compatible digest-pinned base image. |
+| Admin console | PBI-016 now supplies `apps/admin`, typed admin APIs, cookie sessions, and a deployment-injected public runtime configuration contract. The new static image packages only its built artifact and public runtime-config generator. | Keep the browser free of credentials and retain API-owned authentication/authorization. |
+| CI | `ci.yml` now pins actions by immutable SHA and uses Node 22.13.1. `containers.yml` adds unprivileged image/local-Compose verification and tag-gated API/Admin image publication. | Add scan, attestation verification, release records, and protected-release policy before calling delivery complete. |
+| Toolchain | `package.json` specifies pnpm 11.12.0 and Node >=22.13.0; CI and Docker use Node 22.13.1. | The container build uses the lockfile and Corepack with digest-pinned Node; retain the same baseline across delivery workflows. |
 
 The audit also confirms the initial database is PostgreSQL with pgvector
 (`.features/20-persistence-and-database-guide.md` and
@@ -391,7 +416,7 @@ ephemeral, non-production secrets:
 
 ## Acceptance criteria
 
-- [ ] PBI-016 is accepted, including its backend administration APIs, secure session
+- [x] PBI-016 is accepted, including its backend administration APIs, secure session
   model, and documented static artifact/runtime public-config contract; its unresolved
   delivery risks are either closed or explicitly block release.
 - [ ] A fresh amd64 Docker build is multi-stage, lockfile-based, reproducible within

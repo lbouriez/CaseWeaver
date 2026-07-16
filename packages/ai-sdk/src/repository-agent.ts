@@ -10,6 +10,19 @@ export interface ConfiguredRepository {
   readonly pinnedCommit: string;
 }
 
+/**
+ * An immutable, server-selected repository-runtime identity.  It contains no
+ * checkout endpoint, filesystem location, or credential.  The application
+ * creates this pin from a retained analysis profile; case content and model
+ * tool input must never create or alter it.
+ */
+export interface RepositoryAgentRuntimePin {
+  readonly workspaceId: string;
+  readonly runtimeVersionId: string;
+  readonly repositoryId: string;
+  readonly pinnedCommit: string;
+}
+
 export interface RepositoryAgentEvidence {
   readonly path: string;
   readonly startLine: number;
@@ -61,4 +74,28 @@ export interface RepositoryAgentRuntime {
       context: RepositoryAgentRuntimeContext,
     ) => Promise<RepositoryAgentRuntimeResult>,
   ): Promise<RepositoryAgentRuntimeResult>;
+}
+
+/**
+ * The server-private runtime material selected by an immutable pin.  Only a
+ * provider adapter receives this result, so the checkout secret reference is
+ * still confined to the checkout-broker boundary.
+ */
+export interface ResolvedRepositoryAgentRuntime {
+  readonly repository: ConfiguredRepository;
+  readonly runtime: RepositoryAgentRuntime;
+  readonly allowedTools: readonly RepositoryReadOnlyTool[];
+  readonly limits: RepositoryAgentSandboxLimits;
+}
+
+/**
+ * Resolves only an exact, workspace-scoped runtime version.  Implementations
+ * must fail closed for an unknown, inactive, mismatched, or superseded pin and
+ * must not substitute a current/default configuration.
+ */
+export interface PinnedRepositoryAgentRuntimeResolver {
+  resolve(
+    pin: RepositoryAgentRuntimePin,
+    signal: AbortSignal,
+  ): Promise<ResolvedRepositoryAgentRuntime>;
 }

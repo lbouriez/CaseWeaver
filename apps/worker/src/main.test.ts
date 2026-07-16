@@ -6,15 +6,40 @@ import { describe, expect, it, vi } from "vitest";
 import { runWorkerCommand } from "./main.js";
 
 describe("runWorkerCommand", () => {
-  it("reports worker health without initializing job infrastructure", () => {
+  it("reports worker health only after a bounded PostgreSQL readiness probe", async () => {
     const output = { error: vi.fn(), log: vi.fn() };
+    const readiness = { check: vi.fn(async () => "ready" as const) };
 
-    expect(runWorkerCommand(["health"], output)).toBe(0);
+    await expect(
+      runWorkerCommand(
+        ["health"],
+        output,
+        { DATABASE_URL: "postgresql://caseweaver:test@localhost/test" },
+        readiness,
+      ),
+    ).resolves.toBe(0);
+    expect(readiness.check).toHaveBeenCalledExactlyOnceWith();
     expect(output.log).toHaveBeenCalledWith('{"status":"ok"}');
     expect(output.error).not.toHaveBeenCalled();
   });
 
-  it("rejects unsupported commands through the executable entry point", () => {
+  it("fails closed when PostgreSQL readiness is unavailable", async () => {
+    const output = { error: vi.fn(), log: vi.fn() };
+    await expect(
+      runWorkerCommand(
+        ["health"],
+        output,
+        { DATABASE_URL: "postgresql://caseweaver:test@localhost/test" },
+        { check: async () => "unavailable" },
+      ),
+    ).resolves.toBe(1);
+    expect(output.error).toHaveBeenCalledWith(
+      "Worker database is unavailable.",
+    );
+    expect(output.log).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on production startup when required runtime configuration is absent", () => {
     const result = spawnSync(
       process.execPath,
       [
@@ -29,8 +54,6 @@ describe("runWorkerCommand", () => {
 
     expect(result.status).toBe(1);
     expect(result.stdout).toBe("");
-    expect(result.stderr).toBe(
-      "Usage: caseweaver-worker health | diagnostics | diagnostics-once\n",
-    );
+    expect(result.stderr).toBe("Worker startup failed.\n");
   });
 });

@@ -45,6 +45,8 @@ function createEndpoint(): WebhookEndpoint {
     id: "opaque_endpoint-1",
     workspaceId: "workspace-1",
     connectorInstanceId: "connector-1",
+    endpointConfigurationVersionId: "endpoint-version-1",
+    connectorConfigurationVersionId: "connector-version-1",
     adapter: new RecordingWebhookAdapter(verified, signals),
   };
 }
@@ -58,6 +60,30 @@ function resolverFor(
 }
 
 describe("buildWebhookApp", () => {
+  it("exposes bounded injected readiness without public failure details", async () => {
+    const app = buildWebhookApp({
+      ingress: createIngress(),
+      endpointResolver: resolverFor(createEndpoint()),
+      maximumBodyBytes: 1_024,
+      readinessProbe: {
+        check: async () => {
+          throw new Error("postgresql://secret@example.test refused");
+        },
+      },
+    });
+
+    await expect(
+      app.inject({ method: "GET", url: "/health/live" }),
+    ).resolves.toMatchObject({
+      statusCode: 200,
+    });
+    const readiness = await app.inject({ method: "GET", url: "/health/ready" });
+    expect(readiness.statusCode).toBe(503);
+    expect(readiness.json()).toEqual({ status: "unavailable" });
+    expect(readiness.body).not.toContain("postgresql://");
+    await app.close();
+  });
+
   it("passes exact raw bytes to the server-selected endpoint and returns promptly", async () => {
     const endpoint = createEndpoint();
     const resolver = resolverFor(endpoint);
@@ -200,11 +226,13 @@ describe("buildWebhookApp", () => {
       workspaceId: "workspace-1",
       lifecycle: "active" as const,
       connectorRegistrationId: "connector-1",
-      configurationVersionId: "version-1",
+      endpointConfigurationVersionId: "endpoint-version-1",
+      connectorConfigurationVersionId: "connector-version-1",
       verifiedEventTypes: ["case.updated"],
       maximumBodyBytes: 512,
       maximumRequestsPerMinute: 4,
       analysisTriggerId: "trigger-1",
+      automatedPrincipalId: "principal-1",
     }));
     const acquire = vi.fn(async () => ({ allowed: true }));
     const resolveAdapter = vi.fn(async () => adapter);
@@ -220,11 +248,12 @@ describe("buildWebhookApp", () => {
       workspaceId: "workspace-1",
       connectorInstanceId: "connector-1",
       analysisTriggerId: "trigger-1",
+      automatedPrincipalId: "principal-1",
     });
     expect(resolveAdapter).toHaveBeenCalledWith({
       workspaceId: "workspace-1",
       connectorRegistrationId: "connector-1",
-      configurationVersionId: "version-1",
+      connectorConfigurationVersionId: "connector-version-1",
       verifiedEventTypes: ["case.updated"],
     });
     await resolved?.admit?.();

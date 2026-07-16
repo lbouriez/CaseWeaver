@@ -1,7 +1,9 @@
 import type { EnvelopeFor } from "@caseweaver/domain";
 import {
+  type AnalysisPromptBuilder,
   type AnalysisPromptBudgets,
   type AnalysisPromptTemplate,
+  type PromptTokenCounter,
   analysisPromptBudgetsSchema,
   analysisPromptTemplateSchema,
   CASE_ANALYSIS_SCHEMA_VERSION,
@@ -89,6 +91,54 @@ export const analysisEvidenceSchema = z.discriminatedUnion("kind", [
 
 export type AnalysisEvidence = z.infer<typeof analysisEvidenceSchema>;
 
+/**
+ * An append-only reference captured with a case snapshot.  It deliberately
+ * contains no object-storage location: only the server-private content reader
+ * may resolve the derivative's opaque storage handle.
+ */
+export const snapshotAttachmentReferenceSchema = z
+  .object({
+    attachmentId: identifier,
+    derivativeId: identifier,
+    processorVersion: identifier,
+    /** SHA-256 of the normalized, safe-to-prompt derivative text. */
+    outputContentHash: digest,
+  })
+  .strict();
+
+export type SnapshotAttachmentReference = z.infer<
+  typeof snapshotAttachmentReferenceSchema
+>;
+
+/**
+ * Implemented by persistence. References are selected by the immutable
+ * snapshot identity, never by a current external-reference lookup.
+ */
+export interface SnapshotAttachmentReferenceStore {
+  listSnapshotAttachmentReferences(input: {
+    readonly workspaceId: string;
+    readonly caseSnapshotId: string;
+    readonly signal: AbortSignal;
+  }): Promise<readonly SnapshotAttachmentReference[]>;
+}
+
+/**
+ * A server-private reader for normalized attachment derivatives. Implementors
+ * must enforce workspace, retention, and storage access rules and must never
+ * disclose object locations or credentials through this contract.
+ */
+export interface AttachmentDerivativeEvidenceContentReader {
+  readDerivativeText(input: {
+    readonly workspaceId: string;
+    readonly attachmentId: string;
+    readonly derivativeId: string;
+    readonly signal: AbortSignal;
+  }): Promise<{
+    readonly content: string;
+    readonly contentHash: string;
+  }>;
+}
+
 export const caseSnapshotTombstoneSchema = z
   .object({
     actorPrincipalId: identifier,
@@ -163,6 +213,7 @@ export const analysisProfileSchema = z
       .object({
         policy: stagePolicy,
         profileId: identifier,
+        /** Exact immutable retrieval runtime configuration version ID. */
         profileVersion: identifier,
         collectionIds: z.array(identifier).min(1).max(100),
         maximumQueryCharacters: z.number().int().positive().max(64_000),
@@ -176,6 +227,8 @@ export const analysisProfileSchema = z
     repository: z
       .object({
         policy: stagePolicy,
+        /** Exact immutable server-side repository runtime configuration. */
+        runtimeVersionId: identifier.optional(),
         bindingVersionId: identifier.optional(),
         repositoryId: identifier.optional(),
         pinnedCommit: z
@@ -189,14 +242,15 @@ export const analysisProfileSchema = z
       .superRefine((repository, context) => {
         if (
           repository.policy !== "disabled" &&
-          (repository.bindingVersionId === undefined ||
+          (repository.runtimeVersionId === undefined ||
+            repository.bindingVersionId === undefined ||
             repository.repositoryId === undefined ||
             repository.pinnedCommit === undefined)
         ) {
           context.addIssue({
             code: "custom",
             message:
-              "An enabled repository stage requires immutable binding, repository, and commit references.",
+              "An enabled repository stage requires immutable runtime, binding, repository, and commit references.",
           });
         }
       }),
@@ -339,9 +393,36 @@ export interface RetrievalEvidencePort {
   }): Promise<AnalysisEvidenceStageResult>;
 }
 
+/**
+ * Prompt construction needs the tokenizer belonging to the exact retained
+ * analysis binding. The resolver is asynchronous because production
+ * composition may first resolve that immutable server-side binding. It never
+ * selects a current/default model from analysis content.
+ */
+export interface AnalysisPromptBuilderResolver {
+  resolve(input: {
+    readonly execution: AnalysisExecution;
+    readonly signal: AbortSignal;
+  }): Promise<AnalysisPromptBuilder>;
+}
+
+/**
+ * Outer runtime composition resolves a model-compatible counter for this
+ * exact retained binding. It must reject an unavailable tokenizer instead of
+ * selecting a current/default provider or model.
+ */
+export interface AnalysisPromptTokenCounterResolver {
+  resolve(input: {
+    readonly workspaceId: string;
+    readonly bindingVersionId: string;
+    readonly signal: AbortSignal;
+  }): Promise<PromptTokenCounter>;
+}
+
 export interface RepositoryInvestigationPort {
   investigate(input: {
     readonly execution: AnalysisExecution;
+    readonly runtimeVersionId: string;
     readonly bindingVersionId: string;
     readonly repositoryId: string;
     readonly pinnedCommit: string;
@@ -383,6 +464,7 @@ export interface AnalysisRequestIdentityInput {
   readonly outputSchemaVersion: string;
   readonly repositoryCommit?: string;
   readonly repositoryBindingVersionId?: string;
+  readonly repositoryRuntimeVersionId?: string;
 }
 
 export interface CapturedAnalysisRequest {

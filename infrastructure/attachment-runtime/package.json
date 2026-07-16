@@ -15,6 +15,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@caseweaver/analysis": "workspace:*",
     "@caseweaver/attachments": "workspace:*"
   },
   "devDependencies": {

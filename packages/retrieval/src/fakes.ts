@@ -7,8 +7,12 @@ import type {
 } from "./contracts.js";
 
 export class WhitespaceTokenCounter implements RetrievalTokenCounter {
-  public count(text: string): number {
-    const trimmed = text.trim();
+  public count(input: {
+    readonly text: string;
+    readonly bindingVersionId: string;
+    readonly purpose: "embedding" | "reranking" | "context";
+  }): number {
+    const trimmed = input.text.trim();
     return trimmed.length === 0 ? 0 : trimmed.split(/\s+/u).length;
   }
 }

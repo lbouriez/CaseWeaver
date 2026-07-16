@@ -17,45 +17,10 @@ import { type CaseWeaverApiClient, PublicApiError } from "../api/api-client.js";
 import type { AdminDetail, AdminListItem } from "../api/contracts.js";
 import { ApiFailure } from "../components/api-failure.js";
 import { PublicationWebhookLifecycleControl } from "../components/publication-webhook-lifecycle-control.js";
-
-type ConfigurationObject = Readonly<Record<string, unknown>>;
-
-const secretLikeKey =
-  /secret|token|pass(?:word)?|credential|api[-_]?key|authorization|private[-_]?key|locator/iu;
-
-/**
- * Configuration JSON remains generic, but forms refuse credential-shaped
- * fields. Credentials are registered through the dedicated opaque-reference
- * workflow and no raw secret-like text is retained after rejection.
- */
-function parseSafeConfiguration(
-  text: string,
-  label: string,
-): ConfigurationObject {
-  let value: unknown;
-  try {
-    value = JSON.parse(text);
-  } catch {
-    throw new Error(`${label} must be a valid JSON object.`);
-  }
-  if (value === null || Array.isArray(value) || typeof value !== "object") {
-    throw new Error(`${label} must be a JSON object.`);
-  }
-  if (containsSecretLikeKey(value)) {
-    throw new Error(
-      "Credential-shaped configuration fields are not accepted here. Register an opaque external reference instead.",
-    );
-  }
-  return value as ConfigurationObject;
-}
-
-function containsSecretLikeKey(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(containsSecretLikeKey);
-  if (value === null || typeof value !== "object") return false;
-  return Object.entries(value).some(
-    ([key, nested]) => secretLikeKey.test(key) || containsSecretLikeKey(nested),
-  );
-}
+import {
+  parseSafeConfiguration,
+  type SafeConfigurationObject,
+} from "../components/safe-configuration-json.js";
 
 function splitIdentifiers(value: string): readonly string[] {
   const values = value
@@ -161,7 +126,7 @@ function PublicationProfileDraftForm({
   const [created, setCreated] = useState<AdminDetail>();
 
   const submit = async () => {
-    let parsedDefinition: ConfigurationObject;
+    let parsedDefinition: SafeConfigurationObject;
     try {
       parsedDefinition = parseSafeConfiguration(
         definition,
@@ -352,7 +317,7 @@ function WebhookEndpointDraftForm({
   };
 
   const submit = async () => {
-    let parsedSettings: ConfigurationObject;
+    let parsedSettings: SafeConfigurationObject;
     let parsedEvents: readonly string[];
     let bodyBytes: number;
     let rate: number;

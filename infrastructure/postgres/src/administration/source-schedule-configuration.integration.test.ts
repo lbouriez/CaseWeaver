@@ -147,10 +147,12 @@ describe("PostgreSQL source and schedule administration projections", () => {
       const source = await pool.query<{
         readonly lifecycle: string;
         readonly configuration_version: string;
+        readonly connector_configuration_version_id: string;
         readonly connector_registration_id: string;
         readonly knowledge_collection_id: string;
       }>(
-        `SELECT lifecycle, configuration_version, connector_registration_id,
+        `SELECT lifecycle, configuration_version, connector_configuration_version_id,
+                connector_registration_id,
                 knowledge_collection_id
          FROM knowledge_sources
          WHERE workspace_id = 'workspace-a' AND id = 'source-a'`,
@@ -159,6 +161,7 @@ describe("PostgreSQL source and schedule administration projections", () => {
         {
           lifecycle: "enabled",
           configuration_version: sourceVersion,
+          connector_configuration_version_id: "connector-a-configuration-v1",
           connector_registration_id: "connector-a",
           knowledge_collection_id: "collection-a",
         },
@@ -166,11 +169,12 @@ describe("PostgreSQL source and schedule administration projections", () => {
       const schedule = await pool.query<{
         readonly enabled: boolean;
         readonly configuration_version: string;
+        readonly connector_configuration_version_id: string;
         readonly administration_configuration_version_id: string;
         readonly trigger_kind: string;
         readonly interval_ms: string;
       }>(
-        `SELECT enabled, configuration_version,
+        `SELECT enabled, configuration_version, connector_configuration_version_id,
                 administration_configuration_version_id, trigger_kind, interval_ms
          FROM knowledge_schedules
          WHERE workspace_id = 'workspace-a' AND id = 'schedule-a'`,
@@ -179,6 +183,7 @@ describe("PostgreSQL source and schedule administration projections", () => {
         {
           enabled: true,
           configuration_version: sourceVersion,
+          connector_configuration_version_id: "connector-a-configuration-v1",
           administration_configuration_version_id: activatedSchedule.version.id,
           trigger_kind: "interval",
           interval_ms: "60000",
@@ -299,6 +304,56 @@ describe("PostgreSQL source and schedule administration projections", () => {
            AND configuration_id = 'source-cross-workspace'`,
       );
       expect(retained.rows[0]?.count).toBe("0");
+    } finally {
+      await persistence.close();
+    }
+  });
+
+  it("fails closed when the selected embedding budget is not an active hard policy", async () => {
+    const persistence = createPostgresPersistence({ databaseUrl });
+    try {
+      await pool.query(
+        `INSERT INTO ai_budget_policies
+           (id, workspace_id, scope, scope_key, limit_amount, currency, hard, active, revision)
+         VALUES ('budget-soft-a', 'workspace-a', 'analysis', 'soft-budget-test', 1000, 'USD', FALSE, FALSE, 1)`,
+      );
+      await expect(
+        persistence.unitOfWork.transaction((transaction) =>
+          new ManageKnowledgeSourceConfiguration(
+            transactions,
+            store(persistence, transaction),
+            audit(
+              persistence.auditStore,
+              transaction,
+              "workspace-a",
+              "principal-a",
+            ),
+          ).create({
+            workspaceId: "workspace-a",
+            displayName: "Soft budget source",
+            settings: { schemaVersion: 1 },
+            source: {
+              ...sourceProjection(),
+              sourceId: "source-soft-budget",
+              embeddingBudgetPolicyId: "budget-soft-a",
+            },
+            mutation: mutation("knowledgeSource.create", "soft-budget"),
+          }),
+        ),
+      ).rejects.toThrow(/immutable execution settings/i);
+      await expect(
+        pool.query(
+          `SELECT id FROM administration_configurations
+           WHERE workspace_id = 'workspace-a' AND id = 'source-soft-budget'`,
+        ),
+      ).resolves.toMatchObject({ rows: [] });
+      await expect(
+        pool.query(
+          `SELECT workspace_id FROM knowledge_source_runtime_versions
+           WHERE workspace_id = 'workspace-a'
+             AND knowledge_source_id = 'source-soft-budget'`,
+        ),
+      ).resolves.toMatchObject({ rows: [] });
     } finally {
       await persistence.close();
     }
@@ -747,8 +802,12 @@ function sourceProjection() {
     sourceId: "source-a",
     connectorRegistrationId: "connector-a",
     knowledgeCollectionId: "collection-a",
+    normalizationProfileId: "text-normalization",
     normalizationProfileVersion: "normalization-v1",
+    chunkingProfileId: "text-chunking",
     chunkingProfileVersion: "chunking-v1",
+    embeddingBatchSize: 16,
+    embeddingBudgetPolicyId: "budget-a",
     synchronizationPolicy: { triggers: [{ mode: "manual" }] },
     deletionBehavior: "tombstone" as const,
   };
@@ -823,8 +882,8 @@ async function seedWorkspace(
     `INSERT INTO ai_model_binding_versions (
        id, workspace_id, model_binding_id, version, provider_instance_version_id,
        catalog_snapshot_id, catalog_model_id, canonical_model, wire_api,
-       parameters, capabilities, secret_reference
-     ) VALUES ($1, $2, $3, 1, $4, $5, $6, 'embedding', 'embeddings', '{}'::jsonb, '[]'::jsonb, 'vault:test')`,
+       parameters, capabilities, maximum_input_tokens, secret_reference
+     ) VALUES ($1, $2, $3, 1, $4, $5, $6, 'embedding', 'embeddings', '{}'::jsonb, '["embedding"]'::jsonb, 8192, 'vault:test')`,
     [bindingVersion, workspace, binding, providerVersion, catalog, model],
   );
   await pool.query(
@@ -838,10 +897,57 @@ async function seedWorkspace(
        VALUES ($1, $2, 'knowledgeSource')`,
       [workspace, `connector-${suffix}`],
     );
+    await seedActiveConnectorConfiguration({
+      workspace,
+      connectorId: `connector-${suffix}`,
+      versionId: `connector-${suffix}-configuration-v1`,
+    });
   }
   await pool.query(
     `INSERT INTO knowledge_collections (id, workspace_id, embedding_binding_version_id, embedding_profile_version, dimensions)
      VALUES ($1, $2, $3, 'embedding-profile-v1', 3)`,
     [`collection-${suffix}`, workspace, bindingVersion],
+  );
+  await pool.query(
+    `INSERT INTO ai_budget_policies (id, workspace_id, scope, scope_key, limit_amount, currency, hard, active, revision)
+     VALUES ($1, $2, 'workspace', $2, 1000, 'USD', true, true, 1)`,
+    [`budget-${suffix}`, workspace],
+  );
+}
+
+async function seedActiveConnectorConfiguration(
+  input: Readonly<{
+    readonly workspace: string;
+    readonly connectorId: string;
+    readonly versionId: string;
+  }>,
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO administration_descriptor_revisions (
+       kind, type, version, descriptor, descriptor_hash
+     ) VALUES (
+       'connector', 'source-schedule-test-connector', 'v1', '{}'::jsonb,
+       repeat('a', 64)
+     ) ON CONFLICT (kind, type, version) DO NOTHING`,
+  );
+  await pool.query(
+    `INSERT INTO administration_configurations (
+       id, workspace_id, resource_type, lifecycle, current_version_id
+     ) VALUES ($1, $2, 'connector-instances', 'active', NULL)`,
+    [input.connectorId, input.workspace],
+  );
+  await pool.query(
+    `INSERT INTO administration_configuration_versions (
+       id, workspace_id, configuration_id, version, settings, secret_references,
+       descriptor_kind, descriptor_type, descriptor_version
+     ) VALUES ($1, $2, $3, 1, '{}'::jsonb, '[]'::jsonb,
+       'connector', 'source-schedule-test-connector', 'v1')`,
+    [input.versionId, input.workspace, input.connectorId],
+  );
+  await pool.query(
+    `UPDATE administration_configurations
+     SET current_version_id = $1
+     WHERE workspace_id = $2 AND id = $3`,
+    [input.versionId, input.workspace, input.connectorId],
   );
 }

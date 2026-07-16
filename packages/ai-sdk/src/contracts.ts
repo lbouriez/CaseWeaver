@@ -1,3 +1,8 @@
+import type {
+  RepositoryAgentEvidence,
+  RepositoryAgentRuntimePin,
+} from "./repository-agent.js";
+
 export type AiRole =
   | "embedding"
   | "vision"
@@ -139,6 +144,11 @@ export interface RerankerResult {
 }
 
 export interface RepositoryAgentRequest {
+  /**
+   * Server-created immutable checkout/runtime identity retained by the analysis
+   * profile version.  It is never accepted from browser, case, or model input.
+   */
+  readonly runtimePin: RepositoryAgentRuntimePin;
   readonly instruction: string;
   readonly maximumTurns: number;
   /**
@@ -166,6 +176,11 @@ export type RepositoryAgentMetering =
 
 export interface RepositoryAgentResult {
   readonly summary: string;
+  /**
+   * Validated locations in the isolated pinned tree. Repository adapters must
+   * not place source text, checkout metadata, or credentials here.
+   */
+  readonly evidence: readonly RepositoryAgentEvidence[];
   readonly metering: RepositoryAgentMetering;
 }
 

@@ -92,6 +92,8 @@ async function seedAiBinding(): Promise<void> {
 }
 
 async function seedKnowledge(): Promise<void> {
+  const connectorConfigurationVersionId =
+    "retrieval-connector-configuration-v1";
   await pool.query("INSERT INTO workspaces (id) VALUES ($1)", [workspaceId]);
   await seedAiBinding();
   await pool.query(
@@ -99,6 +101,9 @@ async function seedKnowledge(): Promise<void> {
      VALUES ('retrieval-connector', $1, 'active')`,
     [workspaceId],
   );
+  await seedConnectorConfiguration({
+    versionId: connectorConfigurationVersionId,
+  });
   await pool.query(
     `INSERT INTO knowledge_collections (
        id, workspace_id, embedding_binding_version_id,
@@ -121,17 +126,46 @@ async function seedKnowledge(): Promise<void> {
       sourceId,
       versionId: configurationVersionId,
     });
-    await pool.query(
-      `INSERT INTO knowledge_sources (
-         id, workspace_id, connector_registration_id, knowledge_collection_id,
-         lifecycle, configuration_version, normalization_profile_version,
-         chunking_profile_version, synchronization_policy, deletion_behavior
-       ) VALUES (
-         $1, $2, 'retrieval-connector', $3, 'enabled', $4, 'normalization-v1',
-         'chunking-v1', '{}'::jsonb, 'tombstone'
-       )`,
-      [sourceId, workspaceId, collection.id, configurationVersionId],
-    );
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query(
+        `INSERT INTO knowledge_sources (
+           id, workspace_id, connector_registration_id, knowledge_collection_id,
+           lifecycle, configuration_version, connector_configuration_version_id,
+           normalization_profile_version, chunking_profile_version,
+           synchronization_policy, deletion_behavior
+         ) VALUES (
+           $1, $2, 'retrieval-connector', $3, 'enabled', $4, $5,
+           'normalization-v1', 'chunking-v1', '{}'::jsonb, 'tombstone'
+         )`,
+        [
+          sourceId,
+          workspaceId,
+          collection.id,
+          configurationVersionId,
+          connectorConfigurationVersionId,
+        ],
+      );
+      await client.query(
+        `INSERT INTO knowledge_source_runtime_versions (
+           workspace_id, knowledge_source_id, source_configuration_version_id,
+           connector_registration_id, connector_configuration_version_id
+         ) VALUES ($1, $2, $3, 'retrieval-connector', $4)`,
+        [
+          workspaceId,
+          sourceId,
+          configurationVersionId,
+          connectorConfigurationVersionId,
+        ],
+      );
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
   }
   await seedDocument({
     documentId: "retrieval-document-active",
@@ -194,6 +228,43 @@ async function seedSourceConfiguration(
      SET current_version_id = $1
      WHERE workspace_id = $2 AND id = $3`,
     [input.versionId, workspaceId, input.sourceId],
+  );
+}
+
+async function seedConnectorConfiguration(input: {
+  readonly versionId: string;
+}): Promise<void> {
+  await pool.query(
+    `INSERT INTO connector_capabilities (
+       workspace_id, connector_registration_id, capability
+     ) VALUES ($1, 'retrieval-connector', 'knowledgeSource')`,
+    [workspaceId],
+  );
+  await pool.query(
+    `INSERT INTO administration_descriptor_revisions (
+       kind, type, version, descriptor, descriptor_hash
+     ) VALUES ('connector', 'retrieval-test-connector', 'v1', '{}'::jsonb, repeat('a', 64))
+     ON CONFLICT (kind, type, version) DO NOTHING`,
+  );
+  await pool.query(
+    `INSERT INTO administration_configurations (
+       id, workspace_id, resource_type, lifecycle, current_version_id
+     ) VALUES ('retrieval-connector', $1, 'connector-instances', 'active', NULL)`,
+    [workspaceId],
+  );
+  await pool.query(
+    `INSERT INTO administration_configuration_versions (
+       id, workspace_id, configuration_id, version, settings, secret_references,
+       descriptor_kind, descriptor_type, descriptor_version
+     ) VALUES ($1, $2, 'retrieval-connector', 1, '{}'::jsonb, '[]'::jsonb,
+       'connector', 'retrieval-test-connector', 'v1')`,
+    [input.versionId, workspaceId],
+  );
+  await pool.query(
+    `UPDATE administration_configurations
+     SET current_version_id = $1
+     WHERE workspace_id = $2 AND id = 'retrieval-connector'`,
+    [input.versionId, workspaceId],
   );
 }
 

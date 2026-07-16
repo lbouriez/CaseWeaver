@@ -17,6 +17,7 @@
   "dependencies": {
     "@caseweaver/administration": "workspace:*",
     "@caseweaver/ai-sdk": "workspace:*",
+    "@github/copilot-sdk": "1.0.6",
     "zod": "^4.0.0"
   },
   "devDependencies": {

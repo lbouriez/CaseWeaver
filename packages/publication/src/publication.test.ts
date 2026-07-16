@@ -1,3 +1,4 @@
+import { workspaceId } from "@caseweaver/domain";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -66,6 +67,7 @@ describe("publication identity", () => {
       publicationProfileId: "internal-note",
       publicationProfileVersion: "1",
       destinationConnectorInstanceId: "helpdesk-1",
+      destinationConnectorConfigurationVersionId: "helpdesk-configuration-1",
       target: {
         connectorInstanceId: "helpdesk-1",
         resourceType: "case",
@@ -91,6 +93,12 @@ describe("publication identity", () => {
       createPublicationIdentity({
         ...input,
         destinationConnectorInstanceId: "helpdesk-2",
+      }).identityHash,
+    ).not.toBe(first.identityHash);
+    expect(
+      createPublicationIdentity({
+        ...input,
+        destinationConnectorConfigurationVersionId: "helpdesk-configuration-2",
       }).identityHash,
     ).not.toBe(first.identityHash);
     expect(first.marker.value).toMatch(
@@ -154,6 +162,7 @@ describe("publication fakes", () => {
       publicationProfileId: "internal-note",
       publicationProfileVersion: "1",
       destinationConnectorInstanceId: "helpdesk-1",
+      destinationConnectorConfigurationVersionId: "helpdesk-configuration-1",
       target: {
         connectorInstanceId: "helpdesk-1",
         resourceType: "case",
@@ -180,7 +189,21 @@ describe("publication fakes", () => {
     const first = await destination.publish(request);
     const second = await destination.publish(request);
 
-    expect(resolver.resolve("helpdesk-1")).toBe(destination);
+    await expect(
+      resolver.resolve({
+        workspaceId: workspaceId("workspace-1"),
+        connectorRegistrationId: "helpdesk-1",
+        connectorConfigurationVersionId: "helpdesk-configuration-1",
+        signal: request.signal,
+      }),
+    ).resolves.toBe(destination);
+    expect(resolver.resolveRequests).toEqual([
+      {
+        workspaceId: workspaceId("workspace-1"),
+        connectorRegistrationId: "helpdesk-1",
+        connectorConfigurationVersionId: "helpdesk-configuration-1",
+      },
+    ]);
     expect(first).toMatchObject({ status: "published" });
     expect(second).toEqual(first);
     await expect(

@@ -108,6 +108,7 @@ class DefaultStandaloneRuntime implements StandaloneRuntime {
   private starting = false;
   private started = false;
   private relayTimer: NodeJS.Timeout | undefined;
+  private relayInFlight: Promise<{ readonly delivered: number }> | undefined;
   private telemetry: Awaited<ReturnType<typeof startOpenTelemetry>>;
 
   public constructor(
@@ -144,9 +145,9 @@ class DefaultStandaloneRuntime implements StandaloneRuntime {
       });
 
       for (const process of [
+        this.dependencies.scheduler,
         this.dependencies.api,
         this.dependencies.webhook,
-        this.dependencies.scheduler,
       ]) {
         await process.start();
         this.startedProcesses.push(process);
@@ -181,7 +182,14 @@ class DefaultStandaloneRuntime implements StandaloneRuntime {
   }
 
   public async runRelayOnce(): Promise<{ readonly delivered: number }> {
-    return this.relay.runOnce(this.relayBatchSize);
+    if (this.relayInFlight !== undefined) return this.relayInFlight;
+    const run = this.relay.runOnce(this.relayBatchSize);
+    this.relayInFlight = run;
+    try {
+      return await run;
+    } finally {
+      if (this.relayInFlight === run) this.relayInFlight = undefined;
+    }
   }
 
   private recordBackgroundFailure(error: unknown): void {
@@ -210,6 +218,11 @@ class DefaultStandaloneRuntime implements StandaloneRuntime {
       } catch (error) {
         failures.push(error);
       }
+    }
+    try {
+      await this.relayInFlight;
+    } catch (error) {
+      failures.push(error);
     }
     if (this.queueStarted) {
       try {
@@ -244,3 +257,6 @@ export function createStandaloneRuntime(
 ): StandaloneRuntime {
   return new DefaultStandaloneRuntime(dependencies);
 }
+
+export * from "./process.js";
+export * from "./production-bootstrap.js";

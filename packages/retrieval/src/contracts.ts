@@ -49,6 +49,13 @@ export interface RerankerPolicy {
 export interface RetrievalProfile {
   readonly id: string;
   readonly version: string;
+  /**
+   * The immutable model-binding version whose tokenizer measures selected
+   * evidence for the consuming prompt. This is deliberately explicit: an
+   * embedding or reranker tokenizer cannot safely stand in for the analysis
+   * model's context window.
+   */
+  readonly contextTokenBindingVersionId: string;
   readonly collections: readonly RetrievalCollection[];
   readonly policy: RetrievalPolicy;
   readonly queryEmbedding: QueryEmbeddingPolicy;
@@ -79,6 +86,13 @@ export interface RetrievalRequest {
     readonly id: string;
     readonly analysisId?: string;
     readonly capturedAt: string;
+  };
+  /**
+   * Server-owned correlation for gateway metering. It is supplied by trusted
+   * orchestration, never by a retrieval query or browser request.
+   */
+  readonly attribution?: {
+    readonly analysisJobId?: string;
   };
   readonly signal: AbortSignal;
 }
@@ -130,8 +144,20 @@ export interface RetrievalSearchPort {
   search(input: RetrievalSearchInput): Promise<readonly RetrievalCandidate[]>;
 }
 
+export type RetrievalTokenCountPurpose = "embedding" | "reranking" | "context";
+
+/**
+ * A production counter is resolved against the exact immutable binding before
+ * this service is invoked. The service always states which binding and budget
+ * purpose it is measuring, so a generic/default tokenizer cannot silently
+ * account for a different model.
+ */
 export interface RetrievalTokenCounter {
-  count(text: string): number;
+  count(input: {
+    readonly text: string;
+    readonly bindingVersionId: string;
+    readonly purpose: RetrievalTokenCountPurpose;
+  }): number;
 }
 
 export interface RetrievalEvidenceScores {

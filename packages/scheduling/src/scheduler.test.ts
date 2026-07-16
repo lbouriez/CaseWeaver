@@ -16,7 +16,8 @@ function schedule(
     id: "schedule-1",
     workspaceId: "workspace-1",
     sourceId: "source-1",
-    configurationVersion: "source-config.v1",
+    sourceConfigurationVersionId: "source-config.v1",
+    connectorConfigurationVersionId: "connector-config.v1",
     kind: "synchronize",
     enabled: true,
     nextRunAt: "2026-07-13T20:00:00.000Z",
@@ -76,9 +77,10 @@ describe("KnowledgeScheduler", () => {
     expect(second).toEqual({ due: 1, leased: 1, enqueued: 0, duplicate: 1 });
     expect(store.commands).toEqual([
       expect.objectContaining({
-        type: "knowledge.synchronize.v1",
+        type: "knowledge.synchronize.v2",
         sourceId: "source-1",
-        configurationVersion: "source-config.v1",
+        sourceConfigurationVersionId: "source-config.v1",
+        connectorConfigurationVersionId: "connector-config.v1",
         trigger: "schedule",
       }),
     ]);
@@ -132,7 +134,16 @@ describe("KnowledgeScheduler", () => {
     expect(
       knowledgeScheduleOccurrenceKey({
         ...dstSchedule,
-        configurationVersion: "source-config.v2",
+        sourceConfigurationVersionId: "source-config.v2",
+        nextRunAt: first,
+      }),
+    ).not.toBe(
+      knowledgeScheduleOccurrenceKey({ ...dstSchedule, nextRunAt: first }),
+    );
+    expect(
+      knowledgeScheduleOccurrenceKey({
+        ...dstSchedule,
+        connectorConfigurationVersionId: "connector-config.v2",
         nextRunAt: first,
       }),
     ).not.toBe(

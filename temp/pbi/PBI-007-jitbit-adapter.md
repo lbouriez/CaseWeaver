@@ -4,6 +4,15 @@
 
 Prove the helpdesk-neutral contracts with a complete Jitbit implementation.
 
+## Delivery status
+
+**Completed.** Jitbit provides server-private immutable configuration factories for
+knowledge-source and analysis-destination execution. The runtime contribution is
+descriptor-driven and resolves only the version pinned by durable work.
+
+The neutral connector contracts, runtime-contribution tests, and integrated worker
+composition validate the adapter without introducing connector branches into core code.
+
 ## Existing implementation reference
 
 Before implementing, inspect

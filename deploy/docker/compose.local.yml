@@ -1,0 +1,341 @@
+name: caseweaver-local
+
+x-api-image: &api-image ${CASEWEAVER_API_IMAGE:-caseweaver-api:local}
+x-worker-image: &worker-image ${CASEWEAVER_WORKER_IMAGE:-caseweaver-worker:local}
+x-scheduler-image: &scheduler-image ${CASEWEAVER_SCHEDULER_IMAGE:-caseweaver-scheduler:local}
+x-webhook-image: &webhook-image ${CASEWEAVER_WEBHOOK_IMAGE:-caseweaver-webhook:local}
+x-build-args: &build-args
+  VERSION: ${CASEWEAVER_IMAGE_VERSION:-local}
+  REVISION: ${CASEWEAVER_IMAGE_REVISION:-local}
+  SOURCE: ${CASEWEAVER_IMAGE_SOURCE:-https://github.com/caseweaver/caseweaver}
+  CREATED: ${CASEWEAVER_IMAGE_CREATED:-local}
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17@sha256:d2ef61f42ef767baa5a1475393303cc235bcd92febd9d7014eddb48b41f3bad0
+    environment:
+      POSTGRES_DB: caseweaver
+      POSTGRES_USER: caseweaver
+      # This Compose file is a disposable, private-network development stack only.
+      # Trust auth avoids a committed password; PostgreSQL has no published host port.
+      POSTGRES_HOST_AUTH_METHOD: trust
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          pg_isready -U caseweaver -d caseweaver &&
+          psql -U caseweaver -d caseweaver -v ON_ERROR_STOP=1
+          -c "SELECT 1 / COUNT(*) FROM pg_extension WHERE extname = 'vector';"
+          > /dev/null
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    volumes:
+      - caseweaver_local_postgres_data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - data
+    security_opt:
+      - no-new-privileges:true
+
+  migrate:
+    image: ${CASEWEAVER_MIGRATION_IMAGE:-caseweaver-migration:local}
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      target: migration
+      args: *build-args
+    environment:
+      DATABASE_URL: postgresql://caseweaver@postgres:5432/caseweaver
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: true
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - data
+
+  # pg-boss owns durable queue DDL independently from Prisma. It is applied once
+  # after the immutable application schema and before every long-running process.
+  queue-migrate:
+    image: *worker-image
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      target: worker
+      args: *build-args
+    command: ["node", "dist/main.js", "migrate-queue"]
+    environment:
+      DATABASE_URL: postgresql://caseweaver@postgres:5432/caseweaver
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+        required: true
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - data
+
+  api:
+    image: *api-image
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      target: api
+      args: *build-args
+    environment:
+      NODE_ENV: development
+      HOST: 0.0.0.0
+      PORT: "3000"
+      DATABASE_URL: postgresql://caseweaver@postgres:5432/caseweaver
+      API_WORKSPACE_ID: local-workspace
+      API_PRINCIPAL_ID: local-administrator
+      DATABASE_READINESS_TIMEOUT_MS: "5000"
+      ADMIN_ALLOWED_ORIGINS: http://localhost:${CASEWEAVER_LOCAL_PORT:-8080}
+      # Local password sign-in defaults to admin/admin. Override these host
+      # variables before starting Compose if the loopback UI is shared.
+      ADMIN_LOGIN: ${ADMIN_LOGIN:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      ADMIN_DISABLE_LOGIN_AUTHENTICATION: ${ADMIN_DISABLE_LOGIN_AUTHENTICATION:-false}
+      # OIDC is deliberately host-environment passthrough. Compose omits an unset
+      # mapping-form variable rather than injecting an invalid empty value. A login
+      # requires every value below plus a real provider/client registration.
+      OIDC_ISSUER:
+      OIDC_CLIENT_ID:
+      OIDC_CLIENT_SECRET:
+      OIDC_CALLBACK_URL:
+      OIDC_EPHEMERAL_ENCRYPTION_KEY:
+      OIDC_EPHEMERAL_KEY_ID:
+      ADMIN_BOOTSTRAP_OIDC_SUBJECT:
+      ADMIN_BOOTSTRAP_DISPLAY_NAME:
+      TRUSTED_PROXY_CIDRS:
+    depends_on:
+      queue-migrate:
+        condition: service_completed_successfully
+        required: true
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - data
+      - edge
+      # Required only when a real OIDC issuer is configured: discovery and JWKS
+      # validation happen in the API, never in the browser or the data network.
+      - egress
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:3000/health/ready').then((response) =>
+          process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  worker:
+    image: *worker-image
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      target: worker
+      args: *build-args
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgresql://caseweaver@postgres:5432/caseweaver
+      # Disposable local development storage. This non-production derivation
+      # material is never a deployment credential and must be overridden with a
+      # secret-manager value for any non-disposable installation.
+      OBJECT_STORAGE_KIND: local
+      OBJECT_STORAGE_BACKEND_ID: local-dev
+      OBJECT_STORAGE_KEY_DERIVATION_SECRET: caseweaver-local-disposable-derivation-material-2026
+      OBJECT_STORAGE_LOCAL_ROOT: /tmp/caseweaver-objects
+      WORKER_GIT_TEMPORARY_DIRECTORY: /tmp/caseweaver-git
+      WORKER_GIT_REMOTE_CACHE_DIRECTORY: /tmp/caseweaver-git-cache
+    depends_on:
+      queue-migrate:
+        condition: service_completed_successfully
+        required: true
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - data
+      - egress
+    healthcheck:
+      test: ["CMD", "node", "dist/main.js", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 8s
+
+  scheduler:
+    image: *scheduler-image
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      target: scheduler
+      args: *build-args
+    environment:
+      DATABASE_URL: postgresql://caseweaver@postgres:5432/caseweaver
+    depends_on:
+      queue-migrate:
+        condition: service_completed_successfully
+        required: true
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - data
+    healthcheck:
+      test: ["CMD", "node", "dist/main.js", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 8s
+
+  webhook:
+    image: *webhook-image
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      target: webhook
+      args: *build-args
+    environment:
+      DATABASE_URL: postgresql://caseweaver@postgres:5432/caseweaver
+      WEBHOOK_HOST: 0.0.0.0
+      WEBHOOK_PORT: "8081"
+    depends_on:
+      queue-migrate:
+        condition: service_completed_successfully
+        required: true
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - data
+      - edge
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:8081/health/ready').then((response) =>
+          process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 8s
+
+  admin:
+    image: ${CASEWEAVER_ADMIN_IMAGE:-caseweaver-admin:local}
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      target: admin
+      args: *build-args
+    environment:
+      # A browser must use the edge's public same-origin address, never Docker DNS.
+      CASEWEAVER_ADMIN_API_BASE_URL: http://localhost:${CASEWEAVER_LOCAL_PORT:-8080}
+      CASEWEAVER_ADMIN_UI_TITLE: ${CASEWEAVER_ADMIN_UI_TITLE:-CaseWeaver Control Room (local)}
+    depends_on:
+      api:
+        condition: service_healthy
+        required: true
+    read_only: true
+    tmpfs:
+      - /tmp:uid=101,gid=101,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD-SHELL", "test -s /tmp/caseweaver-runtime-config.json && nginx -t"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 3s
+
+  edge:
+    image: nginxinc/nginx-unprivileged:1.27-alpine@sha256:65e3e85dbaed8ba248841d9d58a899b6197106c23cb0ff1a132b7bfe0547e4c0
+    depends_on:
+      api:
+        condition: service_healthy
+        required: true
+      admin:
+        condition: service_healthy
+        required: true
+      webhook:
+        condition: service_healthy
+        required: true
+    ports:
+      - "127.0.0.1:${CASEWEAVER_LOCAL_PORT:-8080}:8080"
+    volumes:
+      - ./proxy/local-nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    read_only: true
+    tmpfs:
+      - /tmp:uid=101,gid=101,mode=0700
+      - /var/cache/nginx:uid=101,gid=101,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - edge
+      # The only non-internal network attachment. It exists solely so Docker can
+      # publish the loopback edge port; it never carries database traffic.
+      - ingress
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 3s
+
+volumes:
+  caseweaver_local_postgres_data:
+
+networks:
+  # The database is private even inside this disposable stack; only API/migration
+  # join this network, and no service publishes PostgreSQL to the host.
+  data:
+    internal: true
+  edge:
+    internal: true
+  ingress:
+  egress:

@@ -20,6 +20,8 @@ import {
 } from "@caseweaver/ai-sdk";
 
 export * from "./administration-descriptor.js";
+export * from "./tokenizer.js";
+
 import { z } from "zod";
 
 const recordSchema = z.record(z.string(), z.unknown());
@@ -342,7 +344,7 @@ export class OpenAiCompatibleProvider implements AiProviderDispatcher {
     _invocation: ProviderInvocation<RepositoryAgentRequest>,
   ): Promise<ProviderResult<RepositoryAgentResult>> {
     throw new AiConfigurationError(
-      "The OpenAI-compatible adapter does not implement repository agents.",
+      "OpenAI-compatible repository agents are unavailable: this adapter has no standardized attested immutable-runtime pin and read-only tool-loop protocol.",
     );
   }
 

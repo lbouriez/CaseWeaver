@@ -1,10 +1,13 @@
-import { createElement } from "react";
 import { render, screen } from "@testing-library/react";
+import { createElement } from "react";
 import { describe, expect, it, vi } from "vitest";
-
-import type { AdminListItem, ConfigurationSurface } from "../api/contracts.js";
 import { ApiClientProvider } from "../api/context.js";
-import { ResourcePanel, itemActions } from "./section-page.js";
+import type { AdminListItem, ConfigurationSurface } from "../api/contracts.js";
+import {
+  itemActions,
+  ResourcePanel,
+  supportsPolicyProfileDraft,
+} from "./section-page.js";
 
 vi.mock("react-admin", () => ({
   useGetList: vi.fn(() => ({
@@ -91,6 +94,33 @@ describe("configuration surface actions", () => {
         operationalActions: [],
       }),
     ).toEqual([]);
+  });
+
+  it("enables policy profile authoring only for an API-advertised managed draft workflow", () => {
+    expect(supportsPolicyProfileDraft(undefined)).toBe(false);
+    expect(
+      supportsPolicyProfileDraft(
+        surface({ surface: "retrieval-profiles", mode: "read_only" }),
+      ),
+    ).toBe(false);
+    expect(
+      supportsPolicyProfileDraft(
+        surface({
+          surface: "retrieval-profiles",
+          mode: "managed",
+          workflows: ["inspect_history"],
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      supportsPolicyProfileDraft(
+        surface({
+          surface: "prompt-profiles",
+          mode: "managed",
+          workflows: ["create_draft"],
+        }),
+      ),
+    ).toBe(true);
   });
 
   it("allows publication approval only when the surface advertises the existing guarded use case", () => {

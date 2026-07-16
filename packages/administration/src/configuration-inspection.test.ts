@@ -150,6 +150,18 @@ describe("configuration inspection contracts", () => {
     ).toMatchObject({ mode: "managed" });
     expect(
       toConfigurationSurfaceDto({
+        surface: "ai-budget-policies",
+        mode: "managed",
+        configurationId: "configuration-2",
+        workflows: ["create", "replace", "inspect_history"],
+        operationalActions: [],
+      }),
+    ).toMatchObject({
+      mode: "managed",
+      workflows: ["create", "replace", "inspect_history"],
+    });
+    expect(
+      toConfigurationSurfaceDto({
         surface: "platform",
         mode: "read_only",
         reasonCode: "deployment_owned",

@@ -26,8 +26,10 @@ returns browser credentials, token claims, or secrets.
 administration source/schedule managers. It delegates immutable version, idempotency,
 audit, and configuration-change outbox work to `PostgresConfigurationLifecycleStore`;
 then, in that same transaction, validates the active `knowledgeSource` connector
-capability and workspace-scoped collection/source/version references before projecting
-the feature read-model rows. It never reads connector settings, credentials, or clients.
+capability, locks its active descriptor-backed connector configuration, and records the
+resulting immutable source-plus-connector version pair before projecting the feature
+read-model rows. Schedules consume that stored pair rather than resolving a mutable
+connector current version. It never reads connector settings, credentials, or clients.
 
 `PostgresProviderCapabilityTestConfigurationStore` and
 `PostgresProviderCapabilityTestStore` resolve only active, workspace-scoped immutable
@@ -51,10 +53,12 @@ secret-reference data.
 generic versions, idempotency, audit, and cache invalidation to
 `PostgresConfigurationLifecycleStore`. On activation it parses the retained
 configuration with PBI-012's `publicationProfileSchema`, verifies the selected active
-`analysisDestination`, and inserts the immutable PBI-012 profile version using the
-same ID as the administration configuration version. Drafts are intentionally inert;
-disablement preserves all historical profile versions and only changes the profile
-lifecycle.
+`analysisDestination` plus its current descriptor-backed connector configuration, and
+inserts the immutable PBI-012 profile version using the same ID as the administration
+configuration version. The selected connector configuration version is retained as a
+separate immutable pin, so later connector edits cannot rebind durable publication
+work. Drafts are intentionally inert; disablement preserves all historical profile
+versions and only changes the profile lifecycle.
 
 Webhook configuration is intentionally not projected through `webhook_inbox`: that
 table records verified deliveries and cannot safely act as an endpoint registry.
@@ -69,6 +73,11 @@ optional server trigger, and the exact immutable configuration version. It never
 selects request bodies, headers, secret locators, or adapter clients. Verified inbox
 rows retain their accepting version separately and cannot be rewritten.
 
+Activating an endpoint that selects an analysis trigger also persists the authenticated
+activation principal as internal routing state. The endpoint/runtime adapters never
+expose that field through generic administration reads; trusted webhook composition
+uses it only to produce attributable, exact-pinned automated analysis requests.
+
 `PostgresWebhookEndpointRuntimeStore` is the separate public-ingress lookup and
 database-time rate-admission boundary. Its active-only lookup returns opaque routing
 identity, immutable configuration version, bounded limits, and selected connector
@@ -77,3 +86,11 @@ Its fixed-minute admission query locks the active endpoint and fails closed for 
 or disabled endpoints. Trusted application composition must still resolve the adapter
 from the immutable server-owned configuration and persist the accepting version with a
 verified delivery.
+
+`PostgresRuntimeConnectorConfigurationResolver` is the separate trusted worker
+composition lookup. It returns a server-private immutable connector version only when
+the workspace connector aggregate and configuration are active, its descriptor snapshot
+allows the requested capability, and every retained opaque credential locator remains
+active in that workspace. It permits an explicitly pinned historical immutable version
+for durable work. It has no cache and never resolves a secret or sends settings/locators
+to an API, audit, log, diagnostic, or trace boundary.

@@ -6,9 +6,11 @@ import {
   MenuItem,
   Select,
   Stack,
+  TextField,
   Typography,
 } from "@mui/material";
 import {
+  type FormEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -32,7 +34,7 @@ import {
 import { Link, Route } from "react-router-dom";
 
 import { CaseWeaverApiClient } from "./api/api-client.js";
-import type { AuthenticatedSession } from "./api/contracts.js";
+import type { AuthenticatedSession, Session } from "./api/contracts.js";
 import { ApiClientProvider } from "./api/context.js";
 import { createDataProvider } from "./api/data-provider.js";
 import {
@@ -49,12 +51,37 @@ import type { RuntimeConfig } from "./runtime-config.js";
 import { operatorTheme } from "./theme.js";
 
 function OperatorSignInCard({
-  onContinue,
+  authentication,
+  onOauthLogin,
+  onPasswordLogin,
+  onRetry,
   unavailable = false,
 }: {
-  readonly onContinue: () => void;
+  readonly authentication?: Extract<
+    Session,
+    { readonly authenticated: false }
+  >["authentication"];
+  readonly onOauthLogin?: () => void;
+  readonly onPasswordLogin?: (login: string, password: string) => Promise<void>;
+  readonly onRetry?: () => void;
   readonly unavailable?: boolean;
 }) {
+  const [login, setLogin] = useState("");
+  const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const submitPassword = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (onPasswordLogin === undefined || submitting) return;
+    setSubmitting(true);
+    setFailed(false);
+    void onPasswordLogin(login, password)
+      .catch(() => setFailed(true))
+      .finally(() => {
+        setPassword("");
+        setSubmitting(false);
+      });
+  };
   return (
     <Box
       sx={{
@@ -84,13 +111,57 @@ function OperatorSignInCard({
         <Typography color="text.secondary">
           {unavailable
             ? "The control-plane session could not be checked. Retry when the API is available."
-            : "Authentication is initiated by the CaseWeaver API. This browser never handles an OAuth token or identity-provider credential."}
+            : "Authentication is handled by the CaseWeaver API. This browser retains only the server-managed session cookie and never an OAuth token."}
         </Typography>
-        <Button onClick={onContinue} variant="contained">
-          {unavailable
-            ? "Retry session check"
-            : "Continue with configured identity provider"}
-        </Button>
+        {unavailable ? (
+          <Button onClick={onRetry} variant="contained">
+            Retry session check
+          </Button>
+        ) : null}
+        {authentication?.password && onPasswordLogin !== undefined ? (
+          <Box component="form" noValidate onSubmit={submitPassword}>
+            <Stack spacing={1.5}>
+              <TextField
+                autoComplete="username"
+                autoFocus
+                disabled={submitting}
+                label="Login"
+                onChange={(event) => setLogin(event.target.value)}
+                required
+                value={login}
+              />
+              <TextField
+                autoComplete="current-password"
+                disabled={submitting}
+                label="Password"
+                onChange={(event) => setPassword(event.target.value)}
+                required
+                type="password"
+                value={password}
+              />
+              <Button disabled={submitting} type="submit" variant="contained">
+                Sign in
+              </Button>
+              {failed ? (
+                <Typography color="error" role="alert" variant="caption">
+                  Sign in was not completed. Check the login and password.
+                </Typography>
+              ) : null}
+            </Stack>
+          </Box>
+        ) : null}
+        {authentication?.oauth && onOauthLogin !== undefined ? (
+          <Button onClick={onOauthLogin} variant="outlined">
+            Continue with configured identity provider
+          </Button>
+        ) : null}
+        {authentication !== undefined &&
+        !authentication.password &&
+        !authentication.oauth ? (
+          <Typography color="error" variant="body2">
+            No sign-in method is enabled for this console.
+          </Typography>
+        ) : null}
       </Stack>
     </Box>
   );
@@ -98,7 +169,7 @@ function OperatorSignInCard({
 
 function OperatorLoginPage() {
   const login = useLogin();
-  return <OperatorSignInCard onContinue={() => void login({})} />;
+  return <OperatorSignInCard onOauthLogin={() => void login({})} />;
 }
 
 function OperatorMenu() {
@@ -360,11 +431,20 @@ export function OperatorApp({ config }: { readonly config: RuntimeConfig }) {
 }
 
 type SessionGateClient = Pick<CaseWeaverApiClient, "session">;
-type SessionGateAuth = Pick<SessionAuthProvider, "login" | "logout">;
+type SessionGateAuth = Pick<
+  SessionAuthProvider,
+  "login" | "logout" | "passwordLogin"
+>;
 
 type SessionGateState =
   | { readonly phase: "checking" }
-  | { readonly phase: "anonymous" }
+  | {
+      readonly phase: "anonymous";
+      readonly authentication: Extract<
+        Session,
+        { readonly authenticated: false }
+      >["authentication"];
+    }
   | { readonly phase: "authenticated" }
   | { readonly phase: "unavailable" };
 
@@ -387,9 +467,11 @@ export function OperatorSessionGate({
     setState({ phase: "checking" });
     try {
       const session = await client.session();
-      setState({
-        phase: session.authenticated ? "authenticated" : "anonymous",
-      });
+      setState(
+        session.authenticated
+          ? { phase: "authenticated" }
+          : { phase: "anonymous", authentication: session.authentication },
+      );
     } catch {
       setState({ phase: "unavailable" });
     }
@@ -401,8 +483,15 @@ export function OperatorSessionGate({
 
   const signOut = useCallback(async () => {
     await authProvider.logout({});
-    setState({ phase: "anonymous" });
-  }, [authProvider]);
+    await checkSession();
+  }, [authProvider, checkSession]);
+  const passwordLogin = useCallback(
+    async (login: string, password: string) => {
+      await authProvider.passwordLogin(login, password);
+      setState({ phase: "authenticated" });
+    },
+    [authProvider],
+  );
 
   if (state.phase === "checking") {
     return (
@@ -421,12 +510,22 @@ export function OperatorSessionGate({
   }
   if (state.phase === "anonymous") {
     return (
-      <OperatorSignInCard onContinue={() => void authProvider.login({})} />
+      <OperatorSignInCard
+        authentication={state.authentication}
+        onOauthLogin={
+          state.authentication.oauth
+            ? () => void authProvider.login({})
+            : undefined
+        }
+        onPasswordLogin={
+          state.authentication.password ? passwordLogin : undefined
+        }
+      />
     );
   }
   if (state.phase === "unavailable") {
     return (
-      <OperatorSignInCard onContinue={() => void checkSession()} unavailable />
+      <OperatorSignInCard onRetry={() => void checkSession()} unavailable />
     );
   }
   return renderAuthenticated(signOut);

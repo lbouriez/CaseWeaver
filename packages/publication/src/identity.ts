@@ -16,6 +16,7 @@ export const publicationIdentityInputSchema = z
     publicationProfileId: identifier,
     publicationProfileVersion: identifier,
     destinationConnectorInstanceId: identifier,
+    destinationConnectorConfigurationVersionId: identifier,
     target: externalReferenceSchema,
   })
   .strict();
@@ -63,6 +64,8 @@ export function createPublicationIdentity(
     publicationProfileId: parsed.publicationProfileId,
     publicationProfileVersion: parsed.publicationProfileVersion,
     destinationConnectorInstanceId: parsed.destinationConnectorInstanceId,
+    destinationConnectorConfigurationVersionId:
+      parsed.destinationConnectorConfigurationVersionId,
     target: parsed.target,
   });
 

@@ -7,12 +7,8 @@ import type {
   UnitOfWork,
 } from "@caseweaver/application";
 import {
-  causationId,
-  correlationId,
-  createEnvelope,
   type Envelope,
   IdempotencyConflictError,
-  outboxEnvelopeId,
   type PublicationIntent,
   publicationIntentId,
   utcInstant,
@@ -23,6 +19,7 @@ import {
   createPublicationIdentity,
   type PublicationAttempt,
   type PublicationCandidate,
+  PublicationExecutionError,
   type PublicationExecutionStore,
   publicationProfileSchema,
 } from "@caseweaver/publication";
@@ -57,7 +54,34 @@ interface CandidateRow extends IntentRow {
   readonly target_resource_type: string | null;
   readonly target_external_id: string | null;
   readonly destination_connector_instance_id: string | null;
+  readonly destination_connector_configuration_version_id: string | null;
+  readonly profile_destination_connector_configuration_version_id:
+    | string
+    | null;
   readonly record: Prisma.JsonValue;
+}
+
+interface WebhookTriggerRow {
+  readonly trigger_id: string;
+  readonly trigger_version_id: string;
+  readonly analysis_profile_version_id: string;
+  readonly connector_registration_id: string;
+  readonly connector_configuration_version_id: string;
+}
+
+/**
+ * A public webhook route must fail closed when its retained immutable routing
+ * state can no longer prove an active, exact analysis-trigger configuration.
+ * The message intentionally omits endpoint, connector, and secret metadata.
+ */
+export class PostgresVerifiedWebhookEventStoreError extends Error {
+  public constructor() {
+    super("Webhook analysis trigger configuration is unavailable.");
+    this.name = "PostgresVerifiedWebhookEventStoreError";
+  }
+
+  public readonly code = "analysis.trigger.configurationUnavailable";
+  public readonly retryable = false;
 }
 
 function sha256(value: string): string {
@@ -110,14 +134,22 @@ function candidateFromRow(row: CandidateRow): PublicationCandidate {
     row.target_connector_instance_id === null ||
     row.target_resource_type === null ||
     row.target_external_id === null ||
-    row.destination_connector_instance_id === null
+    row.destination_connector_instance_id === null ||
+    row.destination_connector_configuration_version_id === null ||
+    row.profile_destination_connector_configuration_version_id === null
   ) {
-    throw new Error("Publication intent is missing immutable delivery inputs.");
+    throw new PublicationExecutionError(
+      "publication.configurationUnavailable",
+      "Publication intent has no immutable destination configuration.",
+      false,
+    );
   }
   const profile = publicationProfileSchema.parse(row.definition);
   if (
     profile.destination.connectorInstanceId !==
-    row.destination_connector_instance_id
+      row.destination_connector_instance_id ||
+    row.profile_destination_connector_configuration_version_id !==
+      row.destination_connector_configuration_version_id
   ) {
     throw new Error("Publication profile destination is inconsistent.");
   }
@@ -133,6 +165,8 @@ function candidateFromRow(row: CandidateRow): PublicationCandidate {
     publicationProfileId: row.publication_profile_id,
     publicationProfileVersion: row.profile_version,
     destinationConnectorInstanceId: row.destination_connector_instance_id,
+    destinationConnectorConfigurationVersionId:
+      row.destination_connector_configuration_version_id,
     target: {
       connectorInstanceId: row.target_connector_instance_id,
       resourceType: row.target_resource_type,
@@ -152,6 +186,11 @@ function candidateFromRow(row: CandidateRow): PublicationCandidate {
     marker: Object.freeze({ value: row.publication_marker }),
     analysis: publicationOutput(row.record),
     profile,
+    destination: Object.freeze({
+      connectorRegistrationId: row.destination_connector_instance_id,
+      connectorConfigurationVersionId:
+        row.destination_connector_configuration_version_id,
+    }),
     target: Object.freeze({
       connectorInstanceId: row.target_connector_instance_id,
       resourceType: row.target_resource_type,
@@ -181,9 +220,14 @@ export class PostgresPublicationIntentStore implements PublicationIntentStore {
     input: Parameters<PublicationIntentStore["findProfile"]>[1],
   ): Promise<StoredPublicationProfile | undefined> {
     const rows = await this.unitOfWork.get(transaction).$queryRaw<
-      readonly { readonly definition: Prisma.JsonValue }[]
+      readonly {
+        readonly definition: Prisma.JsonValue;
+        readonly destination_connector_configuration_version_id: string | null;
+      }[]
     >`
-      SELECT version.definition
+      SELECT
+        version.definition,
+        version.destination_connector_configuration_version_id
       FROM publication_profile_versions AS version
       JOIN publication_profiles AS profile
         ON profile.workspace_id = version.workspace_id
@@ -197,12 +241,32 @@ export class PostgresPublicationIntentStore implements PublicationIntentStore {
         ON capability.workspace_id = destination.workspace_id
         AND capability.connector_registration_id = destination.id
         AND capability.capability = 'analysisDestination'
+      JOIN administration_configurations AS configuration
+        ON configuration.workspace_id = version.workspace_id
+        AND configuration.id = destination.id
+        AND configuration.resource_type = 'connector-instances'
+        AND configuration.lifecycle = 'active'
+      JOIN administration_configuration_versions AS configuration_version
+        ON configuration_version.workspace_id = version.workspace_id
+        AND configuration_version.id = version.destination_connector_configuration_version_id
+        AND configuration_version.configuration_id = configuration.id
+        AND configuration_version.descriptor_kind = 'connector'
+      JOIN administration_descriptor_revisions AS descriptor
+        ON descriptor.kind = configuration_version.descriptor_kind
+        AND descriptor.type = configuration_version.descriptor_type
+        AND descriptor.version = configuration_version.descriptor_version
+        AND descriptor.descriptor -> 'connectorCapabilities' ? 'analysisDestination'
       WHERE version.workspace_id = ${input.workspaceId}
         AND version.publication_profile_id = ${input.profileId}
         AND version.version = ${input.profileVersion}
     `;
     const row = rows[0];
-    if (row === undefined) return undefined;
+    if (
+      row === undefined ||
+      row.destination_connector_configuration_version_id === null
+    ) {
+      return undefined;
+    }
     const profile = publicationProfileSchema.parse(row.definition);
     if (
       profile.id !== input.profileId ||
@@ -216,6 +280,8 @@ export class PostgresPublicationIntentStore implements PublicationIntentStore {
       id: profile.id,
       version: profile.version,
       destinationConnectorInstanceId: profile.destination.connectorInstanceId,
+      destinationConnectorConfigurationVersionId:
+        row.destination_connector_configuration_version_id,
       policy: profile.policy,
     });
   }
@@ -233,7 +299,9 @@ export class PostgresPublicationIntentStore implements PublicationIntentStore {
     if (
       storedProfile === undefined ||
       storedProfile.destinationConnectorInstanceId !==
-        input.profile.destinationConnectorInstanceId
+        input.profile.destinationConnectorInstanceId ||
+      storedProfile.destinationConnectorConfigurationVersionId !==
+        input.profile.destinationConnectorConfigurationVersionId
     ) {
       throw new Error("Publication profile destination is unavailable.");
     }
@@ -250,9 +318,14 @@ export class PostgresPublicationIntentStore implements PublicationIntentStore {
       SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))
     `;
     const existing = await database.$queryRaw<
-      readonly (IntentRow & { readonly intent_hash: string })[]
+      readonly (IntentRow & {
+        readonly intent_hash: string;
+        readonly destination_connector_configuration_version_id: string | null;
+      })[]
     >`
-      SELECT id, workspace_id, analysis_job_id, state, intent_hash, created_at, updated_at
+      SELECT
+        id, workspace_id, analysis_job_id, state, intent_hash, created_at,
+        updated_at, destination_connector_configuration_version_id
       FROM publication_intents
       WHERE workspace_id = ${input.workspaceId}
         AND analysis_job_id = ${input.analysisJobId}
@@ -272,6 +345,17 @@ export class PostgresPublicationIntentStore implements PublicationIntentStore {
       if (found.intent_hash !== input.intentHash) {
         throw new IdempotencyConflictError("publication.intent");
       }
+      if (
+        found.destination_connector_configuration_version_id === null ||
+        found.destination_connector_configuration_version_id !==
+          input.profile.destinationConnectorConfigurationVersionId
+      ) {
+        throw new PublicationExecutionError(
+          "publication.configurationUnavailable",
+          "Publication intent has no immutable destination configuration.",
+          false,
+        );
+      }
       await this.bindExistingResult(database, input, found.id);
       const current = await intentRow(database, input.workspaceId, found.id);
       if (current === undefined) {
@@ -280,9 +364,14 @@ export class PostgresPublicationIntentStore implements PublicationIntentStore {
       return asIntent(current);
     }
     const profileRows = await database.$queryRaw<
-      readonly { readonly id: string }[]
+      readonly {
+        readonly id: string;
+        readonly destination_connector_configuration_version_id: string | null;
+      }[]
     >`
-      SELECT version.id
+      SELECT
+        version.id,
+        version.destination_connector_configuration_version_id
       FROM publication_profile_versions AS version
       JOIN publication_profiles AS profile
         ON profile.workspace_id = version.workspace_id
@@ -296,13 +385,33 @@ export class PostgresPublicationIntentStore implements PublicationIntentStore {
         ON capability.workspace_id = destination.workspace_id
         AND capability.connector_registration_id = destination.id
         AND capability.capability = 'analysisDestination'
+      JOIN administration_configurations AS configuration
+        ON configuration.workspace_id = version.workspace_id
+        AND configuration.id = destination.id
+        AND configuration.resource_type = 'connector-instances'
+        AND configuration.lifecycle = 'active'
+      JOIN administration_configuration_versions AS configuration_version
+        ON configuration_version.workspace_id = version.workspace_id
+        AND configuration_version.id = version.destination_connector_configuration_version_id
+        AND configuration_version.configuration_id = configuration.id
+        AND configuration_version.descriptor_kind = 'connector'
+      JOIN administration_descriptor_revisions AS descriptor
+        ON descriptor.kind = configuration_version.descriptor_kind
+        AND descriptor.type = configuration_version.descriptor_type
+        AND descriptor.version = configuration_version.descriptor_version
+        AND descriptor.descriptor -> 'connectorCapabilities' ? 'analysisDestination'
       WHERE version.workspace_id = ${input.workspaceId}
         AND version.publication_profile_id = ${input.profile.id}
         AND version.version = ${input.profile.version}
       FOR KEY SHARE
     `;
     const profileVersion = profileRows[0];
-    if (profileVersion === undefined) {
+    if (
+      profileVersion === undefined ||
+      profileVersion.destination_connector_configuration_version_id === null ||
+      profileVersion.destination_connector_configuration_version_id !==
+        input.profile.destinationConnectorConfigurationVersionId
+    ) {
       throw new Error("Publication profile destination is unavailable.");
     }
     const resultRows = await database.$queryRaw<
@@ -324,6 +433,8 @@ export class PostgresPublicationIntentStore implements PublicationIntentStore {
             publicationProfileVersion: input.profile.version,
             destinationConnectorInstanceId:
               input.profile.destinationConnectorInstanceId,
+            destinationConnectorConfigurationVersionId:
+              input.profile.destinationConnectorConfigurationVersionId,
             target: input.target,
           });
     await database.$executeRaw`
@@ -331,13 +442,16 @@ export class PostgresPublicationIntentStore implements PublicationIntentStore {
         id, workspace_id, analysis_job_id, state, intent_hash,
         publication_profile_version_id, target_connector_instance_id,
         target_resource_type, target_external_id,
-        destination_connector_instance_id, analysis_result_id, identity_hash,
+        destination_connector_instance_id,
+        destination_connector_configuration_version_id,
+        analysis_result_id, identity_hash,
         publication_marker, created_at, updated_at
       ) VALUES (
         ${input.id}, ${input.workspaceId}, ${input.analysisJobId}, ${input.state},
         ${input.intentHash}, ${profileVersion.id},
         ${input.target.connectorInstanceId}, ${input.target.resourceType},
         ${input.target.externalId}, ${input.profile.destinationConnectorInstanceId},
+        ${input.profile.destinationConnectorConfigurationVersionId},
         ${analysisResult?.id ?? null}, ${identity?.identityHash ?? null},
         ${identity?.marker.value ?? null},
         ${new Date(input.occurredAt)}, ${new Date(input.occurredAt)}
@@ -371,6 +485,8 @@ export class PostgresPublicationIntentStore implements PublicationIntentStore {
       publicationProfileVersion: input.profile.version,
       destinationConnectorInstanceId:
         input.profile.destinationConnectorInstanceId,
+      destinationConnectorConfigurationVersionId:
+        input.profile.destinationConnectorConfigurationVersionId,
       target: input.target,
     });
     await database.$executeRaw`
@@ -510,11 +626,15 @@ export class PostgresPublicationIntentStore implements PublicationIntentStore {
       readonly {
         readonly id: string;
         readonly destination_connector_instance_id: string;
+        readonly destination_connector_configuration_version_id: string | null;
         readonly target_connector_instance_id: string;
         readonly target_resource_type: string;
         readonly target_external_id: string;
         readonly publication_profile_id: string;
         readonly profile_version: string;
+        readonly profile_destination_connector_configuration_version_id:
+          | string
+          | null;
         readonly analysis_result_id: string | null;
         readonly identity_hash: string | null;
         readonly publication_marker: string | null;
@@ -523,11 +643,14 @@ export class PostgresPublicationIntentStore implements PublicationIntentStore {
       SELECT
         intent.id,
         intent.destination_connector_instance_id,
+        intent.destination_connector_configuration_version_id,
         intent.target_connector_instance_id,
         intent.target_resource_type,
         intent.target_external_id,
         profile.publication_profile_id,
         profile.version AS profile_version,
+        profile.destination_connector_configuration_version_id
+          AS profile_destination_connector_configuration_version_id,
         intent.analysis_result_id,
         intent.identity_hash,
         intent.publication_marker
@@ -540,6 +663,19 @@ export class PostgresPublicationIntentStore implements PublicationIntentStore {
       FOR UPDATE OF intent
     `;
     for (const intent of intents) {
+      if (
+        intent.destination_connector_configuration_version_id === null ||
+        intent.profile_destination_connector_configuration_version_id ===
+          null ||
+        intent.destination_connector_configuration_version_id !==
+          intent.profile_destination_connector_configuration_version_id
+      ) {
+        throw new PublicationExecutionError(
+          "publication.configurationUnavailable",
+          "Publication intent has no immutable destination configuration.",
+          false,
+        );
+      }
       const identity = createPublicationIdentity({
         workspaceId: input.workspaceId,
         analysisResultId: input.analysisResultId,
@@ -547,6 +683,8 @@ export class PostgresPublicationIntentStore implements PublicationIntentStore {
         publicationProfileVersion: intent.profile_version,
         destinationConnectorInstanceId:
           intent.destination_connector_instance_id,
+        destinationConnectorConfigurationVersionId:
+          intent.destination_connector_configuration_version_id,
         target: {
           connectorInstanceId: intent.target_connector_instance_id,
           resourceType: intent.target_resource_type,
@@ -642,7 +780,10 @@ export class PostgresPublicationExecutionStore
         intent.identity_hash, intent.publication_marker,
         intent.target_connector_instance_id, intent.target_resource_type,
         intent.target_external_id, intent.destination_connector_instance_id,
+        intent.destination_connector_configuration_version_id,
         profile.publication_profile_id, profile.version AS profile_version,
+        profile.destination_connector_configuration_version_id
+          AS profile_destination_connector_configuration_version_id,
         profile.definition, result.record
       FROM publication_intents AS intent
       JOIN analysis_results AS result
@@ -714,10 +855,12 @@ export class PostgresPublicationExecutionStore
     await database.$executeRaw`
       INSERT INTO publication_attempts (
         id, workspace_id, publication_intent_id, attempt_ordinal, state,
-        identity_hash, publication_marker, created_at
+        identity_hash, publication_marker,
+        destination_connector_configuration_version_id, created_at
       ) VALUES (
         ${id}, ${input.candidate.intent.workspaceId}, ${input.candidate.intent.id},
         ${ordinal}, 'publishing', ${input.identityHash}, ${input.marker},
+        ${input.candidate.destination.connectorConfigurationVersionId},
         ${new Date(input.now)}
       )
     `;
@@ -829,12 +972,16 @@ export class PostgresVerifiedWebhookEventStore
         readonly { readonly id: string }[]
       >`
         INSERT INTO webhook_inbox (
-          id, workspace_id, endpoint_id, connector_instance_id,
-          analysis_trigger_id, delivery_key, raw_body_digest,
+          id, workspace_id, endpoint_id, endpoint_configuration_version_id,
+          connector_configuration_version_id, connector_instance_id,
+          analysis_trigger_id, automated_principal_id, delivery_key, raw_body_digest,
           verification, signals, received_at
         ) VALUES (
           ${id}, ${event.workspaceId}, ${event.endpointId},
+          ${event.endpointConfigurationVersionId},
+          ${event.connectorConfigurationVersionId},
           ${event.connectorInstanceId}, ${event.analysisTriggerId ?? null},
+          ${event.automatedPrincipalId ?? null},
           ${event.deliveryKey}, ${event.rawBodyDigest},
           ${JSON.stringify(event.verification)}::jsonb,
           ${JSON.stringify(event.signals)}::jsonb, ${new Date(event.receivedAt)}
@@ -856,39 +1003,140 @@ export class PostgresVerifiedWebhookEventStore
           : "idempotencyConflict";
       }
       if (event.analysisTriggerId === undefined) return "accepted";
+      if (event.automatedPrincipalId === undefined) {
+        throw new PostgresVerifiedWebhookEventStoreError();
+      }
+      const resolved = await database.$queryRaw<readonly WebhookTriggerRow[]>`
+        SELECT
+          trigger.id AS trigger_id,
+          version.id AS trigger_version_id,
+          version.analysis_profile_version_id,
+          version.connector_registration_id,
+          version.connector_configuration_version_id
+        FROM analysis_triggers AS trigger
+        JOIN analysis_trigger_versions AS version
+          ON version.workspace_id = trigger.workspace_id
+         AND version.id = trigger.current_version_id
+         AND version.analysis_trigger_id = trigger.id
+        JOIN connector_registrations AS connector
+          ON connector.workspace_id = version.workspace_id
+         AND connector.id = version.connector_registration_id
+         AND connector.lifecycle = 'active'
+        JOIN connector_capabilities AS capability
+          ON capability.workspace_id = connector.workspace_id
+         AND capability.connector_registration_id = connector.id
+         AND capability.capability = 'caseSource'
+        JOIN administration_configurations AS configuration
+          ON configuration.workspace_id = connector.workspace_id
+         AND configuration.id = connector.id
+         AND configuration.resource_type = 'connector-instances'
+         AND configuration.lifecycle = 'active'
+        JOIN administration_configuration_versions AS connector_version
+          ON connector_version.workspace_id = configuration.workspace_id
+         AND connector_version.id = version.connector_configuration_version_id
+         AND connector_version.configuration_id = configuration.id
+         AND connector_version.descriptor_kind = 'connector'
+        JOIN administration_descriptor_revisions AS descriptor
+          ON descriptor.kind = connector_version.descriptor_kind
+         AND descriptor.type = connector_version.descriptor_type
+         AND descriptor.version = connector_version.descriptor_version
+         AND descriptor.descriptor -> 'connectorCapabilities' ? 'caseSource'
+        JOIN principals AS actor
+          ON actor.workspace_id = trigger.workspace_id
+         AND actor.id = ${event.automatedPrincipalId}
+        WHERE trigger.workspace_id = ${event.workspaceId}
+          AND trigger.id = ${event.analysisTriggerId}
+          AND trigger.lifecycle = 'active'
+          AND version.connector_registration_id = ${event.connectorInstanceId}
+          AND version.connector_configuration_version_id = ${event.connectorConfigurationVersionId}
+        FOR UPDATE OF trigger
+      `;
+      const trigger = resolved[0];
+      if (trigger === undefined || resolved.length !== 1) {
+        throw new PostgresVerifiedWebhookEventStoreError();
+      }
       for (const [index, signal] of event.signals.entries()) {
         if (signal.kind !== "caseChanged") continue;
-        const commandId = `webhook-trigger:${sha256(`${event.deliveryKey}:${index}:${signal.reference.externalId}`)}`;
-        const envelope = createEnvelope({
-          id: outboxEnvelopeId(commandId),
-          kind: "command",
-          type: "analysis.trigger.v1",
-          schemaVersion: 1,
-          workspaceId: workspaceId(event.workspaceId),
-          occurredAt: utcInstant(event.receivedAt),
-          correlationId: correlationId(`webhook:${event.deliveryKey}`),
-          causationId: causationId(`webhook:${event.deliveryKey}`),
-          payload: {
-            triggerId: event.analysisTriggerId,
-            source: "webhook",
-            target: {
-              connectorInstanceId: signal.reference.connectorInstanceId,
-              resourceType: signal.reference.resourceType,
-              externalId: signal.reference.externalId,
-            },
-          },
-        });
+        if (
+          signal.reference.connectorInstanceId !== event.connectorInstanceId
+        ) {
+          throw new PostgresVerifiedWebhookEventStoreError();
+        }
+        const target = signal.reference;
+        const occurrenceKey = `webhook:${event.deliveryKey}:${index}`;
+        const requestIdentity = [
+          "caseweaver.analysis-trigger.webhook.v2",
+          event.workspaceId,
+          event.endpointId,
+          event.deliveryKey,
+          String(index),
+          trigger.trigger_version_id,
+          target.connectorInstanceId,
+          target.resourceType,
+          target.externalId,
+        ].join("\u0000");
+        const identityHash = sha256(requestIdentity);
+        const triggerRequestId = `analysis-trigger-request:webhook:${identityHash}`;
+        const idempotencyKeyDigest = sha256(
+          `idempotency\u0000${requestIdentity}`,
+        );
+        const requestDigest = sha256(`request\u0000${requestIdentity}`);
+        await database.$executeRaw`
+          INSERT INTO analysis_trigger_requests (
+            id, workspace_id, actor_principal_id, analysis_trigger_version_id,
+            analysis_profile_version_id, connector_registration_id,
+            connector_configuration_version_id, source, occurrence_key,
+            target_connector_instance_id, target_resource_type, target_external_id,
+            idempotency_key_digest, request_digest, state, created_at, updated_at
+          ) VALUES (
+            ${triggerRequestId}, ${event.workspaceId}, ${event.automatedPrincipalId},
+            ${trigger.trigger_version_id}, ${trigger.analysis_profile_version_id},
+            ${trigger.connector_registration_id},
+            ${trigger.connector_configuration_version_id}, 'webhook', ${occurrenceKey},
+            ${target.connectorInstanceId}, ${target.resourceType}, ${target.externalId},
+            ${idempotencyKeyDigest}, ${requestDigest}, 'pending',
+            ${new Date(event.receivedAt)}, ${new Date(event.receivedAt)}
+          )
+        `;
+        await database.$executeRaw`
+          INSERT INTO idempotency_records (
+            workspace_id, operation, key_digest, request_digest, resource_id, created_at
+          ) VALUES (
+            ${event.workspaceId}, 'analysis.trigger', ${idempotencyKeyDigest},
+            ${requestDigest}, ${triggerRequestId}, ${new Date(event.receivedAt)}
+          )
+        `;
+        const envelopeId = `analysis-trigger-webhook:${identityHash}`;
+        const envelopeContext = `webhook:${event.deliveryKey}`;
         await database.$executeRaw`
           INSERT INTO outbox_envelopes (
             id, workspace_id, kind, type, schema_version, occurred_at,
             correlation_id, causation_id, payload, available_at
           ) VALUES (
-            ${envelope.id}, ${envelope.workspaceId}, ${envelope.kind},
-            ${envelope.type}, ${envelope.schemaVersion}, ${new Date(envelope.occurredAt)},
-            ${envelope.correlationId}, ${envelope.causationId},
-            ${JSON.stringify(envelope.payload)}::jsonb, ${new Date(envelope.occurredAt)}
+            ${envelopeId}, ${event.workspaceId}, 'command', 'analysis.trigger.v2', 1,
+            ${new Date(event.receivedAt)}, ${envelopeContext}, ${envelopeContext},
+            ${JSON.stringify({
+              triggerRequestId,
+              triggerId: trigger.trigger_id,
+              triggerVersionId: trigger.trigger_version_id,
+              connectorRegistrationId: trigger.connector_registration_id,
+              connectorConfigurationVersionId:
+                trigger.connector_configuration_version_id,
+              source: "webhook",
+              occurrenceKey,
+              target,
+            })}::jsonb, ${new Date(event.receivedAt)}
           )
-          ON CONFLICT (id) DO NOTHING
+        `;
+        await database.$executeRaw`
+          INSERT INTO audit_events (
+            id, workspace_id, actor_principal_id, action, target_id, after_hash, occurred_at
+          ) VALUES (
+            ${`audit:analysis-trigger-webhook:${identityHash}`},
+            ${event.workspaceId}, ${event.automatedPrincipalId},
+            'analysis.trigger.requested', ${triggerRequestId}, ${requestDigest},
+            ${new Date(event.receivedAt)}
+          )
         `;
       }
       return "accepted";

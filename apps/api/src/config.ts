@@ -19,6 +19,9 @@ const proxyAddress = z
       /^[0-9a-fA-F:]+(?:\/\d{1,3})?$/u.test(value),
     { message: "Expected an IP address or CIDR." },
   );
+const booleanEnvironmentValue = z
+  .enum(["true", "false"])
+  .transform((value) => value === "true");
 
 function validEphemeralKey(value: string): boolean {
   try {
@@ -69,6 +72,14 @@ const apiConfigSchema = z
     /** Deployment-only first-administrator bootstrap; never exposed by the API. */
     ADMIN_BOOTSTRAP_OIDC_SUBJECT: z.string().trim().min(1).max(500).optional(),
     ADMIN_BOOTSTRAP_DISPLAY_NAME: z.string().trim().min(1).max(160).optional(),
+    /** Local-only operator login. Development and test have safe-to-discover defaults. */
+    ADMIN_LOGIN: z.string().trim().min(1).max(160).optional(),
+    ADMIN_PASSWORD: z.string().min(1).max(1_024).optional(),
+    /** Required to deliberately enable password login in production. */
+    ADMIN_ENABLE_PASSWORD_AUTHENTICATION: booleanEnvironmentValue.optional(),
+    ADMIN_DISABLE_LOGIN_AUTHENTICATION: booleanEnvironmentValue
+      .optional()
+      .default(false),
     ADMIN_ALLOWED_ORIGINS: z.string().max(8_000).optional(),
     TRUSTED_PROXY_CIDRS: z.string().max(8_000).optional(),
   })
@@ -94,6 +105,13 @@ export interface ApiConfig {
   /** First-installation identity bootstrap, sourced only from deployment config. */
   readonly administrationBootstrap?: Readonly<{
     readonly oidcSubject: string;
+    readonly displayName: string;
+  }>;
+  /** Deployment-owned password login; its credential is never exposed in a DTO. */
+  readonly localAuthentication?: Readonly<{
+    readonly login: string;
+    readonly password: string;
+    readonly principalId: string;
     readonly displayName: string;
   }>;
   readonly allowedAdminOrigins: readonly string[];
@@ -154,9 +172,35 @@ export function parseApiConfig(env: NodeJS.ProcessEnv): ApiConfig {
     throw new ApiConfigurationError();
   }
   // A cookie-authenticated operator console cannot perform CSRF-protected
-  // mutations without an explicit origin allow-list. Do not silently run an
-  // OIDC-enabled API in a login-only configuration.
-  if (result.data.OIDC_ISSUER !== undefined && origins.length === 0) {
+  // mutations or accept password credentials without an explicit origin
+  // allow-list. Do not silently run an interactive administration API without
+  // this browser boundary.
+  if (origins.length === 0) {
+    throw new ApiConfigurationError();
+  }
+  if (
+    result.data.ADMIN_DISABLE_LOGIN_AUTHENTICATION &&
+    result.data.ADMIN_ENABLE_PASSWORD_AUTHENTICATION === true
+  ) {
+    throw new ApiConfigurationError();
+  }
+  const developmentPasswordAuthentication =
+    result.data.NODE_ENV === "development" || result.data.NODE_ENV === "test";
+  const passwordAuthenticationEnabled =
+    !result.data.ADMIN_DISABLE_LOGIN_AUTHENTICATION &&
+    (result.data.ADMIN_ENABLE_PASSWORD_AUTHENTICATION ??
+      developmentPasswordAuthentication);
+  if (
+    passwordAuthenticationEnabled &&
+    result.data.NODE_ENV === "production" &&
+    (result.data.ADMIN_LOGIN === undefined ||
+      result.data.ADMIN_PASSWORD === undefined ||
+      (result.data.ADMIN_LOGIN === "admin" &&
+        result.data.ADMIN_PASSWORD === "admin"))
+  ) {
+    throw new ApiConfigurationError();
+  }
+  if (!passwordAuthenticationEnabled && result.data.OIDC_ISSUER === undefined) {
     throw new ApiConfigurationError();
   }
   const trustedProxyCidrs = (result.data.TRUSTED_PROXY_CIDRS ?? "")
@@ -201,6 +245,18 @@ export function parseApiConfig(env: NodeJS.ProcessEnv): ApiConfig {
             displayName: result.data.ADMIN_BOOTSTRAP_DISPLAY_NAME as string,
           }),
         }),
+    ...(passwordAuthenticationEnabled
+      ? {
+          localAuthentication: Object.freeze({
+            login: result.data.ADMIN_LOGIN ?? "admin",
+            password: result.data.ADMIN_PASSWORD ?? "admin",
+            // Keep local-password sessions distinguishable from OIDC sessions,
+            // so disabling this login method also invalidates those sessions.
+            principalId: "local-password-administrator",
+            displayName: "Local administrator",
+          }),
+        }
+      : {}),
   };
 }
 

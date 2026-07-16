@@ -17,7 +17,10 @@ export interface KnowledgeSchedule {
   readonly id: string;
   readonly workspaceId: string;
   readonly sourceId: string;
-  readonly configurationVersion: string;
+  /** Immutable source version selected before this schedule becomes due. */
+  readonly sourceConfigurationVersionId: string;
+  /** Immutable server-private connector version paired with the source version. */
+  readonly connectorConfigurationVersionId: string;
   readonly kind: KnowledgeScheduleKind;
   readonly cadence: ScheduleCadence;
   readonly enabled: boolean;
@@ -30,11 +33,13 @@ export interface ScheduleLease {
 }
 
 export interface KnowledgeSynchronizationCommand {
-  readonly type: "knowledge.synchronize.v1" | "knowledge.full-rescan.v1";
+  readonly type: "knowledge.synchronize.v2" | "knowledge.full-rescan.v2";
   readonly workspaceId: string;
   readonly sourceId: string;
   /** Immutable source configuration pinned when the occurrence was scheduled. */
-  readonly configurationVersion: string;
+  readonly sourceConfigurationVersionId: string;
+  /** Immutable connector configuration paired with the pinned source version. */
+  readonly connectorConfigurationVersionId: string;
   readonly trigger: "schedule";
   readonly occurrenceKey: string;
   readonly scheduledFor: string;
@@ -84,21 +89,46 @@ export interface SchedulerRunResult {
 export interface CaseAnalysisSchedule {
   readonly id: string;
   readonly workspaceId: string;
-  /** Server-owned configuration resolved by the worker, not schedule payload. */
+  /** Stable trigger aggregate identity, retained for legacy schedule diagnostics. */
   readonly triggerId: string;
+  /** Legacy mutable marker. It is never used to construct v2 work. */
   readonly configurationVersion: string;
+  /** Exact active trigger revision selected when the schedule was configured. */
+  readonly analysisTriggerVersionId?: string;
+  /** Opaque case identity retained for v2 trigger work. */
+  readonly target?: Readonly<{
+    readonly connectorInstanceId: string;
+    readonly resourceType: string;
+    readonly externalId: string;
+  }>;
+  /** Principal authorized when this automated schedule was activated. */
+  readonly automatedPrincipalId?: string;
+  /**
+   * Derived from the exact trigger revision by the durable store. These are
+   * read-model values only; enqueue re-derives and verifies them while locked.
+   */
+  readonly connectorRegistrationId?: string;
+  readonly connectorConfigurationVersionId?: string;
   readonly cadence: ScheduleCadence;
   readonly enabled: boolean;
   readonly nextRunAt: string;
 }
 
 export interface CaseAnalysisTriggerCommand {
-  readonly type: "analysis.trigger.v1";
+  readonly type: "analysis.trigger.v2";
   readonly workspaceId: string;
+  readonly triggerRequestId: string;
   readonly triggerId: string;
-  readonly configurationVersion: string;
+  readonly triggerVersionId: string;
+  readonly connectorRegistrationId: string;
+  readonly connectorConfigurationVersionId: string;
+  readonly source: "schedule";
   readonly occurrenceKey: string;
-  readonly scheduledFor: string;
+  readonly target: Readonly<{
+    readonly connectorInstanceId: string;
+    readonly resourceType: string;
+    readonly externalId: string;
+  }>;
 }
 
 export interface CaseAnalysisScheduleStore {

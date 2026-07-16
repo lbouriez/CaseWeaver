@@ -1,7 +1,9 @@
 import type {
   AiProviderBinding,
+  PinnedRepositoryAgentRuntimeResolver,
   ProviderInvocation,
   RepositoryAgentRequest,
+  RepositoryAgentRuntimePin,
 } from "@caseweaver/ai-sdk";
 import { describe, expect, it } from "vitest";
 
@@ -21,10 +23,18 @@ const binding: AiProviderBinding = {
   capabilities: new Set(["repositoryAgent", "tools"]),
   secretReference: "vault:models",
 };
+const runtimePin: RepositoryAgentRuntimePin = {
+  workspaceId: "workspace-1",
+  runtimeVersionId: "runtime-version-1",
+  repositoryId: "support-service",
+  pinnedCommit: "a".repeat(40),
+};
+
 const invocation = (): ProviderInvocation<RepositoryAgentRequest> => ({
   binding,
   secret: { value: "byok-key" },
   request: {
+    runtimePin,
     instruction: "Inspect the configured repository.",
     maximumTurns: 2,
     maximumInputTokensPerTurn: 20,
@@ -33,13 +43,59 @@ const invocation = (): ProviderInvocation<RepositoryAgentRequest> => ({
   signal: new AbortController().signal,
 });
 
-function options(): CopilotSdkAgentProviderOptions {
-  return {
-    repository: {
-      repositoryId: "support-service",
-      checkoutSecretReference: "vault:checkout/support-service",
-      pinnedCommit: "a".repeat(40),
+function harness(
+  input: {
+    readonly resolver?: PinnedRepositoryAgentRuntimeResolver;
+    readonly client?: CopilotSdkAgentProviderOptions["client"];
+  } = {},
+) {
+  const resolverPins: RepositoryAgentRuntimePin[] = [];
+  const runtimeRequests: unknown[] = [];
+  const clientInputs: unknown[] = [];
+  const resolver: PinnedRepositoryAgentRuntimeResolver = {
+    resolve: async (pin) => {
+      resolverPins.push(pin);
+      return {
+        repository: {
+          repositoryId: "support-service",
+          checkoutSecretReference: "vault:checkout/support-service",
+          pinnedCommit: "a".repeat(40),
+        },
+        allowedTools: ["listFiles", "readFile"],
+        limits: {
+          timeoutMs: 2_000,
+          maximumCpuMilliseconds: 2_000,
+          maximumMemoryBytes: 2_048,
+          maximumOutputBytes: 2_048,
+          maximumToolCalls: 4,
+        },
+        runtime: {
+          run: async (request, runner) => {
+            runtimeRequests.push(request);
+            return runner({
+              repositoryId: "support-service",
+              pinnedCommit: "a".repeat(40),
+              tools: { execute: async () => ({}) },
+            });
+          },
+        },
+      };
     },
+  };
+  const client: CopilotSdkAgentProviderOptions["client"] = {
+    run: async (value) => {
+      clientInputs.push(value);
+      return {
+        summary: "The pinned source handles the error.",
+        evidence: [{ path: "src/service.ts", startLine: 2, endLine: 3 }],
+        metering: { mode: "aggregate" },
+        usage: { inputTokens: 12, outputTokens: 4 },
+        requestId: "intentionally-not-returned",
+      };
+    },
+  };
+  const options: CopilotSdkAgentProviderOptions = {
+    runtimeResolver: input.resolver ?? resolver,
     limits: {
       maximumTurns: 3,
       maximumCpuMilliseconds: 1_000,
@@ -50,47 +106,23 @@ function options(): CopilotSdkAgentProviderOptions {
       maximumAggregateInputTokens: 50,
       maximumAggregateOutputTokens: 20,
     },
-    runtime: {
-      run: async (_request, runner) =>
-        runner({
-          repositoryId: "support-service",
-          pinnedCommit: "a".repeat(40),
-          tools: { execute: async () => ({}) },
-        }),
-    },
-    client: {
-      run: async () => ({
-        summary: "The pinned source handles the error.",
-        evidence: [{ path: "src/service.ts", startLine: 2, endLine: 3 }],
-        metering: { mode: "aggregate" },
-        usage: { inputTokens: 12, outputTokens: 4 },
-        requestId: "intentionally-not-returned",
-      }),
-    },
+    client: input.client ?? client,
     now: () => 10,
+  };
+  return {
+    provider: new CopilotSdkAgentProvider(options),
+    resolverPins,
+    runtimeRequests,
+    clientInputs,
   };
 }
 
 describe("CopilotSdkAgentProvider", () => {
-  it("uses the injected runtime and BYOK-only OpenAI configuration", async () => {
-    const input: unknown[] = [];
-    const configured = options();
-    configured.client = {
-      run: async (value) => {
-        input.push(value);
-        return {
-          summary: "The pinned source handles the error.",
-          evidence: [{ path: "src/service.ts", startLine: 2, endLine: 3 }],
-          metering: { mode: "aggregate" },
-          usage: { inputTokens: 12, outputTokens: 4 },
-          requestId: "intentionally-not-returned",
-        };
-      },
-    };
-    const provider = new CopilotSdkAgentProvider(configured);
+  it("uses the required immutable runtime pin and never falls back to a fixed repository", async () => {
+    const test = harness();
 
     await expect(
-      provider.runRepositoryAgent(invocation()),
+      test.provider.runRepositoryAgent(invocation()),
     ).resolves.toMatchObject({
       value: { summary: "The pinned source handles the error." },
       usage: { inputTokens: 12, outputTokens: 4 },
@@ -99,7 +131,20 @@ describe("CopilotSdkAgentProvider", () => {
         rawRedacted: { evidenceCount: 1 },
       },
     });
-    expect(input[0]).toMatchObject({
+    expect(test.resolverPins).toEqual([runtimePin]);
+    expect(test.runtimeRequests).toEqual([
+      expect.objectContaining({
+        allowedTools: ["listFiles", "readFile"],
+        limits: {
+          timeoutMs: 1_000,
+          maximumCpuMilliseconds: 1_000,
+          maximumMemoryBytes: 1_024,
+          maximumOutputBytes: 1_024,
+          maximumToolCalls: 3,
+        },
+      }),
+    ]);
+    expect(test.clientInputs[0]).toMatchObject({
       provider: "openai",
       baseUrl: "https://models.example/v1",
       apiKey: "byok-key",
@@ -107,22 +152,61 @@ describe("CopilotSdkAgentProvider", () => {
       maximumAggregateInputTokens: 40,
       maximumAggregateOutputTokens: 20,
     });
-    expect(input[0]).not.toHaveProperty("githubToken");
-    expect(input[0]).not.toHaveProperty("subscription");
+    expect(test.clientInputs[0]).not.toHaveProperty("checkoutSecretReference");
+    expect(test.clientInputs[0]).not.toHaveProperty("githubToken");
+    expect(test.clientInputs[0]).not.toHaveProperty("subscription");
   });
 
-  it("rejects unsafe bindings, excessive turns, and unsafe aggregate usage", async () => {
-    const provider = new CopilotSdkAgentProvider(options());
+  it("rejects a resolver that returns a different repository or commit before contacting Copilot", async () => {
+    const calls: unknown[] = [];
+    const test = harness({
+      resolver: {
+        resolve: async () => ({
+          repository: {
+            repositoryId: "different-service",
+            checkoutSecretReference: "vault:checkout/different-service",
+            pinnedCommit: "b".repeat(40),
+          },
+          allowedTools: ["readFile"],
+          limits: {
+            timeoutMs: 1_000,
+            maximumCpuMilliseconds: 1_000,
+            maximumMemoryBytes: 1_024,
+            maximumOutputBytes: 1_024,
+            maximumToolCalls: 1,
+          },
+          runtime: {
+            run: async () => ({ summary: "unreachable", evidence: [] }),
+          },
+        }),
+      },
+      client: {
+        run: async (input) => {
+          calls.push(input);
+          throw new Error("must not call client");
+        },
+      },
+    });
+
     await expect(
-      provider.runRepositoryAgent({
+      test.provider.runRepositoryAgent(invocation()),
+    ).rejects.toThrow("immutable pinned repository");
+    expect(calls).toEqual([]);
+  });
+
+  it("rejects unsafe bindings, excessive turns, and unsafe aggregate usage for a pinned invocation", async () => {
+    const test = harness();
+    await expect(
+      test.provider.runRepositoryAgent({
         ...invocation(),
         binding: { ...binding, endpoint: "http://models.example" },
       }),
     ).rejects.toThrow("unsafe");
     await expect(
-      provider.runRepositoryAgent({
+      test.provider.runRepositoryAgent({
         ...invocation(),
         request: {
+          runtimePin,
           instruction: "Inspect.",
           maximumTurns: 4,
           maximumInputTokensPerTurn: 20,
@@ -131,17 +215,18 @@ describe("CopilotSdkAgentProvider", () => {
       }),
     ).rejects.toThrow("turn limit");
 
-    const configured = options();
-    configured.client = {
-      run: async () => ({
-        summary: "Bound exceeded.",
-        evidence: [],
-        metering: { mode: "aggregate" },
-        usage: { inputTokens: 51 },
-      }),
-    };
+    const testWithExcessUsage = harness({
+      client: {
+        run: async () => ({
+          summary: "Bound exceeded.",
+          evidence: [],
+          metering: { mode: "aggregate" },
+          usage: { inputTokens: 51 },
+        }),
+      },
+    });
     await expect(
-      new CopilotSdkAgentProvider(configured).runRepositoryAgent(invocation()),
+      testWithExcessUsage.provider.runRepositoryAgent(invocation()),
     ).rejects.toMatchObject({ code: "ai.provider" });
   });
 });

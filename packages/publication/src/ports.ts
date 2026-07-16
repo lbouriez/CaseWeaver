@@ -1,21 +1,21 @@
 import type {
-  AnalysisDestination,
-  ExternalReference,
-  RenderedPublication,
-} from "@caseweaver/connector-sdk";
-import type { CaseAnalysisOutput } from "@caseweaver/prompts";
-import type {
   ApplicationTransaction,
   Clock,
   ResourceLeaseStore,
   UnitOfWork,
 } from "@caseweaver/application";
 import type {
+  AnalysisDestination,
+  ExternalReference,
+  RenderedPublication,
+} from "@caseweaver/connector-sdk";
+import type {
   PublicationIntent,
   PublicationIntentId,
   UtcInstant,
   WorkspaceId,
 } from "@caseweaver/domain";
+import type { CaseAnalysisOutput } from "@caseweaver/prompts";
 
 import type { PublicationProfile } from "./profiles.js";
 
@@ -27,11 +27,17 @@ export interface PublicationRenderer {
 }
 
 /**
- * The publication layer selects a destination by configured connector instance;
- * composition remains responsible for registering connector implementations.
+ * The publication layer selects an adapter only from an immutable connector
+ * configuration version. Composition owns descriptor registration and private
+ * credential resolution; this port never receives settings or secret values.
  */
 export interface PublicationDestinationResolver {
-  resolve(connectorInstanceId: string): AnalysisDestination | undefined;
+  resolve(input: {
+    readonly workspaceId: WorkspaceId;
+    readonly connectorRegistrationId: string;
+    readonly connectorConfigurationVersionId: string;
+    readonly signal: AbortSignal;
+  }): Promise<AnalysisDestination | undefined>;
 }
 
 export interface PublicationCandidate {
@@ -41,6 +47,10 @@ export interface PublicationCandidate {
   readonly marker: import("@caseweaver/connector-sdk").PublicationMarker;
   readonly analysis: CaseAnalysisOutput;
   readonly profile: PublicationProfile;
+  readonly destination: Readonly<{
+    readonly connectorRegistrationId: string;
+    readonly connectorConfigurationVersionId: string;
+  }>;
   readonly target: ExternalReference;
 }
 

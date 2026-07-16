@@ -9,16 +9,22 @@
       "default": "./dist/index.js"
     }
   },
+  "bin": {
+    "caseweaver-scheduler": "./dist/main.js"
+  },
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@caseweaver/scheduling": "workspace:*"
+    "@caseweaver/postgres": "workspace:*",
+    "@caseweaver/scheduling": "workspace:*",
+    "pg": "^8.16.3"
   },
   "devDependencies": {
     "@types/node": "22.19.7",
+    "@types/pg": "^8.15.6",
     "typescript": "5.9.3",
     "vitest": "4.0.18"
   }

@@ -55,6 +55,7 @@ import type {
   AdministrationRouteOperations,
   AdminRequestContext,
   AdminResource,
+  InvalidAdministrationRequest,
 } from "./routes.js";
 
 type RequestLike = {
@@ -217,8 +218,12 @@ export class AdministrationApiOperations
           readonly displayName: string;
           readonly connectorInstanceId: string;
           readonly collectionId: string;
+          readonly normalizationProfileId: string;
           readonly normalizationProfileVersion: string;
+          readonly chunkingProfileId: string;
           readonly chunkingProfileVersion: string;
+          readonly embeddingBatchSize: number;
+          readonly embeddingBudgetPolicyId: string;
           readonly synchronizationPolicy: Readonly<Record<string, unknown>>;
           readonly deletionBehavior: "tombstone" | "retain";
           readonly context: AdminRequestContext;
@@ -280,6 +285,29 @@ export class AdministrationApiOperations
         }>,
       ) => Promise<
         Readonly<{ readonly id: string; readonly revision: number }>
+      >;
+      createPolicyProfileDraft?: (
+        input: Readonly<{
+          readonly workspaceId: string;
+          readonly resource: "retrieval-profiles" | "prompt-profiles";
+          readonly displayName: string;
+          readonly settings: Readonly<Record<string, unknown>>;
+          readonly context: AdminRequestContext;
+        }>,
+      ) => Promise<
+        Readonly<{ readonly id: string; readonly revision: number }>
+      >;
+      transitionPolicyProfile?: (
+        input: Readonly<{
+          readonly workspaceId: string;
+          readonly resource: "retrieval-profiles" | "prompt-profiles";
+          readonly profileId: string;
+          readonly expectedRevision: number;
+          readonly lifecycle: "active" | "disabled";
+          readonly context: AdminRequestContext;
+        }>,
+      ) => Promise<
+        Readonly<{ readonly revision: number; readonly lifecycle: string }>
       >;
       transitionPublicationProfile?: (
         input: Readonly<{
@@ -504,6 +532,68 @@ export class AdministrationApiOperations
       requestMode: "user",
     });
   }
+  /**
+   * Invalid browser requests still cross the authenticated control-plane
+   * boundary. Resolve the server session and append a fixed route-owned audit
+   * event without inspecting or persisting request payload, query, or params.
+   *
+   * A failed audit is deliberately unavailable rather than a successful 400:
+   * otherwise a caller could perform an untraceable mutation attempt.
+   */
+  public async rejectInvalidRequest(
+    request: unknown,
+    audit: InvalidAdministrationRequest,
+  ): Promise<void> {
+    const context = await this.resolve(request, { mutation: audit.mutation });
+    const authorized =
+      audit.permission === undefined ||
+      context.permissions.includes(audit.permission);
+    try {
+      await this.dependencies.unitOfWork.transaction(async (transaction) =>
+        this.dependencies.auditStore.append(transaction, {
+          id: auditEventId(randomUUID()),
+          workspaceId: workspaceId(context.workspaceId),
+          actorPrincipalId: principalId(context.principalId),
+          action: audit.action,
+          targetId: audit.targetId,
+          targetType: audit.targetType,
+          outcome: authorized ? "failed" : "denied",
+          ...(audit.permission === undefined
+            ? {}
+            : { permission: audit.permission }),
+          reasonCode: authorized ? audit.reasonCode : "authorization.denied",
+          origin: "admin_ui",
+          occurredAt: utcInstant(new Date()),
+          requestId: context.requestId,
+          correlationId: context.correlationId,
+          ...(context.uiActionId === undefined
+            ? {}
+            : { uiActionId: context.uiActionId }),
+          ...(context.idempotencyKey === undefined
+            ? {}
+            : {
+                idempotencyKeyDigest: digestIdempotencyKey(
+                  context.idempotencyKey,
+                ),
+              }),
+        }),
+      );
+    } catch {
+      throw new AdministrationUnavailableError();
+    }
+  }
+  /** Password credentials are not an authenticated request yet. Record only a
+   * generic failed login with no payload or credential-derived metadata. */
+  public async rejectInvalidPasswordLogin(request: unknown): Promise<void> {
+    await this.recordAuth(request, {
+      workspaceId: this.dependencies.auditWorkspaceId,
+      action: "auth.login.failed",
+      outcome: "failed",
+      targetType: "password-login",
+      targetId: "configured-login",
+      reasonCode: "credentials.invalid",
+    });
+  }
   public async session(request: unknown) {
     const value = await this.dependencies.auth.session(
       header((request as RequestLike).headers ?? {}, "cookie"),
@@ -538,6 +628,38 @@ export class AdministrationApiOperations
         outcome: "failed",
         targetType: "oidc-login",
         targetId: "configured-issuer",
+        reasonCode: authReason(error),
+      });
+      throw error;
+    }
+  }
+  public async passwordLogin(
+    request: unknown,
+    credentials: Readonly<{
+      readonly login: string;
+      readonly password: string;
+    }>,
+  ) {
+    await this.recordAuth(request, {
+      workspaceId: this.dependencies.auditWorkspaceId,
+      action: "auth.login.initiated",
+      outcome: "attempted",
+      targetType: "password-login",
+      targetId: "configured-login",
+    });
+    try {
+      return await this.dependencies.auth.passwordLogin({
+        ...credentials,
+        origin: header((request as RequestLike).headers ?? {}, "origin"),
+        audit: this.authAuditMetadata(request),
+      });
+    } catch (error) {
+      await this.recordAuth(request, {
+        workspaceId: this.dependencies.auditWorkspaceId,
+        action: "auth.login.failed",
+        outcome: "failed",
+        targetType: "password-login",
+        targetId: "configured-login",
         reasonCode: authReason(error),
       });
       throw error;
@@ -747,6 +869,24 @@ export class AdministrationApiOperations
         });
       }
       if (
+        (surface.surface === "retrieval-profiles" ||
+          surface.surface === "prompt-profiles") &&
+        this.dependencies.createPolicyProfileDraft !== undefined &&
+        this.dependencies.transitionPolicyProfile !== undefined
+      ) {
+        return Object.freeze({
+          surface: surface.surface,
+          mode: "managed" as const,
+          workflows: [
+            "create_draft",
+            "activate",
+            "disable",
+            "inspect_history",
+          ] as const,
+          operationalActions: [] as const,
+        });
+      }
+      if (
         surface.surface === "webhook-endpoints" &&
         this.dependencies.createWebhookEndpoint === undefined
       ) {
@@ -875,8 +1015,12 @@ export class AdministrationApiOperations
       readonly displayName: string;
       readonly connectorInstanceId: string;
       readonly collectionId: string;
+      readonly normalizationProfileId: string;
       readonly normalizationProfileVersion: string;
+      readonly chunkingProfileId: string;
       readonly chunkingProfileVersion: string;
+      readonly embeddingBatchSize: number;
+      readonly embeddingBudgetPolicyId: string;
       readonly synchronizationPolicy: Readonly<Record<string, unknown>>;
       readonly deletionBehavior: "tombstone" | "retain";
     }>,
@@ -1033,6 +1177,72 @@ export class AdministrationApiOperations
       label: input.displayName,
       status: "draft",
       version: String(created.revision),
+      fields: Object.freeze({}),
+    });
+  }
+  /**
+   * Retrieval and prompt profile documents have no descriptor/secret slots.
+   * They are still versioned server-side so an analysis can retain the exact
+   * configuration it used rather than observing an editable current document.
+   */
+  public async createPolicyProfileDraft(
+    resource: "retrieval-profiles" | "prompt-profiles",
+    input: Readonly<{
+      readonly displayName: string;
+      readonly settings: Readonly<Record<string, unknown>>;
+    }>,
+    context: AdminRequestContext,
+  ) {
+    await this.requireMutationPermission(
+      context,
+      "configuration.manage",
+      "admin.policyProfile.draft.create.denied",
+      "new",
+    );
+    const create = this.dependencies.createPolicyProfileDraft;
+    if (create === undefined) throw new AdministrationUnavailableError();
+    const created = await create({
+      workspaceId: context.workspaceId,
+      resource,
+      ...input,
+      context,
+    });
+    return Object.freeze({
+      id: created.id,
+      label: input.displayName,
+      status: "draft",
+      version: String(created.revision),
+      fields: Object.freeze({}),
+    });
+  }
+  public async transitionPolicyProfile(
+    resource: "retrieval-profiles" | "prompt-profiles",
+    input: Readonly<{
+      readonly profileId: string;
+      readonly expectedRevision: number;
+      readonly lifecycle: "active" | "disabled";
+    }>,
+    context: AdminRequestContext,
+  ) {
+    await this.requireMutationPermission(
+      context,
+      "configuration.manage",
+      "admin.policyProfile.lifecycle.denied",
+      input.profileId,
+    );
+    const transition = this.dependencies.transitionPolicyProfile;
+    if (transition === undefined) throw new AdministrationUnavailableError();
+    const result = await transition({
+      workspaceId: context.workspaceId,
+      resource,
+      ...input,
+      context,
+    });
+    return Object.freeze({
+      id: input.profileId,
+      label: `Policy profile ${input.profileId}`,
+      status: result.lifecycle,
+      version: String(result.revision),
       fields: Object.freeze({}),
     });
   }
@@ -1845,7 +2055,11 @@ export class AdministrationApiOperations
       readonly actorPrincipalId?: string;
       readonly action: AuthAuditAction;
       readonly outcome: "attempted" | "succeeded" | "failed" | "denied";
-      readonly targetType: "oidc-login" | "auth-session" | "workspace";
+      readonly targetType:
+        | "oidc-login"
+        | "password-login"
+        | "auth-session"
+        | "workspace";
       readonly targetId?: string;
       readonly reasonCode?: AuthAuditReasonCode;
     }>,
@@ -1973,6 +2187,10 @@ function authReason(error: unknown): AuthAuditReasonCode {
   switch (error instanceof Error ? error.message : "") {
     case "auth.identity.unmapped":
       return "identity.unmapped";
+    case "auth.login.invalid":
+      return "credentials.invalid";
+    case "auth.login.disabled":
+      return "login.disabled";
     case "auth.session.required":
       return "session.required";
     case "auth.csrf.invalid":

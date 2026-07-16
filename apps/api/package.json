@@ -3,6 +3,12 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/main.d.ts",
+      "default": "./dist/main.js"
+    }
+  },
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "start": "node dist/main.js",
@@ -14,6 +20,7 @@
     "@caseweaver/administration": "workspace:*",
     "@caseweaver/ai-config": "workspace:*",
     "@caseweaver/ai-execution": "workspace:*",
+    "@caseweaver/ai-provider-runtime": "workspace:*",
     "@caseweaver/ai-sdk": "workspace:*",
     "@caseweaver/connector-git-markdown": "workspace:*",
     "@caseweaver/connector-jitbit": "workspace:*",

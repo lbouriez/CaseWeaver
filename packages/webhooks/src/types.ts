@@ -11,12 +11,22 @@ export interface WebhookEndpoint {
   readonly id: string;
   readonly workspaceId: string;
   readonly connectorInstanceId: string;
+  /** Immutable endpoint routing configuration retained with accepted events. */
+  readonly endpointConfigurationVersionId: string;
+  /** Immutable connector configuration used to construct this adapter. */
+  readonly connectorConfigurationVersionId: string;
   readonly adapter: WebhookAdapter;
   /**
    * A server-configured analysis trigger. It is deliberately copied from the
    * opaque-route configuration, never accepted from request content.
    */
   readonly analysisTriggerId?: string;
+  /**
+   * Server-owned principal that was authorized when the endpoint's trigger
+   * routing was activated. It is never supplied by a webhook request and is
+   * retained only for durable, attributable trigger submission.
+   */
+  readonly automatedPrincipalId?: string;
 }
 
 /**
@@ -37,7 +47,11 @@ export interface VerifiedWebhookEvent {
   readonly endpointId: string;
   readonly workspaceId: string;
   readonly connectorInstanceId: string;
+  readonly endpointConfigurationVersionId: string;
+  readonly connectorConfigurationVersionId: string;
   readonly analysisTriggerId?: string;
+  /** Server-owned activation actor copied from the trusted endpoint route. */
+  readonly automatedPrincipalId?: string;
   /**
    * A deterministic, endpoint-scoped delivery identity. It is based on a connector
    * event ID when one was verified, otherwise on the exact raw request bytes.

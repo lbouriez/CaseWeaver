@@ -24,3 +24,18 @@ returns generic external revision, provenance, and heading-anchor metadata from
 `KnowledgeSource.load`. Discovery carries a Git-commit load token, so loading reads that
 exact commit rather than a mutable branch or tag. Chunking and embedding remain in
 `packages/knowledge`.
+
+## Production runtime contribution
+
+`createGitMarkdownRuntimeContribution` is the connector-owned contribution for trusted
+worker composition. It accepts one exact, immutable server-private descriptor-backed
+configuration plus the runtime registry's server-side secret resolver. Before it creates
+the source or repository port it checks the descriptor revision, connector instance,
+connector-owned settings, and the optional opaque token locator. It does not resolve a
+secret while it is constructed.
+
+Composition supplies a `GitMarkdownRuntimeRepositoryFactory`; the open-source Git CLI
+implementation is `@caseweaver/git-repository-runtime`. That outer adapter owns
+credential-free HTTPS cache transport, short-lived AskPass credentials, command limits,
+and local-root revalidation. It must never be replaced with the package's fake
+repository outside tests.

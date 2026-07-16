@@ -1,4 +1,7 @@
-import { IdempotencyConflictError } from "@caseweaver/administration";
+import {
+  AdministrationUnavailableError,
+  IdempotencyConflictError,
+} from "@caseweaver/administration";
 import type { Permission } from "@caseweaver/security";
 import { describe, expect, it, vi } from "vitest";
 
@@ -36,13 +39,28 @@ const context: AdminRequestContext = {
 function createOperations(): AdministrationRouteOperations {
   return {
     resolve: vi.fn(async () => context),
-    session: vi.fn(async () => ({ authenticated: false })),
+    rejectInvalidRequest: vi.fn(async () => undefined),
+    rejectInvalidPasswordLogin: vi.fn(async () => undefined),
+    session: vi.fn(async () => ({
+      authenticated: false,
+      authentication: { password: true, oauth: true },
+    })),
     login: vi.fn(async () => ({
       redirectTo: "https://issuer.example/authorize",
     })),
+    passwordLogin: vi.fn(async () => ({
+      setCookie: "caseweaver-session=session-value",
+      session: {
+        authenticated: false,
+        authentication: { password: true, oauth: true },
+      },
+    })),
     callback: vi.fn(async () => ({ redirectTo: "/" })),
     logout: vi.fn(async () => undefined),
-    switchWorkspace: vi.fn(async () => ({ authenticated: false })),
+    switchWorkspace: vi.fn(async () => ({
+      authenticated: false,
+      authentication: { password: true, oauth: true },
+    })),
     descriptors: vi.fn(async () => ({ items: [] })),
     list: vi.fn(async () => ({ items: [], page: { hasNextPage: false } })),
     detail: vi.fn(async () => ({ id: "item-1", label: "Item", fields: {} })),
@@ -173,6 +191,310 @@ function createApp(operations = createOperations()) {
 }
 
 describe("administration API routes", () => {
+  it("creates a retrieval policy draft through its typed, idempotent endpoint", async () => {
+    const operations = createOperations();
+    operations.createPolicyProfileDraft = vi.fn(async () => ({
+      id: "retrieval-profile-1",
+      label: "Support retrieval",
+      status: "draft",
+      version: "1",
+      fields: {},
+    }));
+    const built = createApp(operations);
+
+    const response = await built.app.inject({
+      method: "POST",
+      url: "/v1/admin/retrieval-profiles/drafts",
+      headers: { "idempotency-key": "retrieval-profile-draft-0001" },
+      payload: {
+        displayName: "Support retrieval",
+        settings: { policy: "hybrid", maximumResults: 12 },
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(operations.createPolicyProfileDraft).toHaveBeenCalledWith(
+      "retrieval-profiles",
+      {
+        displayName: "Support retrieval",
+        settings: { policy: "hybrid", maximumResults: 12 },
+      },
+      context,
+    );
+    await built.app.close();
+  });
+
+  it("rejects credential-shaped policy settings before they can enter a configuration version", async () => {
+    const operations = createOperations();
+    operations.createPolicyProfileDraft = vi.fn();
+    const built = createApp(operations);
+
+    const response = await built.app.inject({
+      method: "POST",
+      url: "/v1/admin/prompt-profiles/drafts",
+      headers: { "idempotency-key": "prompt-profile-draft-000001" },
+      payload: {
+        displayName: "Analysis prompt",
+        settings: { nested: { apiKey: "must-not-persist" } },
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.body).not.toContain("must-not-persist");
+    expect(operations.createPolicyProfileDraft).not.toHaveBeenCalled();
+    expect(operations.rejectInvalidRequest).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        action: "admin.policyProfile.draft.create.invalid",
+        targetType: "prompt-profiles",
+        reasonCode: "request.invalid",
+      }),
+    );
+    await built.app.close();
+  });
+
+  it("accepts credentials only through the dedicated password-login boundary", async () => {
+    const built = createApp();
+    const response = await built.app.inject({
+      method: "POST",
+      url: "/v1/auth/login/password",
+      headers: { "idempotency-key": "password-login-request-0001" },
+      payload: { login: "admin", password: "admin" },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["set-cookie"]).toContain("caseweaver-session=");
+    expect(built.operations.passwordLogin).toHaveBeenCalledWith(
+      expect.anything(),
+      { login: "admin", password: "admin" },
+    );
+    expect(response.body).not.toContain("admin");
+    await built.app.close();
+  });
+
+  it("audits a missing idempotency key with fixed mutation metadata before rejecting it", async () => {
+    const built = createApp();
+    const response = await built.app.inject({
+      method: "POST",
+      url: "/v1/admin/connector-instances/drafts",
+      payload: {
+        descriptorType: "connector-type",
+        displayName: "Support connector",
+        settings: {},
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toEqual({ code: "idempotency.required" });
+    expect(built.operations.createDraft).not.toHaveBeenCalled();
+    expect(built.operations.rejectInvalidRequest).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        action: "admin.configuration.draft.create.invalid",
+        permission: "configuration.manage",
+        targetType: "connector-instances",
+        targetId: "new",
+        mutation: true,
+        reasonCode: "idempotency.required",
+      },
+    );
+    await built.app.close();
+  });
+
+  it("fails closed when the invalid-request audit cannot persist", async () => {
+    const operations = createOperations();
+    operations.rejectInvalidRequest = vi.fn(async () => {
+      throw new AdministrationUnavailableError();
+    });
+    const built = createApp(operations);
+    const response = await built.app.inject({
+      method: "POST",
+      url: "/v1/admin/connector-instances/drafts",
+      payload: {
+        descriptorType: "connector-type",
+        displayName: "Support connector",
+        settings: {},
+      },
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ code: "service.unavailable" });
+    expect(built.operations.createDraft).not.toHaveBeenCalled();
+    await built.app.close();
+  });
+
+  it("rejects bodies for bodyless auth and administration commands with payload-free audits", async () => {
+    const operations = createOperations();
+    operations.requestDiagnosticExport = vi.fn(async () => ({
+      id: "diagnostic-export-1",
+      status: "requested",
+    }));
+    const built = createApp(operations);
+    const headers = { "idempotency-key": "bodyless-command-request-0001" };
+
+    const logout = await built.app.inject({
+      method: "POST",
+      url: "/v1/auth/logout",
+      headers,
+      payload: { unexpected: "body-value-must-not-be-audited" },
+    });
+    const preview = await built.app.inject({
+      method: "POST",
+      url: "/v1/admin/ai/provider-instances/provider-1/capability-tests/provider.test/previews",
+      headers,
+      payload: { unexpected: "body-value-must-not-be-audited" },
+    });
+    const diagnosticExport = await built.app.inject({
+      method: "POST",
+      url: "/v1/admin/diagnostics/exports",
+      headers,
+      payload: { unexpected: "body-value-must-not-be-audited" },
+    });
+
+    expect([
+      logout.statusCode,
+      preview.statusCode,
+      diagnosticExport.statusCode,
+    ]).toEqual([400, 400, 400]);
+    expect(built.operations.logout).not.toHaveBeenCalled();
+    expect(
+      built.operations.previewProviderCapabilityTest,
+    ).not.toHaveBeenCalled();
+    expect(built.operations.requestDiagnosticExport).not.toHaveBeenCalled();
+    const audits = vi
+      .mocked(built.operations.rejectInvalidRequest)
+      .mock.calls.map(([, audit]) => audit);
+    expect(audits).toEqual([
+      {
+        action: "auth.logout.invalid",
+        permission: undefined,
+        targetType: "auth-session",
+        targetId: "current",
+        mutation: true,
+        reasonCode: "request.invalid",
+      },
+      {
+        action: "admin.provider.capabilityTest.preview.invalid",
+        permission: "configuration.manage",
+        targetType: "ai_provider_instance",
+        targetId: "invalid",
+        mutation: true,
+        reasonCode: "request.invalid",
+      },
+      {
+        action: "admin.diagnostics.export.request.invalid",
+        permission: "diagnostics.export",
+        targetType: "diagnostic_export",
+        targetId: "new",
+        mutation: true,
+        reasonCode: "request.invalid",
+      },
+    ]);
+    expect(JSON.stringify(audits)).not.toContain(
+      "body-value-must-not-be-audited",
+    );
+    await built.app.close();
+  });
+
+  it("does not pass malformed secret-reference content to the audit operation", async () => {
+    const built = createApp();
+    const response = await built.app.inject({
+      method: "POST",
+      url: "/v1/admin/secret-references",
+      headers: { "idempotency-key": "secret-reference-request-0001" },
+      payload: {
+        reference: "vault:secret-value-must-not-be-audited",
+        unexpected: "secret-value-must-not-be-audited",
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(built.operations.createSecretReference).not.toHaveBeenCalled();
+    const audit = vi.mocked(built.operations.rejectInvalidRequest).mock
+      .calls[0]?.[1];
+    expect(audit).toEqual({
+      action: "admin.secretReference.create.invalid",
+      permission: "credential.manage",
+      targetType: "secret_reference",
+      targetId: "new",
+      mutation: true,
+      reasonCode: "request.invalid",
+    });
+    expect(JSON.stringify(audit)).not.toContain(
+      "secret-value-must-not-be-audited",
+    );
+    await built.app.close();
+  });
+
+  it("audits malformed bounded reads with the resource permission", async () => {
+    const built = createApp();
+    const response = await built.app.inject({
+      method: "GET",
+      url: "/v1/admin/connector-instances?limit=201",
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(built.operations.list).not.toHaveBeenCalled();
+    expect(built.operations.rejectInvalidRequest).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        action: "admin.connector-instances.list.invalid",
+        permission: "configuration.read",
+        targetType: "administration_resource",
+        targetId: "connector-instances",
+        mutation: false,
+        reasonCode: "request.invalid",
+      },
+    );
+    await built.app.close();
+  });
+
+  it("audits strict configuration-history query rejection before the read operation", async () => {
+    const built = createApp();
+    const response = await built.app.inject({
+      method: "GET",
+      url: "/v1/admin/configurations/configuration-1/versions?unexpected=query-value-must-not-be-audited",
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(built.operations.configurationHistory).not.toHaveBeenCalled();
+    const audit = vi.mocked(built.operations.rejectInvalidRequest).mock
+      .calls[0]?.[1];
+    expect(audit).toEqual({
+      action: "admin.configuration.history.read",
+      permission: "configuration.read",
+      targetType: "configuration",
+      targetId: "invalid",
+      mutation: false,
+      reasonCode: "request.invalid",
+    });
+    expect(JSON.stringify(audit)).not.toContain(
+      "query-value-must-not-be-audited",
+    );
+    await built.app.close();
+  });
+
+  it("records malformed password login without retaining credentials", async () => {
+    const built = createApp();
+    const response = await built.app.inject({
+      method: "POST",
+      url: "/v1/auth/login/password",
+      headers: { "idempotency-key": "password-login-request-0002" },
+      payload: {
+        login: "admin",
+        password: "password-must-not-be-audited",
+        extra: true,
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(built.operations.passwordLogin).not.toHaveBeenCalled();
+    expect(built.operations.rejectInvalidPasswordLogin).toHaveBeenCalledWith(
+      expect.anything(),
+    );
+    await built.app.close();
+  });
+
   it("uses explicit, bounded list routes and authenticated context", async () => {
     const built = createApp();
     const response = await built.app.inject({
@@ -325,8 +647,12 @@ describe("administration API routes", () => {
         displayName: "Support knowledge",
         connectorInstanceId: "connector-1",
         collectionId: "collection-1",
+        normalizationProfileId: "text-normalization",
         normalizationProfileVersion: "normalization-v1",
+        chunkingProfileId: "text-chunking",
         chunkingProfileVersion: "chunking-v1",
+        embeddingBatchSize: 16,
+        embeddingBudgetPolicyId: "budget-1",
         synchronizationPolicy: { trigger: "manual" },
         deletionBehavior: "tombstone",
       },

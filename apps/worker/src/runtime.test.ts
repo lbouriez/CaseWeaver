@@ -1,10 +1,14 @@
 import {
+  analysisTriggerId,
+  analysisTriggerRequestId,
+  analysisTriggerVersionId,
   analysisIdentityId,
   analysisJobId,
   analysisResultId,
   causationId,
   correlationId,
   createEnvelope,
+  deserializeEnvelope,
   outboxEnvelopeId,
   utcInstant,
   workspaceId,
@@ -54,10 +58,11 @@ describe("worker command runtime", () => {
     });
     const envelope = createEnvelope({
       ...envelopeMetadata,
-      type: "knowledge.synchronize.v1",
+      type: "knowledge.synchronize.v2",
       payload: {
         sourceId: "knowledge-source-1",
-        configurationVersion: "knowledge-source-version-1",
+        sourceConfigurationVersionId: "knowledge-source-version-1",
+        connectorConfigurationVersionId: "connector-version-1",
         trigger: "manual",
       },
     });
@@ -78,10 +83,11 @@ describe("worker command runtime", () => {
     });
     const envelope = createEnvelope({
       ...envelopeMetadata,
-      type: "knowledge.full-rescan.v1",
+      type: "knowledge.full-rescan.v2",
       payload: {
         sourceId: "knowledge-source-1",
-        configurationVersion: "knowledge-source-version-1",
+        sourceConfigurationVersionId: "knowledge-source-version-1",
+        connectorConfigurationVersionId: "connector-version-1",
         trigger: "manual",
       },
     });
@@ -113,6 +119,33 @@ describe("worker command runtime", () => {
       code: "worker.unsupportedEnvelope",
       retryable: false,
     });
+  });
+
+  it("fails legacy pinless knowledge work closed before any handler runs", async () => {
+    const synchronize = vi.fn(async () => {});
+    const fullRescan = vi.fn(async () => {});
+    const runtime = createRuntime({
+      synchronize: { handle: synchronize },
+      fullRescan: { handle: fullRescan },
+    });
+    const legacy = deserializeEnvelope({
+      ...envelopeMetadata,
+      type: "knowledge.synchronize.v1",
+      payload: {
+        sourceId: "knowledge-source-1",
+        configurationVersion: "historical-source-version-1",
+        trigger: "manual",
+      },
+    });
+
+    await expect(
+      runtime.consume(legacy, new AbortController().signal),
+    ).rejects.toMatchObject({
+      code: "worker.legacyKnowledgeConfigurationUnavailable",
+      retryable: false,
+    });
+    expect(synchronize).not.toHaveBeenCalled();
+    expect(fullRescan).not.toHaveBeenCalled();
   });
 
   it("registers analysis execution without routing a completed event", async () => {
@@ -202,5 +235,64 @@ describe("worker command runtime", () => {
     await runtime.consume(envelope, signal);
 
     expect(generate).toHaveBeenCalledWith(envelope, signal);
+  });
+
+  it("routes only version-pinned analysis triggers and rejects legacy v1 before handler I/O", async () => {
+    const trigger = vi.fn(async () => {});
+    const runtime = createWorkerRuntime(
+      createWorkerCommandDispatcher({
+        synchronize: { handle: async () => {} },
+        fullRescan: { handle: async () => {} },
+        analysis: { execute: { handle: async () => {} } },
+        publication: {
+          trigger: { handle: trigger },
+          delivery: {
+            execute: { handle: async () => {} },
+            reconcile: { handle: async () => {} },
+          },
+          analysisCompleted: { handle: async () => {} },
+        },
+      }),
+    );
+    const v2 = createEnvelope({
+      ...envelopeMetadata,
+      type: "analysis.trigger.v2",
+      payload: {
+        triggerRequestId: analysisTriggerRequestId("trigger-request-1"),
+        triggerId: analysisTriggerId("trigger-1"),
+        triggerVersionId: analysisTriggerVersionId("trigger-version-1"),
+        connectorRegistrationId: "connector-1",
+        connectorConfigurationVersionId: "connector-version-1",
+        source: "manual",
+        target: {
+          connectorInstanceId: "connector-1",
+          resourceType: "case",
+          externalId: "case-1",
+        },
+      },
+    });
+    const legacy = deserializeEnvelope({
+      ...envelopeMetadata,
+      id: outboxEnvelopeId("legacy-analysis-trigger-1"),
+      type: "analysis.trigger.v1",
+      payload: {
+        triggerId: "trigger-1",
+        source: "manual",
+        target: {
+          connectorInstanceId: "connector-1",
+          resourceType: "case",
+          externalId: "case-1",
+        },
+      },
+    });
+    const signal = new AbortController().signal;
+
+    await runtime.consume(v2, signal);
+    expect(trigger).toHaveBeenCalledWith(v2, signal);
+    await expect(runtime.consume(legacy, signal)).rejects.toMatchObject({
+      code: "worker.legacyAnalysisTriggerConfigurationUnavailable",
+      retryable: false,
+    });
+    expect(trigger).toHaveBeenCalledOnce();
   });
 });

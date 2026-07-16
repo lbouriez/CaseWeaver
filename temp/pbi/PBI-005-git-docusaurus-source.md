@@ -4,6 +4,15 @@
 
 Ingest documentation from public or authenticated Git repositories.
 
+## Delivery status
+
+**Completed.** Git/Markdown has a server-private, immutable configuration factory and
+real repository transport contribution. Production composition resolves a pinned
+configuration version and never substitutes the fake repository used by tests.
+
+Contract, runtime-contribution, and integrated worker validation cover the configured
+source path and its failure-closed behavior.
+
 ## Scope
 
 - Local and remote Git repository configuration.

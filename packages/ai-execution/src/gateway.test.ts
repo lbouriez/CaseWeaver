@@ -100,6 +100,13 @@ function repositoryAgentBinding() {
   });
 }
 
+const repositoryRuntimePin = Object.freeze({
+  workspaceId: "workspace-1",
+  runtimeVersionId: "repository-runtime-version-1",
+  repositoryId: "repository-1",
+  pinnedCommit: "a".repeat(40),
+});
+
 function harness(
   provider: DeterministicAiProviderDispatcher,
   model = binding(),
@@ -454,6 +461,7 @@ describe("DefaultAiExecutionGateway", () => {
           kind: "repositoryAgent",
           role: "repositoryAgent",
           request: {
+            runtimePin: repositoryRuntimePin,
             instruction: "Inspect only the configured pinned repository.",
             maximumTurns: 2,
             maximumInputTokensPerTurn: 10,
@@ -524,6 +532,7 @@ describe("DefaultAiExecutionGateway", () => {
         kind: "repositoryAgent",
         role: "repositoryAgent",
         request: {
+          runtimePin: repositoryRuntimePin,
           instruction: "Inspect only the configured pinned repository.",
           maximumTurns: 2,
           maximumInputTokensPerTurn: 10,
@@ -573,6 +582,7 @@ describe("DefaultAiExecutionGateway", () => {
           kind: "repositoryAgent",
           role: "repositoryAgent",
           request: {
+            runtimePin: repositoryRuntimePin,
             instruction: "Inspect.",
             maximumTurns: 2,
           } as never,

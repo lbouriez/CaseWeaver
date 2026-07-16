@@ -8,6 +8,10 @@ export interface SessionAuthProvider extends AuthProvider {
   readonly switchWorkspace: (
     workspaceId: string,
   ) => Promise<AuthenticatedSession>;
+  readonly passwordLogin: (
+    login: string,
+    password: string,
+  ) => Promise<AuthenticatedSession>;
 }
 
 export interface SessionAuthProviderOptions {
@@ -64,6 +68,13 @@ export function createSessionAuthProvider(
         currentOrigin(),
       ).toString();
       navigateToLogin(client.loginUrl(returnTo));
+    },
+    async passwordLogin(login, password) {
+      const authenticated = requireAuthenticated(
+        await client.passwordLogin({ login, password }),
+      );
+      session = authenticated;
+      return authenticated;
     },
     async logout() {
       try {

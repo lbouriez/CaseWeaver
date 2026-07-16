@@ -59,6 +59,10 @@ async function seedWorkspaceKnowledge(
   const bindingVersionId = `source-binding-version-${suffix}`;
   const collectionId = `source-collection-${suffix}`;
   const connectorId = `source-connector-${suffix}`;
+  const connectorConfigurationVersionId =
+    suffix === "primary"
+      ? "connector-configuration-v3"
+      : `connector-configuration-v3-${suffix}`;
   const sourceConfigurationVersionId =
     suffix === "primary"
       ? "source-configuration-v7"
@@ -119,6 +123,11 @@ async function seedWorkspaceKnowledge(
      VALUES ($1, $2, 'active')`,
     [connectorId, workspaceIdValue],
   );
+  await seedConnectorConfiguration({
+    workspaceId: workspaceIdValue,
+    connectorId,
+    versionId: connectorConfigurationVersionId,
+  });
   await pool.query(
     `INSERT INTO knowledge_collections (
        id, workspace_id, embedding_binding_version_id, embedding_profile_version, dimensions
@@ -130,20 +139,86 @@ async function seedWorkspaceKnowledge(
     sourceId,
     versionId: sourceConfigurationVersionId,
   });
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `INSERT INTO knowledge_sources (
+         id, workspace_id, connector_registration_id, knowledge_collection_id,
+         lifecycle, configuration_version, connector_configuration_version_id,
+         normalization_profile_version, chunking_profile_version,
+         synchronization_policy, deletion_behavior
+       ) VALUES ($1, $2, $3, $4, 'enabled', $5, $6,
+         'normalization-v1', 'chunking-v1', '{}'::jsonb, 'tombstone')`,
+      [
+        sourceId,
+        workspaceIdValue,
+        connectorId,
+        collectionId,
+        sourceConfigurationVersionId,
+        connectorConfigurationVersionId,
+      ],
+    );
+    await client.query(
+      `INSERT INTO knowledge_source_runtime_versions (
+         workspace_id, knowledge_source_id, source_configuration_version_id,
+         connector_registration_id, connector_configuration_version_id
+       ) VALUES ($1, $2, $3, $4, $5)`,
+      [
+        workspaceIdValue,
+        sourceId,
+        sourceConfigurationVersionId,
+        connectorId,
+        connectorConfigurationVersionId,
+      ],
+    );
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function seedConnectorConfiguration(
+  input: Readonly<{
+    readonly workspaceId: string;
+    readonly connectorId: string;
+    readonly versionId: string;
+  }>,
+): Promise<void> {
   await pool.query(
-    `INSERT INTO knowledge_sources (
-       id, workspace_id, connector_registration_id, knowledge_collection_id,
-       lifecycle, configuration_version, normalization_profile_version,
-       chunking_profile_version, synchronization_policy, deletion_behavior
-     ) VALUES ($1, $2, $3, $4, 'enabled', $5,
-       'normalization-v1', 'chunking-v1', '{}'::jsonb, 'tombstone')`,
-    [
-      sourceId,
-      workspaceIdValue,
-      connectorId,
-      collectionId,
-      sourceConfigurationVersionId,
-    ],
+    `INSERT INTO connector_capabilities (
+       workspace_id, connector_registration_id, capability
+     ) VALUES ($1, $2, 'knowledgeSource')`,
+    [input.workspaceId, input.connectorId],
+  );
+  await pool.query(
+    `INSERT INTO administration_descriptor_revisions (
+       kind, type, version, descriptor, descriptor_hash
+     ) VALUES ('connector', 'source-test-connector', 'v1', '{}'::jsonb, repeat('a', 64))
+     ON CONFLICT (kind, type, version) DO NOTHING`,
+  );
+  await pool.query(
+    `INSERT INTO administration_configurations (
+       id, workspace_id, resource_type, lifecycle, current_version_id
+     ) VALUES ($1, $2, 'connector-instances', 'active', NULL)`,
+    [input.connectorId, input.workspaceId],
+  );
+  await pool.query(
+    `INSERT INTO administration_configuration_versions (
+       id, workspace_id, configuration_id, version, settings, secret_references,
+       descriptor_kind, descriptor_type, descriptor_version
+     ) VALUES ($1, $2, $3, 1, '{}'::jsonb, '[]'::jsonb,
+       'connector', 'source-test-connector', 'v1')`,
+    [input.versionId, input.workspaceId, input.connectorId],
+  );
+  await pool.query(
+    `UPDATE administration_configurations
+     SET current_version_id = $1
+     WHERE workspace_id = $2 AND id = $3`,
+    [input.versionId, input.workspaceId, input.connectorId],
   );
 }
 
@@ -241,7 +316,8 @@ describe("PostgreSQL knowledge source command persistence", () => {
 
       expect(first).toMatchObject({
         status: "queued",
-        configurationVersion: "source-configuration-v7",
+        sourceConfigurationVersionId: "source-configuration-v7",
+        connectorConfigurationVersionId: "connector-configuration-v3",
         replayed: false,
       });
       expect(replay).toEqual({ ...first, replayed: true });
@@ -249,7 +325,8 @@ describe("PostgreSQL knowledge source command persistence", () => {
         type: string;
         payload: {
           sourceId: string;
-          configurationVersion: string;
+          sourceConfigurationVersionId: string;
+          connectorConfigurationVersionId: string;
           trigger: string;
         };
       }>("SELECT type, payload FROM outbox_envelopes WHERE workspace_id = $1", [
@@ -257,10 +334,11 @@ describe("PostgreSQL knowledge source command persistence", () => {
       ]);
       expect(outbox.rows).toEqual([
         {
-          type: "knowledge.synchronize.v1",
+          type: "knowledge.synchronize.v2",
           payload: {
             sourceId: source,
-            configurationVersion: "source-configuration-v7",
+            sourceConfigurationVersionId: "source-configuration-v7",
+            connectorConfigurationVersionId: "connector-configuration-v3",
             trigger: "manual",
           },
         },
@@ -339,6 +417,54 @@ describe("PostgreSQL knowledge source command persistence", () => {
         [workspace, source],
       );
       expect(sourceState.rows[0]?.count).toBe("1");
+    } finally {
+      await persistence.close();
+    }
+  });
+
+  it("rejects a legacy pinless idempotency record instead of replaying it against mutable connector state", async () => {
+    const { persistence, useCase } = subject();
+    const keyDigest = sha256Digest("e".repeat(64));
+    const requestDigest = sha256Digest("f".repeat(64));
+    try {
+      await pool.query(
+        `INSERT INTO outbox_envelopes (
+           id, workspace_id, kind, type, schema_version, occurred_at,
+           correlation_id, causation_id, payload, available_at
+         ) VALUES (
+           'legacy-source-command', $1, 'command', 'knowledge.synchronize.v1',
+           1, now(), 'legacy-source-command', 'legacy-source-command',
+           $2::jsonb, now()
+         )`,
+        [
+          workspace,
+          JSON.stringify({
+            sourceId: source,
+            configurationVersion: "source-configuration-v7",
+            trigger: "manual",
+          }),
+        ],
+      );
+      await pool.query(
+        `INSERT INTO idempotency_records (
+           workspace_id, operation, key_digest, request_digest, resource_id
+         ) VALUES (
+           $1, 'knowledgeSource.synchronize', $2, $3, 'legacy-source-command'
+         )`,
+        [workspace, keyDigest, requestDigest],
+      );
+
+      await expect(
+        useCase.execute(
+          {
+            sourceId: source,
+            kind: "synchronize",
+            idempotencyKeyDigest: keyDigest,
+            requestDigest,
+          },
+          context(),
+        ),
+      ).rejects.toThrow("legacy and unavailable");
     } finally {
       await persistence.close();
     }

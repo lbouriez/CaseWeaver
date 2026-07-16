@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import type {
   KnowledgeSchedule,
@@ -16,6 +16,7 @@ interface ScheduleRow extends QueryResultRow {
   readonly knowledge_source_id: string;
   readonly schedule_kind: "synchronize" | "fullRescan";
   readonly configuration_version: string;
+  readonly connector_configuration_version_id: string | null;
   readonly trigger_kind: "cron" | "interval";
   readonly cron_expression: string | null;
   readonly timezone: string | null;
@@ -44,6 +45,15 @@ function asNumber(value: string | null, field: string): number | undefined {
 }
 
 function toSchedule(row: ScheduleRow): KnowledgeSchedule {
+  if (
+    row.configuration_version.length === 0 ||
+    row.connector_configuration_version_id === null ||
+    row.connector_configuration_version_id.length === 0
+  ) {
+    throw new Error(
+      "Persisted knowledge schedule runtime pins are unavailable.",
+    );
+  }
   const jitterMs = asNumber(row.jitter_ms, "schedule jitter");
   let cadence: ScheduleCadence;
   if (row.trigger_kind === "cron") {
@@ -67,7 +77,8 @@ function toSchedule(row: ScheduleRow): KnowledgeSchedule {
     id: row.id,
     workspaceId: row.workspace_id,
     sourceId: row.knowledge_source_id,
-    configurationVersion: row.configuration_version,
+    sourceConfigurationVersionId: row.configuration_version,
+    connectorConfigurationVersionId: row.connector_configuration_version_id,
     kind: row.schedule_kind,
     cadence,
     enabled: row.enabled,
@@ -85,10 +96,12 @@ export class PostgresKnowledgeScheduleStore implements KnowledgeScheduleStore {
     const result = await this.pool.query<ScheduleRow>(
       `SELECT
          id, workspace_id, knowledge_source_id, schedule_kind,
-         configuration_version, trigger_kind, cron_expression, timezone,
+         configuration_version, connector_configuration_version_id,
+         trigger_kind, cron_expression, timezone,
          interval_ms, jitter_ms, enabled, next_run_at
        FROM knowledge_schedules
        WHERE enabled AND next_run_at <= $1
+         AND connector_configuration_version_id IS NOT NULL
        ORDER BY next_run_at, id
        LIMIT $2`,
       [input.now, input.limit],
@@ -131,6 +144,7 @@ export class PostgresKnowledgeScheduleStore implements KnowledgeScheduleStore {
   public async enqueueOccurrence(
     input: Parameters<KnowledgeScheduleStore["enqueueOccurrence"]>[0],
   ): Promise<"enqueued" | "duplicate"> {
+    assertPinnedOccurrence(input);
     const client = await this.pool.connect();
     try {
       await client.query("BEGIN");
@@ -153,8 +167,9 @@ export class PostgresKnowledgeScheduleStore implements KnowledgeScheduleStore {
       }
       const occurrence = await client.query<{ readonly id: string }>(
         `INSERT INTO knowledge_schedule_occurrences (
-           id, workspace_id, knowledge_schedule_id, occurrence_key, scheduled_for
-         ) VALUES ($1, $2, $3, $4, $5)
+           id, workspace_id, knowledge_schedule_id, occurrence_key, scheduled_for,
+           source_configuration_version_id, connector_configuration_version_id
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7)
          ON CONFLICT (
            workspace_id, knowledge_schedule_id, occurrence_key
          ) DO NOTHING
@@ -165,6 +180,8 @@ export class PostgresKnowledgeScheduleStore implements KnowledgeScheduleStore {
           input.schedule.id,
           input.occurrenceKey,
           input.command.scheduledFor,
+          input.command.sourceConfigurationVersionId,
+          input.command.connectorConfigurationVersionId,
         ],
       );
       const occurrenceRow = occurrence.rows[0];
@@ -194,18 +211,28 @@ export class PostgresKnowledgeScheduleStore implements KnowledgeScheduleStore {
       if (advanced.rowCount !== 1) {
         throw new Error("Knowledge schedule is no longer enabled.");
       }
+      const envelopeContext = `schedule:${input.schedule.id}:${sha256(
+        input.occurrenceKey,
+      )}`;
       await client.query(
-        `INSERT INTO knowledge_schedule_commands (
-           id, workspace_id, knowledge_schedule_occurrence_id, command_type,
-           idempotency_key, payload
-         ) VALUES ($1, $2, $3, $4, $5, $6::jsonb)`,
+        `INSERT INTO outbox_envelopes (
+           id, workspace_id, kind, type, schema_version, occurred_at,
+           correlation_id, causation_id, payload, available_at
+         ) VALUES ($1, $2, 'command', $3, 1, $4, $5, $5, $6::jsonb, $4)`,
         [
-          `knowledge-schedule-command:${sha256(input.occurrenceKey)}`,
+          randomUUID(),
           input.schedule.workspaceId,
-          occurrenceRow.id,
           input.command.type,
-          input.occurrenceKey,
-          JSON.stringify(input.command),
+          input.now,
+          envelopeContext,
+          JSON.stringify({
+            sourceId: input.command.sourceId,
+            sourceConfigurationVersionId:
+              input.command.sourceConfigurationVersionId,
+            connectorConfigurationVersionId:
+              input.command.connectorConfigurationVersionId,
+            trigger: input.command.trigger,
+          }),
         ],
       );
       const released = await client.query(
@@ -230,5 +257,30 @@ export class PostgresKnowledgeScheduleStore implements KnowledgeScheduleStore {
     } finally {
       client.release();
     }
+  }
+}
+
+function assertPinnedOccurrence(
+  input: Parameters<KnowledgeScheduleStore["enqueueOccurrence"]>[0],
+): void {
+  const expectedType =
+    input.schedule.kind === "synchronize"
+      ? "knowledge.synchronize.v2"
+      : "knowledge.full-rescan.v2";
+  if (
+    input.command.type !== expectedType ||
+    input.command.workspaceId !== input.schedule.workspaceId ||
+    input.command.sourceId !== input.schedule.sourceId ||
+    input.command.sourceConfigurationVersionId !==
+      input.schedule.sourceConfigurationVersionId ||
+    input.command.connectorConfigurationVersionId !==
+      input.schedule.connectorConfigurationVersionId ||
+    input.command.trigger !== "schedule" ||
+    input.command.occurrenceKey !== input.occurrenceKey ||
+    input.command.scheduledFor !== input.schedule.nextRunAt ||
+    input.command.sourceConfigurationVersionId.length === 0 ||
+    input.command.connectorConfigurationVersionId.length === 0
+  ) {
+    throw new Error("Knowledge schedule occurrence runtime pins are invalid.");
   }
 }

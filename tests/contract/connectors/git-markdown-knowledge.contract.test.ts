@@ -110,27 +110,41 @@ describe("Git Markdown knowledge ingestion contract", () => {
       ai,
       ids: { next: () => "unused-revision" },
       clock: { now: () => "2026-07-13T20:00:00.000Z" },
-      normalizer: {
-        normalize: async () => {
-          normalizations += 1;
-          throw new Error("An unchanged Git blob must not be normalized.");
-        },
-      },
-      chunker: {
-        chunk: async () => {
-          throw new Error("An unchanged Git blob must not be chunked.");
-        },
+      profiles: {
+        resolve: () =>
+          Object.freeze({
+            normalizer: {
+              normalize: async () => {
+                normalizations += 1;
+                throw new Error(
+                  "An unchanged Git blob must not be normalized.",
+                );
+              },
+            },
+            chunker: {
+              chunk: async () => {
+                throw new Error("An unchanged Git blob must not be chunked.");
+              },
+            },
+          }),
       },
     });
 
     const result = await service.synchronize({
       source,
       signal: new AbortController().signal,
+      discovery: {
+        mode: "incremental",
+        reset: false,
+        signal: new AbortController().signal,
+      },
       configuration: {
         id: "git-source",
         workspaceId: "workspace-1",
         connectorInstanceId: "git-docs",
+        normalizationProfileId: "text-normalization",
         normalizationProfileVersion: "normalization.v1",
+        chunkingProfileId: "text-chunking",
         chunkingProfileVersion: "chunking.v1",
         embeddingBatchSize: 10,
         synchronization: { triggers: [{ mode: "manual" }] },

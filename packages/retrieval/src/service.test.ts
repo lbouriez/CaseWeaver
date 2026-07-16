@@ -10,6 +10,7 @@ import type {
   RetrievalCandidate,
   RetrievalProfile,
   RetrievalRequest,
+  RetrievalTokenCounter,
 } from "./contracts.js";
 import {
   DeterministicRetrievalSearchPort,
@@ -44,12 +45,31 @@ class FakeAiGateway implements AiExecutionGateway {
   }
 }
 
+class RecordingTokenCounter implements RetrievalTokenCounter {
+  public readonly calls: {
+    readonly text: string;
+    readonly bindingVersionId: string;
+    readonly purpose: "embedding" | "reranking" | "context";
+  }[] = [];
+
+  public count(input: {
+    readonly text: string;
+    readonly bindingVersionId: string;
+    readonly purpose: "embedding" | "reranking" | "context";
+  }): number {
+    this.calls.push(input);
+    const trimmed = input.text.trim();
+    return trimmed === "" ? 0 : trimmed.split(/\s+/u).length;
+  }
+}
+
 const controller = new AbortController();
 
 function profile(overrides: Partial<RetrievalProfile> = {}): RetrievalProfile {
   return {
     id: "retrieval.v1",
     version: "1",
+    contextTokenBindingVersionId: "analysis.v1",
     collections: [
       {
         id: "docs",
@@ -124,7 +144,10 @@ function request(
   };
 }
 
-function serviceFor(candidates: readonly RetrievalCandidate[]) {
+function serviceFor(
+  candidates: readonly RetrievalCandidate[],
+  tokens: RetrievalTokenCounter = new WhitespaceTokenCounter(),
+) {
   const search = new DeterministicRetrievalSearchPort(candidates);
   const snapshots = new InMemoryRetrievalSnapshotPort();
   const ai = new FakeAiGateway();
@@ -136,7 +159,7 @@ function serviceFor(candidates: readonly RetrievalCandidate[]) {
       search,
       snapshots,
       ai,
-      tokens: new WhitespaceTokenCounter(),
+      tokens,
     }),
   };
 }
@@ -179,6 +202,58 @@ describe("RetrievalService", () => {
       expect.objectContaining({ collectionIds: ["operations"] }),
     ]);
     expect(searchRequest?.maximumCandidatesPerSource).toBe(5);
+  });
+
+  it("uses binding-specific token counters and preserves analysis attribution for retrieval AI calls", async () => {
+    const tokens = new RecordingTokenCounter();
+    const configured = profile({
+      reranker: {
+        bindingVersionId: "reranker.v1",
+        maximumCandidates: 2,
+        maximumInputTokens: 10,
+        budget: { currency: "USD", hard: false },
+      },
+    });
+    const harness = serviceFor(
+      [candidate("docs", "one", { lexicalRank: 1 })],
+      tokens,
+    );
+
+    await harness.service.retrieve({
+      ...request(configured),
+      attribution: { analysisJobId: "analysis-job-1" },
+    });
+
+    expect(tokens.calls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          bindingVersionId: "embedding.v1",
+          purpose: "embedding",
+        }),
+        expect.objectContaining({
+          bindingVersionId: "reranker.v1",
+          purpose: "reranking",
+        }),
+        expect.objectContaining({
+          bindingVersionId: "analysis.v1",
+          purpose: "context",
+        }),
+      ]),
+    );
+    expect(harness.ai.calls).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "embedding",
+          analysisId: "analysis-1",
+          attribution: { analysisJobId: "analysis-job-1" },
+        }),
+        expect.objectContaining({
+          kind: "reranker",
+          analysisId: "analysis-1",
+          attribution: { analysisJobId: "analysis-job-1" },
+        }),
+      ]),
+    );
   });
 
   it("fuses ranks, deduplicates, breaks ties, filters access, and applies source quotas", async () => {

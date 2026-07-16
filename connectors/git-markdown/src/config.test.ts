@@ -1,5 +1,5 @@
-import { redactConnectorConfiguration } from "@caseweaver/connector-sdk";
 import { dirname, sep } from "node:path";
+import { redactConnectorConfiguration } from "@caseweaver/connector-sdk";
 import { describe, expect, it } from "vitest";
 
 import { gitMarkdownConfigurationSchema } from "./config.js";
@@ -70,6 +70,21 @@ describe("Git Markdown configuration", () => {
         },
       }),
     ).toThrow(/token secret reference is required/);
+
+    expect(() =>
+      gitMarkdownConfigurationSchema.parse({
+        schemaVersion: 1,
+        connectorType: "git-markdown",
+        secrets: { repositoryToken: "env:GIT_TOKEN" },
+        settings: {
+          connectorInstanceId: "documentation",
+          repository: { kind: "local", path: process.cwd() },
+          allowedLocalRoots: [process.cwd()],
+          ref: { kind: "branch", name: "main" },
+          authentication: { kind: "token", secretName: "repositoryToken" },
+        },
+      }),
+    ).toThrow(/Local repositories do not support Git token authentication/);
   });
 
   it.each([

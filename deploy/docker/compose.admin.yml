@@ -3,17 +3,16 @@ name: caseweaver-admin
 services:
   admin:
     build:
-      context: .
-      dockerfile: Dockerfile.admin-bridge
-    image: ${CASEWEAVER_ADMIN_BRIDGE_IMAGE:-caseweaver-admin-bridge:local}
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      target: admin
+    image: ${CASEWEAVER_ADMIN_IMAGE:-caseweaver-admin:local}
     restart: unless-stopped
     environment:
       CASEWEAVER_ADMIN_API_BASE_URL: ${CASEWEAVER_ADMIN_API_BASE_URL:?Set CASEWEAVER_ADMIN_API_BASE_URL to the public API URL.}
       CASEWEAVER_ADMIN_UI_TITLE: ${CASEWEAVER_ADMIN_UI_TITLE:-CaseWeaver Control Room}
     ports:
       - "127.0.0.1:${CASEWEAVER_ADMIN_PORT:-8082}:8080"
-    volumes:
-      - ../../apps/admin/dist:/usr/share/nginx/static:ro
     read_only: true
     tmpfs:
       - /tmp:uid=101,gid=101,mode=0700

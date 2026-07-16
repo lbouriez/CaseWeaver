@@ -12,10 +12,11 @@ function occurrenceKey(schedule: KnowledgeSchedule): string {
   return createHash("sha256")
     .update(
       [
-        "knowledge-schedule.v1",
+        "knowledge-schedule.v2",
         schedule.workspaceId,
         schedule.id,
-        schedule.configurationVersion,
+        schedule.sourceConfigurationVersionId,
+        schedule.connectorConfigurationVersionId,
         schedule.kind,
         schedule.nextRunAt,
       ].join(":"),
@@ -31,11 +32,12 @@ function commandFor(
   return {
     type:
       schedule.kind === "synchronize"
-        ? "knowledge.synchronize.v1"
-        : "knowledge.full-rescan.v1",
+        ? "knowledge.synchronize.v2"
+        : "knowledge.full-rescan.v2",
     workspaceId: schedule.workspaceId,
     sourceId: schedule.sourceId,
-    configurationVersion: schedule.configurationVersion,
+    sourceConfigurationVersionId: schedule.sourceConfigurationVersionId,
+    connectorConfigurationVersionId: schedule.connectorConfigurationVersionId,
     trigger: "schedule",
     occurrenceKey: key,
     scheduledFor: schedule.nextRunAt,

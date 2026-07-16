@@ -1,0 +1,164 @@
+name: Container images
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: 22.13.1
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }} image
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Each process has a separately deployable, least-privilege image. The
+        # migration runner is published as a versioned operational tool, never
+        # bundled into the API image.
+        target: [migration, api, admin, worker, scheduler, webhook, standalone]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
+      - name: Build final image without publishing
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          target: ${{ matrix.target }}
+          load: true
+          push: false
+          tags: caseweaver-${{ matrix.target }}:ci
+          build-args: |
+            VERSION=${{ github.sha }}
+            REVISION=${{ github.sha }}
+            SOURCE=${{ github.server_url }}/${{ github.repository }}
+            CREATED=${{ github.run_id }}
+          cache-from: type=gha,scope=caseweaver-${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=caseweaver-${{ matrix.target }}
+          sbom: true
+          provenance: mode=max
+      - name: Verify image process user and identity
+        run: docker image inspect caseweaver-${{ matrix.target }}:ci --format '{{.Id}} {{.Config.User}}'
+
+  local-smoke:
+    name: Disposable local Compose smoke
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
+      - name: Install the pinned browser test toolchain
+        run: |
+          npm install --global corepack@0.31.0
+          corepack enable
+          corepack prepare pnpm@11.12.0 --activate
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+      - name: Start disposable local stack
+        run: docker compose -f deploy/docker/compose.local.yml up --build --wait
+      - name: Verify edge API and public Admin runtime configuration
+        run: |
+          curl --fail --show-error http://localhost:8080/health/live
+          curl --fail --show-error http://localhost:8080/health/ready
+          curl --fail --show-error http://localhost:8080/runtime-config.json
+      - name: Exercise the real Compose operator journey
+        env:
+          CASEWEAVER_E2E_COMPOSE_ORIGIN: http://localhost:8080
+        run: pnpm exec playwright test tests/e2e/admin-compose.spec.ts
+      - name: Print service state on failure
+        if: failure()
+        run: docker compose -f deploy/docker/compose.local.yml ps && docker compose -f deploy/docker/compose.local.yml logs --no-color
+      - name: Remove disposable stack and database volume
+        if: always()
+        run: docker compose -f deploy/docker/compose.local.yml down -v
+
+  publish:
+    name: Publish ${{ matrix.target }} release image
+    needs: [build, local-smoke]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [migration, api, admin, worker, scheduler, webhook, standalone]
+    env:
+      REGISTRY: ${{ vars.CASEWEAVER_CONTAINER_REGISTRY || 'ghcr.io' }}
+      IMAGE: ${{ vars.CASEWEAVER_CONTAINER_REGISTRY || 'ghcr.io' }}/${{ github.repository_owner }}/caseweaver-${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
+      - name: Validate registry-scoped destination
+        run: |
+          case "$IMAGE" in "$REGISTRY"/*) ;; *) echo "Image must use CASEWEAVER_CONTAINER_REGISTRY." >&2; exit 1 ;; esac
+      - name: Log in to the release registry
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
+        with:
+          registry: ${{ vars.CASEWEAVER_CONTAINER_REGISTRY || 'ghcr.io' }}
+          username: ${{ vars.CASEWEAVER_CONTAINER_USERNAME || github.actor }}
+          password: ${{ secrets.CASEWEAVER_CONTAINER_PASSWORD || secrets.GITHUB_TOKEN }}
+      - name: Create release metadata
+        id: meta
+        uses: docker/metadata-action@c1e51972afc2121e065aed6d45c65596fe445f3f
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=ref,event=tag
+            type=sha,format=long,prefix=sha-
+      - name: Publish final image
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
+        with:
+          context: .
+          file: deploy/docker/Dockerfile
+          target: ${{ matrix.target }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+            REVISION=${{ github.sha }}
+            SOURCE=${{ github.server_url }}/${{ github.repository }}
+            CREATED=${{ github.run_id }}
+          cache-from: type=gha,scope=caseweaver-${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=caseweaver-${{ matrix.target }}
+          sbom: true
+          provenance: mode=max
+
+  release-pull-smoke:
+    name: Pull ${{ matrix.target }} release image
+    needs: publish
+    if: needs.publish.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [migration, api, admin, worker, scheduler, webhook, standalone]
+    env:
+      REGISTRY: ${{ vars.CASEWEAVER_CONTAINER_REGISTRY || 'ghcr.io' }}
+      IMAGE: ${{ vars.CASEWEAVER_CONTAINER_REGISTRY || 'ghcr.io' }}/${{ github.repository_owner }}/caseweaver-${{ matrix.target }}:${{ github.ref_name }}
+    steps:
+      - uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
+        with:
+          registry: ${{ vars.CASEWEAVER_CONTAINER_REGISTRY || 'ghcr.io' }}
+          username: ${{ vars.CASEWEAVER_CONTAINER_USERNAME || github.actor }}
+          password: ${{ secrets.CASEWEAVER_CONTAINER_PASSWORD || secrets.GITHUB_TOKEN }}
+      - name: Pull the freshly published release tag
+        run: |
+          docker pull "$IMAGE"
+          docker image inspect "$IMAGE" --format '{{.Id}} {{.Config.User}}'

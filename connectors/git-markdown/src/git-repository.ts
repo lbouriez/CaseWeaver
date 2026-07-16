@@ -105,6 +105,8 @@ export type GitRepositoryAuthentication =
 
 export interface InspectGitRepositoryRequest {
   readonly repository: GitRepositoryTarget;
+  /** Trusted roots for the local repository mode; never accepted from a Git server. */
+  readonly allowedLocalRoots: readonly string[];
   readonly ref: GitRepositoryReference;
   readonly authentication: GitRepositoryAuthentication;
   readonly signal: AbortSignal;

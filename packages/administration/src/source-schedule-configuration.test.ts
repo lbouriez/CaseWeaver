@@ -14,8 +14,12 @@ const source = {
   sourceId: "source-a",
   connectorRegistrationId: "connector-a",
   knowledgeCollectionId: "collection-a",
+  normalizationProfileId: "text-normalization",
   normalizationProfileVersion: "normalization-v1",
+  chunkingProfileId: "text-chunking",
   chunkingProfileVersion: "chunking-v1",
+  embeddingBatchSize: 16,
+  embeddingBudgetPolicyId: "budget-a",
   synchronizationPolicy: { triggers: [{ mode: "manual" }] },
   deletionBehavior: "tombstone" as const,
 };

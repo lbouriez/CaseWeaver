@@ -1,25 +1,65 @@
 import { pathToFileURL } from "node:url";
 
 import { createPostgresPersistence } from "@caseweaver/postgres";
+import { Pool } from "pg";
 
+import {
+  PostgresWorkerReadinessProbe,
+  type WorkerDatabaseReadinessProbe,
+} from "./database-readiness.js";
 import { createDiagnosticExportOutboxWorker } from "./diagnostic-export-outbox-worker.js";
+import { attachWorkerShutdownSignals, type WorkerProcess } from "./process.js";
+import {
+  createProductionWorkerRuntimeFromEnvironment,
+  runWorkerQueueMigration,
+} from "./production-bootstrap.js";
 
 export interface WorkerOutput {
   log(message: string): void;
   error(message: string): void;
 }
 
-export function runWorkerCommand(
+export async function runWorkerCommand(
   arguments_: readonly string[],
   output: WorkerOutput,
-): number {
+  environment: NodeJS.ProcessEnv = process.env,
+  readiness?: WorkerDatabaseReadinessProbe,
+): Promise<number> {
   if (arguments_.length === 1 && arguments_[0] === "health") {
-    output.log(JSON.stringify({ status: "ok" }));
-    return 0;
+    const databaseUrl = environment.DATABASE_URL;
+    if (databaseUrl === undefined || databaseUrl.length === 0) {
+      output.error("Worker database is unavailable.");
+      return 1;
+    }
+    const pool =
+      readiness === undefined
+        ? new Pool({
+            connectionString: databaseUrl,
+            connectionTimeoutMillis: 5_000,
+            query_timeout: 5_000,
+            max: 1,
+          })
+        : undefined;
+    const probe =
+      readiness ?? new PostgresWorkerReadinessProbe(pool as Pool, 5_000);
+    try {
+      if ((await probe.check()) !== "ready") {
+        output.error("Worker database is unavailable.");
+        return 1;
+      }
+      output.log(JSON.stringify({ status: "ok" }));
+      return 0;
+    } finally {
+      await pool?.end();
+    }
   }
 
   output.error("Usage: caseweaver-worker health");
   return 1;
+}
+
+export interface WorkerRuntimeBootstrap {
+  create(environment: NodeJS.ProcessEnv): Promise<WorkerProcess>;
 }
 
 export function main(): void {
@@ -37,16 +77,46 @@ export async function runWorker(
   arguments_: readonly string[],
   output: WorkerOutput,
   environment: NodeJS.ProcessEnv = process.env,
+  bootstrap?: WorkerRuntimeBootstrap,
 ): Promise<number> {
   if (arguments_.length === 1 && arguments_[0] === "health") {
-    return runWorkerCommand(arguments_, output);
+    return runWorkerCommand(arguments_, output, environment);
+  }
+  if (arguments_.length === 1 && arguments_[0] === "start") {
+    let runtime: WorkerProcess | undefined;
+    try {
+      runtime = await (
+        bootstrap ?? {
+          create: createProductionWorkerRuntimeFromEnvironment,
+        }
+      ).create(environment);
+      await runtime.start();
+      attachWorkerShutdownSignals(runtime, process);
+      return 0;
+    } catch {
+      if (runtime !== undefined) {
+        await runtime.stop().catch(() => undefined);
+      }
+      output.error("Worker startup failed.");
+      return 1;
+    }
+  }
+  if (arguments_.length === 1 && arguments_[0] === "migrate-queue") {
+    try {
+      await runWorkerQueueMigration(environment);
+      output.log("Queue migration completed.");
+      return 0;
+    } catch {
+      output.error("Queue migration failed.");
+      return 1;
+    }
   }
   const continuous = arguments_.length === 1 && arguments_[0] === "diagnostics";
   const oneShot =
     arguments_.length === 1 && arguments_[0] === "diagnostics-once";
   if (!continuous && !oneShot) {
     output.error(
-      "Usage: caseweaver-worker health | diagnostics | diagnostics-once",
+      "Usage: caseweaver-worker health | start | migrate-queue | diagnostics | diagnostics-once",
     );
     return 1;
   }

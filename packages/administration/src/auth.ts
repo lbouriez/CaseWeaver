@@ -238,6 +238,8 @@ export type AuthAuditAction = (typeof authAuditActions)[number];
 
 export const authAuditReasonCodes = [
   "callback.invalid",
+  "credentials.invalid",
+  "login.disabled",
   "identity.unmapped",
   "session.required",
   "csrf.invalid",
@@ -254,7 +256,11 @@ export interface AuthAuditEvent {
   readonly actorPrincipalId?: string;
   readonly action: AuthAuditAction;
   readonly outcome: "attempted" | "succeeded" | "failed" | "denied";
-  readonly targetType: "oidc-login" | "auth-session" | "workspace";
+  readonly targetType:
+    | "oidc-login"
+    | "password-login"
+    | "auth-session"
+    | "workspace";
   readonly targetId?: string;
   readonly reasonCode?: AuthAuditReasonCode;
   readonly occurredAt: string;

@@ -4,6 +4,16 @@
 
 Safely convert supported case and knowledge attachments into reusable text derivatives.
 
+## Delivery status
+
+**Completed.** Local-filesystem and S3-compatible production object-storage adapters,
+configuration validation, retention lifecycle, derivative-evidence reader, and composed
+attachment-preparation runtime are delivered. Production retention never acknowledges a
+delete through the in-memory/no-op test storage path.
+
+Unit, contract, PostgreSQL integration, and worker composition tests cover the scoped
+storage, derivative integrity, retention, and failure-closed runtime boundaries.
+
 ## Existing implementation reference
 
 Inspect `C:\GIT\Nectari\Scripts\Cloud\Modules\HelpDeskHelper.psm1` before

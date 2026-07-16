@@ -3,9 +3,15 @@ import {
   type AnalysisIdentityId,
   type AnalysisJobId,
   type AnalysisResultId,
+  type AnalysisTriggerId,
+  type AnalysisTriggerRequestId,
+  type AnalysisTriggerVersionId,
   analysisIdentityId,
   analysisJobId,
   analysisResultId,
+  analysisTriggerId,
+  analysisTriggerRequestId,
+  analysisTriggerVersionId,
   type CausationId,
   type CorrelationId,
   causationId,
@@ -29,11 +35,14 @@ export interface TraceContext {
 export type EnvelopeType =
   | "analysis.execute.v1"
   | "analysis.trigger.v1"
+  | "analysis.trigger.v2"
   | "publication.execute.v1"
   | "publication.reconcile.v1"
   | "analysis.completed.v1"
   | "knowledge.synchronize.v1"
   | "knowledge.full-rescan.v1"
+  | "knowledge.synchronize.v2"
+  | "knowledge.full-rescan.v2"
   | "retention.reap.v1"
   | "retention.purge.v1"
   | "diagnostics.export.generate.v1";
@@ -51,11 +60,37 @@ export interface PublicationReconcilePayload {
   readonly publicationIntentId: PublicationIntentId;
 }
 
-export interface AnalysisTriggerPayload {
+/**
+ * Historical trigger envelope. It is deserialized only so consumers can
+ * classify it as unavailable: it lacks immutable trigger/configuration pins.
+ */
+export interface LegacyAnalysisTriggerPayload {
   readonly triggerId: string;
   readonly source: "manual" | "schedule" | "webhook";
   readonly occurrenceKey?: string;
   readonly target?: Readonly<{
+    connectorInstanceId: string;
+    resourceType: string;
+    externalId: string;
+  }>;
+  /** Added during deserialization; never persisted or emitted. */
+  readonly legacy?: true;
+}
+
+/**
+ * All new trigger commands point to a durable request and its exact immutable
+ * trigger and connector configuration. They contain neither settings nor
+ * secret locators.
+ */
+export interface AnalysisTriggerPayload {
+  readonly triggerRequestId: AnalysisTriggerRequestId;
+  readonly triggerId: AnalysisTriggerId;
+  readonly triggerVersionId: AnalysisTriggerVersionId;
+  readonly connectorRegistrationId: string;
+  readonly connectorConfigurationVersionId: string;
+  readonly source: "manual" | "schedule" | "webhook";
+  readonly occurrenceKey?: string;
+  readonly target: Readonly<{
     connectorInstanceId: string;
     resourceType: string;
     externalId: string;
@@ -67,22 +102,53 @@ export interface AnalysisCompletedPayload {
   readonly analysisResultId: AnalysisResultId;
 }
 
+/**
+ * A legacy knowledge command is deserializable only so workers can classify it
+ * as unavailable. Its single historical pin is never a connector pin.
+ */
+export interface LegacyKnowledgeSynchronizePayload {
+  readonly sourceId: string;
+  /** Historical source-only configuration pin; never a connector version. */
+  readonly configurationVersion: string;
+  readonly trigger: "manual" | "schedule";
+  /** Added while deserializing; it is never persisted or emitted. */
+  readonly legacy: true;
+}
+
+/** See {@link LegacyKnowledgeSynchronizePayload}. */
+export interface LegacyKnowledgeFullRescanPayload {
+  readonly sourceId: string;
+  /** Historical source-only configuration pin; never a connector version. */
+  readonly configurationVersion: string;
+  readonly trigger: "manual" | "schedule";
+  /** Added while deserializing; it is never persisted or emitted. */
+  readonly legacy: true;
+}
+
+/**
+ * Immutable runtime pins for newly emitted knowledge synchronization commands.
+ * The connector pin identifies server-private configuration composition only;
+ * neither connector settings nor credential locators are carried in envelopes.
+ */
 export interface KnowledgeSynchronizePayload {
   readonly sourceId: string;
-  /** Immutable source configuration selected when the command was accepted. */
-  readonly configurationVersion: string;
+  readonly sourceConfigurationVersionId: string;
+  readonly connectorConfigurationVersionId: string;
   readonly trigger: "manual" | "schedule";
 }
 
+/** See {@link KnowledgeSynchronizePayload}. */
 export interface KnowledgeFullRescanPayload {
   readonly sourceId: string;
-  /** Immutable source configuration selected when the command was accepted. */
-  readonly configurationVersion: string;
+  readonly sourceConfigurationVersionId: string;
+  readonly connectorConfigurationVersionId: string;
   readonly trigger: "manual" | "schedule";
 }
 
 export interface RetentionReapPayload {
   readonly reason: "scheduled" | "operator";
+  /** Optional so existing v1 commands remain valid after this bounded hint. */
+  readonly limit?: number;
 }
 
 export interface RetentionPurgePayload {
@@ -96,12 +162,15 @@ export interface DiagnosticsExportGeneratePayload {
 
 export type EnvelopePayloadByType = {
   readonly "analysis.execute.v1": AnalysisExecutePayload;
-  readonly "analysis.trigger.v1": AnalysisTriggerPayload;
+  readonly "analysis.trigger.v1": LegacyAnalysisTriggerPayload;
+  readonly "analysis.trigger.v2": AnalysisTriggerPayload;
   readonly "publication.execute.v1": PublicationExecutePayload;
   readonly "publication.reconcile.v1": PublicationReconcilePayload;
   readonly "analysis.completed.v1": AnalysisCompletedPayload;
-  readonly "knowledge.synchronize.v1": KnowledgeSynchronizePayload;
-  readonly "knowledge.full-rescan.v1": KnowledgeFullRescanPayload;
+  readonly "knowledge.synchronize.v1": LegacyKnowledgeSynchronizePayload;
+  readonly "knowledge.full-rescan.v1": LegacyKnowledgeFullRescanPayload;
+  readonly "knowledge.synchronize.v2": KnowledgeSynchronizePayload;
+  readonly "knowledge.full-rescan.v2": KnowledgeFullRescanPayload;
   readonly "retention.reap.v1": RetentionReapPayload;
   readonly "retention.purge.v1": RetentionPurgePayload;
   readonly "diagnostics.export.generate.v1": DiagnosticsExportGeneratePayload;
@@ -125,7 +194,17 @@ export type EnvelopeFor<Type extends EnvelopeType = EnvelopeType> =
 
 export type Envelope = EnvelopeFor;
 
-export type EnvelopeInput<Type extends EnvelopeType> = Omit<
+type LegacyKnowledgeEnvelopeType =
+  | "knowledge.synchronize.v1"
+  | "knowledge.full-rescan.v1";
+
+/** Types that trusted producers may create for new durable work. */
+export type EmittableEnvelopeType = Exclude<
+  EnvelopeType,
+  LegacyKnowledgeEnvelopeType
+>;
+
+export type EnvelopeInput<Type extends EmittableEnvelopeType> = Omit<
   EnvelopeFor<Type>,
   "payload"
 > & {
@@ -216,6 +295,66 @@ function parsePayload(
                 ),
               }),
             }),
+        legacy: true,
+      });
+    }
+    case "analysis.trigger.v2": {
+      const source = requireString(payload.source, "source");
+      if (
+        source !== "manual" &&
+        source !== "schedule" &&
+        source !== "webhook"
+      ) {
+        throw new DomainValidationError("Envelope payload is invalid.", {
+          field: "source",
+        });
+      }
+      if (!isRecord(payload.target)) {
+        throw new DomainValidationError("Envelope payload is invalid.", {
+          field: "target",
+        });
+      }
+      return Object.freeze({
+        triggerRequestId: analysisTriggerRequestId(
+          requireNonEmptyString(payload.triggerRequestId, "triggerRequestId"),
+        ),
+        triggerId: analysisTriggerId(
+          requireNonEmptyString(payload.triggerId, "triggerId"),
+        ),
+        triggerVersionId: analysisTriggerVersionId(
+          requireNonEmptyString(payload.triggerVersionId, "triggerVersionId"),
+        ),
+        connectorRegistrationId: requireNonEmptyString(
+          payload.connectorRegistrationId,
+          "connectorRegistrationId",
+        ),
+        connectorConfigurationVersionId: requireNonEmptyString(
+          payload.connectorConfigurationVersionId,
+          "connectorConfigurationVersionId",
+        ),
+        source,
+        ...(payload.occurrenceKey === undefined
+          ? {}
+          : {
+              occurrenceKey: requireNonEmptyString(
+                payload.occurrenceKey,
+                "occurrenceKey",
+              ),
+            }),
+        target: Object.freeze({
+          connectorInstanceId: requireNonEmptyString(
+            payload.target.connectorInstanceId,
+            "target.connectorInstanceId",
+          ),
+          resourceType: requireNonEmptyString(
+            payload.target.resourceType,
+            "target.resourceType",
+          ),
+          externalId: requireNonEmptyString(
+            payload.target.externalId,
+            "target.externalId",
+          ),
+        }),
       });
     }
     case "publication.execute.v1":
@@ -254,6 +393,28 @@ function parsePayload(
           "configurationVersion",
         ),
         trigger,
+        legacy: true,
+      });
+    }
+    case "knowledge.synchronize.v2":
+    case "knowledge.full-rescan.v2": {
+      const trigger = requireString(payload.trigger, "trigger");
+      if (trigger !== "manual" && trigger !== "schedule") {
+        throw new DomainValidationError("Envelope payload is invalid.", {
+          field: "trigger",
+        });
+      }
+      return Object.freeze({
+        sourceId: requireNonEmptyString(payload.sourceId, "sourceId"),
+        sourceConfigurationVersionId: requireNonEmptyString(
+          payload.sourceConfigurationVersionId,
+          "sourceConfigurationVersionId",
+        ),
+        connectorConfigurationVersionId: requireNonEmptyString(
+          payload.connectorConfigurationVersionId,
+          "connectorConfigurationVersionId",
+        ),
+        trigger,
       });
     }
     case "retention.reap.v1": {
@@ -263,7 +424,22 @@ function parsePayload(
           field: "reason",
         });
       }
-      return Object.freeze({ reason });
+      const limit = payload.limit;
+      if (
+        limit !== undefined &&
+        (typeof limit !== "number" ||
+          !Number.isInteger(limit) ||
+          limit < 1 ||
+          limit > 1_000)
+      ) {
+        throw new DomainValidationError("Envelope payload is invalid.", {
+          field: "limit",
+        });
+      }
+      return Object.freeze({
+        reason,
+        ...(limit === undefined ? {} : { limit }),
+      });
     }
     case "retention.purge.v1":
       return Object.freeze({
@@ -304,7 +480,7 @@ function parseTraceContext(value: unknown): TraceContext | undefined {
   });
 }
 
-function parseEnvelope(value: unknown): Envelope {
+function parseEnvelope(value: unknown, allowLegacy: boolean): Envelope {
   if (!isRecord(value)) {
     throw new DomainValidationError("Envelope is invalid.");
   }
@@ -315,17 +491,32 @@ function parseEnvelope(value: unknown): Envelope {
     ![
       "analysis.execute.v1",
       "analysis.trigger.v1",
+      "analysis.trigger.v2",
       "publication.execute.v1",
       "publication.reconcile.v1",
       "analysis.completed.v1",
       "knowledge.synchronize.v1",
       "knowledge.full-rescan.v1",
+      "knowledge.synchronize.v2",
+      "knowledge.full-rescan.v2",
       "retention.reap.v1",
       "retention.purge.v1",
       "diagnostics.export.generate.v1",
     ].includes(type)
   ) {
     throw new DomainValidationError("Envelope type is unsupported.");
+  }
+  if (
+    !allowLegacy &&
+    (type === "knowledge.synchronize.v1" ||
+      type === "knowledge.full-rescan.v1" ||
+      type === "analysis.trigger.v1")
+  ) {
+    throw new DomainValidationError(
+      type === "analysis.trigger.v1"
+        ? "Legacy analysis trigger command envelopes cannot be emitted."
+        : "Legacy knowledge command envelopes cannot be emitted.",
+    );
   }
   const requiredKind =
     type === "analysis.completed.v1" ? "domainEvent" : "command";
@@ -352,12 +543,12 @@ function parseEnvelope(value: unknown): Envelope {
   return Object.freeze(envelope) as Envelope;
 }
 
-export function createEnvelope<Type extends EnvelopeType>(
+export function createEnvelope<Type extends EmittableEnvelopeType>(
   input: EnvelopeInput<Type>,
 ): EnvelopeFor<Type> {
-  return parseEnvelope(input) as EnvelopeFor<Type>;
+  return parseEnvelope(input, false) as EnvelopeFor<Type>;
 }
 
 export function deserializeEnvelope(value: unknown): Envelope {
-  return parseEnvelope(value);
+  return parseEnvelope(value, true);
 }

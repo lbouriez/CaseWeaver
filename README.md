@@ -87,16 +87,40 @@ orchestrator prompt for beginning implementation with independent subagents.
 
 ## Status
 
-The core pipeline and PBI-016 operator console are implemented. The console's secure
-cookie-session administration API, immutable configuration/audit boundary, and static
-runtime configuration are runnable locally; its completed delivery record is in
-[`temp/pbi/PBI-016-react-admin-operator-console.md`](temp/pbi/PBI-016-react-admin-operator-console.md).
-PBI-017 remains the future release-packaging, TLS-edge, and CI delivery item. Detailed
-contracts in `.features` remain authoritative.
+PBI-013 production operations and PBI-016’s operator console are accepted. The current
+local Docker topology runs the real control plane, Admin UI, webhook ingress, scheduler,
+durable worker, migrations, and PostgreSQL; it is the supported way to evaluate the
+integrated system. PBI-017 release hardening is still in progress: production TLS,
+release-profile runtime exercise, backup/restore, image-vulnerability policy, and
+provenance/attestation verification are not yet claimed complete. Detailed contracts in
+`.features` remain authoritative.
 
-## Run locally
+## Quick Docker evaluation
 
-Prerequisites: Node.js 22.12 or later, Corepack, pnpm 11.12, and Docker Desktop (or a
+The fastest way to start the complete disposable solution—database, migrations, queue
+migration, API, Admin UI, edge, webhook, scheduler, and worker—is:
+
+```powershell
+docker compose -f deploy\docker\compose.local.yml up --build --wait
+```
+
+Open `http://localhost:8080` and sign in as `admin` / `admin`. These credentials exist
+only in the loopback-only development Compose stack; they are not a production default.
+The only published port is the edge; PostgreSQL, scheduler, worker, and webhook remain
+private inside the Compose network. The command is deliberately disposable:
+
+```powershell
+docker compose -f deploy\docker\compose.local.yml down -v
+```
+
+It exercises real image builds, PostgreSQL/queue migrations, API readiness, same-origin
+cookie sessions, the browser artifact, and all durable process roles. See [the Docker
+guide](deploy/docker/README.md) for the difference between the local, test, Admin bridge,
+and production Compose files, plus OIDC and digest-pinned image setup.
+
+## Run from source
+
+Prerequisites: Node.js 22.13 or later, Corepack, pnpm 11.12, and Docker Desktop (or a
 compatible Docker Engine with Compose). The disposable database is intentionally
 separate from production deployment assets.
 
@@ -110,16 +134,15 @@ pnpm typecheck
 pnpm test
 ```
 
-Run the API in another PowerShell window. The console uses OIDC only through the API;
-the browser never receives a provider token. Configure a standards-compliant local or
-development OIDC client first, including its registered callback URL
-`https://.../v1/auth/callback`. For local OIDC testing, place a local TLS terminator
-in front of API port 3000 and register that HTTPS URL with the provider; the API itself
-does not terminate TLS. PBI-017 will package the production edge, but it is not needed
-to run the application behind an existing local reverse proxy.
-For a fresh database, set the initial administrator's stable OIDC `sub` claim once;
-the API creates the workspace, principal, administrator role, and OIDC mapping in one
-transaction. Remove the two bootstrap variables after that mapping exists.
+Run the API in another PowerShell window. The browser never receives a provider token.
+For a development password session, set `ADMIN_ALLOWED_ORIGINS` and use the explicit
+development-only `ADMIN_LOGIN` / `ADMIN_PASSWORD` values below. For OIDC, configure a
+standards-compliant client and its registered HTTPS callback URL
+`https://.../v1/auth/callback`; place a TLS terminator in front of the API for that
+flow. The API itself does not terminate TLS and production TLS remains PBI-017 work.
+For a fresh OIDC database, set the initial administrator's stable `sub` claim once; the
+API creates the workspace, principal, administrator role, and OIDC mapping atomically.
+Remove bootstrap variables after the mapping exists.
 
 ```powershell
 $env:NODE_ENV = "development"
@@ -129,23 +152,24 @@ $env:DATABASE_URL = "postgresql://caseweaver:caseweaver@localhost:54329/caseweav
 $env:API_WORKSPACE_ID = "local-workspace"
 $env:API_PRINCIPAL_ID = "local-administrator"
 $env:DATABASE_READINESS_TIMEOUT_MS = "5000"
-$env:OIDC_ISSUER = "https://issuer.example"
-$env:OIDC_CLIENT_ID = "caseweaver-admin"
-$env:OIDC_CALLBACK_URL = "https://api.example/v1/auth/callback" # TLS proxy -> 127.0.0.1:3000
-$env:OIDC_EPHEMERAL_ENCRYPTION_KEY = node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))"
-$env:OIDC_EPHEMERAL_KEY_ID = "local-key-1"
 $env:ADMIN_ALLOWED_ORIGINS = "http://127.0.0.1:8082"
-$env:ADMIN_BOOTSTRAP_OIDC_SUBJECT = "stable-subject-from-your-oidc-provider"
-$env:ADMIN_BOOTSTRAP_DISPLAY_NAME = "Initial Administrator"
+$env:ADMIN_LOGIN = "admin"
+$env:ADMIN_PASSWORD = "admin"
 pnpm --filter @caseweaver/api start
 ```
 
-Build and serve the administration SPA in a third window. Its Docker bridge contains
-only static files and a public runtime API URL; it has no database, queue, provider,
-connector, object-storage, OIDC secret, or browser token access:
+To use OIDC instead, set `ADMIN_DISABLE_LOGIN_AUTHENTICATION=true` plus
+`OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CALLBACK_URL`,
+`OIDC_EPHEMERAL_ENCRYPTION_KEY`, `OIDC_EPHEMERAL_KEY_ID`,
+`ADMIN_BOOTSTRAP_OIDC_SUBJECT`, and `ADMIN_BOOTSTRAP_DISPLAY_NAME` before starting the
+API.
+
+Serve the administration SPA in a third window when the API is already running outside
+the local Docker stack. Its Docker image contains only static files and a public runtime
+API URL; it has no database, queue, provider, connector, object-storage, OIDC secret,
+or browser token access:
 
 ```powershell
-pnpm --filter @caseweaver/admin build
 $env:CASEWEAVER_ADMIN_API_BASE_URL = "https://api.example"
 $env:CASEWEAVER_ADMIN_UI_TITLE = "CaseWeaver Control Room"
 docker compose -f deploy\docker\compose.admin.yml up --build -d --wait

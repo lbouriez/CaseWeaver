@@ -1,107 +1,147 @@
-# Docker deployment
+# Docker delivery
 
-**PBIs:** 001, 013, 016
-
-`compose.production.yml` is a production Compose example with two mutually exclusive
-runtime profiles:
-
-- `standalone`: API, webhook, scheduler, relay, and worker lifecycle co-located in one
-  service.
-- `distributed`: separate API, webhook, scheduler, and worker services.
-
-Both use the same PostgreSQL volume, Prisma schema, pg-boss schema, queue name, durable
-outbox envelopes, and worker handlers. Never start both profiles against one deployment.
-To move modes, stop the old profile, retain `caseweaver_postgres_data`, then start the
-other profile after a successful migration. Do not delete the volume; queued envelopes
-and leases are durable state.
-
-## Production startup
-
-Set an immutable `CASEWEAVER_IMAGE` and create two local files containing only the
-database URL and PostgreSQL password. The Compose process reads them as Docker secrets;
-do not put either value in an environment file or command line.
+There is one supported **minimum-interaction evaluation stack**:
 
 ```powershell
-$env:CASEWEAVER_IMAGE = "registry.example/caseweaver@sha256:replace-me"
-$env:CASEWEAVER_DATABASE_URL_FILE = "C:\secrets\caseweaver-database-url.txt"
-$env:CASEWEAVER_POSTGRES_PASSWORD_FILE = "C:\secrets\caseweaver-postgres-password.txt"
-docker compose -f deploy\docker\compose.production.yml --profile migrate run --rm migrate
-docker compose -f deploy\docker\compose.production.yml --profile standalone up -d
+docker compose -f deploy\docker\compose.local.yml up --build --wait
 ```
 
-For distributed mode, replace the final command with:
+It starts a disposable PostgreSQL/pgvector database, applies Prisma and pg-boss
+migrations, then runs the API, Admin UI, edge proxy, webhook ingress, scheduler, and
+durable worker. Open `http://localhost:8080`; sign in as `admin` / `admin`. Those
+credentials exist only because this Compose file is a loopback-only development/test
+stack (`NODE_ENV=development`). Stop and remove its data with:
 
 ```powershell
-docker compose -f deploy\docker\compose.production.yml --profile distributed up -d
+docker compose -f deploy\docker\compose.local.yml down -v
 ```
 
-The release image must provide `caseweaver-migrate`, `caseweaver-standalone`,
-`caseweaver-api`, `caseweaver-webhook`, `caseweaver-scheduler`, and
-`caseweaver-worker` commands. `caseweaver-migrate` runs Prisma migrations followed by
-the pinned pg-boss migration before runtime services start; runtime roles must not have
-DDL permissions. `entrypoint.sh` reads the database URL secret only inside the
-container, exports it for the selected process, and never prints it.
-
-Set `OTEL_EXPORTER_OTLP_ENDPOINT` only when an OTLP collector is available. Applications
-then use real OTLP/HTTP trace and metric exporters; leaving it empty produces no SDK or
-fake telemetry. The database is isolated on an internal Docker network. Runtime
-services have a separate egress network for the collector and configured providers.
-
-## Local administration-console bridge
-
-`compose.admin.yml` is a deliberately small, local static-hosting bridge for the
-PBI-016 admin artifact. It does not replace the PBI-017 production image, TLS edge, or
-release process. It has no database URL, Docker secret, queue, connector, provider, or
-object-storage mount. It binds only to loopback and requires a separately running API.
-
-Build the browser artifact first, then supply its **public** API base URL. The API URL
-must use HTTPS except for localhost development. Do not put OIDC credentials, bearer
-tokens, connector credentials, or database values in either variable.
+The edge is the only published local port. It routes `/v1/` and `/health/` to the API,
+`/webhooks/` to webhook ingress, and all other requests to the static Admin UI. Verify
+the running stack without exposing database or worker ports:
 
 ```powershell
-pnpm --filter @caseweaver/admin build
-$env:CASEWEAVER_ADMIN_API_BASE_URL = "http://127.0.0.1:3000"
-$env:CASEWEAVER_ADMIN_UI_TITLE = "CaseWeaver Control Room"
-docker compose -f deploy\docker\compose.admin.yml up --build -d --wait
+curl.exe --fail http://localhost:8080/health/live
+curl.exe --fail http://localhost:8080/health/ready
+curl.exe --fail http://localhost:8080/runtime-config.json
 ```
 
-Open `http://127.0.0.1:8082`. The container generates `/runtime-config.json` in its
-read-only runtime filesystem and serves it with `Cache-Control: no-store`; it is the
-same credential-free public contract consumed by `apps/admin`. The static artifact is
-mounted read-only. Stop the bridge with:
+Use local environment overrides only when you need to test a different development
+administrator. Never expose this stack or retain its database/derived key material:
 
 ```powershell
-docker compose -f deploy\docker\compose.admin.yml down
+$env:ADMIN_LOGIN = "operator"
+$env:ADMIN_PASSWORD = "change-this-before-sharing-the-ui"
+docker compose -f deploy\docker\compose.local.yml up --build --wait
 ```
 
-This bridge is intentionally not an authentication or TLS boundary. Run it only for
-local development until PBI-017 provides a TLS edge and digest-pinned release images.
-The API remains responsible for OIDC sessions, cookies, CSRF, origin validation,
-authorization, auditing, and all secret handling.
+## Why there are several Compose files
 
-## Disposable test PostgreSQL
+| File | One job | What it starts |
+| --- | --- | --- |
+| `compose.local.yml` | The complete disposable local evaluation stack. | Database, migrations, queue migration, API, Admin, edge, webhook, scheduler, worker. |
+| `compose.test.yml` | Dependency-only integration-test database. | PostgreSQL/pgvector at port `54329`; applications run on the host test runner. |
+| `compose.admin.yml` | Static UI bridge for an API already hosted elsewhere. | Admin image only; it has no access to a database, queue, secrets, connectors, or providers. |
+| `compose.production.yml` | Operator topology using already-published, digest-pinned images. | Database plus either standalone or distributed runtime roles. It intentionally does not provide TLS, backup/restore, or production secret provisioning. |
 
-Start PostgreSQL 17 with pgvector:
+Only `compose.local.yml` is the simple “start the whole project” command. The other
+files are not alternatives to it.
 
-```powershell
-docker compose -f deploy\docker\compose.test.yml up -d --wait
-```
+## Images and local topology
 
-Fresh test volumes initialize the `vector` extension automatically. Container health
-requires the extension to exist.
+`Dockerfile` produces seven non-root final targets:
 
-Default test connection:
+- `migration`: versioned Prisma migration runner, separate from the API image.
+- `api`: cookie-session administration/control-plane API.
+- `admin`: static React-Admin console and public runtime-config generator only.
+- `worker`: durable queue worker and outbox relay.
+- `scheduler`: durable knowledge and analysis schedule producer.
+- `webhook`: verified public webhook ingress.
+- `standalone`: the same API, worker, scheduler, and webhook semantics in one process.
+
+All runtime images use digest-pinned base images and OCI source/version/revision labels.
+The Admin image contains neither Node, database libraries, connector/provider code,
+OIDC credentials, nor application secrets.
+
+The local Compose file builds these targets from the checked-out source. It runs real
+Prisma migrations followed by the pg-boss queue migration before application roles are
+allowed to start. It is therefore suitable for exercising the actual UI/API/worker
+boundary, but is not a production deployment.
+
+## Published-image production topology
+
+The `v*` release workflow publishes all seven targets to:
 
 ```text
-postgresql://caseweaver:caseweaver@localhost:54329/caseweaver_test
+${CASEWEAVER_CONTAINER_REGISTRY:-ghcr.io}/${owner}/caseweaver-{target}
 ```
 
-Reset to a clean database:
+It builds every final target on pull requests and `main`; a version tag publishes only
+after the local Compose smoke completes, then a clean job pulls each release image.
+Operators must use an immutable `image@sha256:...` reference in production, never a
+mutable release tag.
+
+`compose.production.yml` expects explicit pinned values for
+`CASEWEAVER_MIGRATION_IMAGE`, `CASEWEAVER_API_IMAGE`,
+`CASEWEAVER_WORKER_IMAGE`, `CASEWEAVER_SCHEDULER_IMAGE`,
+`CASEWEAVER_WEBHOOK_IMAGE`, and `CASEWEAVER_STANDALONE_IMAGE`. It also requires Docker
+secret files for the database URL and PostgreSQL password, and production API
+configuration such as `API_WORKSPACE_ID`, `API_PRINCIPAL_ID`, and the HTTPS
+`ADMIN_ALLOWED_ORIGINS` value.
+
+Run the migration profile once, wait for it to exit successfully, then choose exactly
+one runtime profile:
 
 ```powershell
-docker compose -f deploy\docker\compose.test.yml down -v
-docker compose -f deploy\docker\compose.test.yml up -d --wait
+docker compose -f deploy\docker\compose.production.yml --profile migrate run --rm migrate
+docker compose -f deploy\docker\compose.production.yml --profile distributed up -d
+# or: docker compose -f deploy\docker\compose.production.yml --profile standalone up -d
 ```
 
-The credentials are intentionally local test defaults and must not be reused in a
-production Compose profile.
+Production password login is off by default. Configure OIDC, or explicitly set
+`ADMIN_ENABLE_PASSWORD_AUTHENTICATION=true` with non-default deployment credentials.
+No browser receives those credentials, database URLs, connector/provider secrets, or
+repository checkout material.
+
+This is deliberately still PBI-017 work in progress: an external TLS edge, managed
+secret integration, backup/restore drill, image vulnerability policy, and provenance/
+attestation verification are not claimed by this reference Compose file.
+
+## OIDC in the local stack
+
+Password login is enough for local evaluation. To exercise OIDC, set all required
+values before starting Compose. The callback and origin must be real HTTPS URLs; the
+loopback edge is not a public OIDC deployment.
+
+```powershell
+$env:OIDC_ISSUER = "https://issuer.example.com"
+$env:OIDC_CLIENT_ID = "caseweaver-local"
+$env:OIDC_CALLBACK_URL = "https://caseweaver-local.example.com/v1/auth/callback"
+$env:OIDC_EPHEMERAL_ENCRYPTION_KEY = node -e "process.stdout.write(require('node:crypto').randomBytes(32).toString('base64url'))"
+$env:OIDC_EPHEMERAL_KEY_ID = "local-key-1"
+$env:ADMIN_BOOTSTRAP_OIDC_SUBJECT = "issuer-stable-subject"
+$env:ADMIN_BOOTSTRAP_DISPLAY_NAME = "Local administrator"
+$env:ADMIN_DISABLE_LOGIN_AUTHENTICATION = "true"
+docker compose -f deploy\docker\compose.local.yml up --build --wait
+```
+
+## Test database and Admin bridge
+
+For host-run PostgreSQL/pgvector integration tests:
+
+```powershell
+docker compose -f deploy\docker\compose.test.yml up -d --wait
+$env:DATABASE_URL = "postgresql://caseweaver:caseweaver@localhost:54329/caseweaver_test"
+pnpm test:integration
+docker compose -f deploy\docker\compose.test.yml down -v
+```
+
+`compose.admin.yml` is only for an API that is already running elsewhere:
+
+```powershell
+$env:CASEWEAVER_ADMIN_API_BASE_URL = "https://api.example.com"
+docker compose -f deploy\docker\compose.admin.yml up --build --wait
+```
+
+It exposes the UI on `http://127.0.0.1:8082` and is not a TLS or authentication
+boundary; the API owns authentication, authorization, CSRF, auditing, and secrets.

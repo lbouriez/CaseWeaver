@@ -4,6 +4,9 @@ import type {
   AnalysisJobId,
   AnalysisProfileVersionId,
   AnalysisResultId,
+  AnalysisTriggerId,
+  AnalysisTriggerRequestId,
+  AnalysisTriggerVersionId,
   CaseSnapshotId,
   CorrelationId,
   Envelope,
@@ -40,6 +43,7 @@ export type IdentifierKind =
   | "auditEvent"
   | "analysisIdentity"
   | "analysisJob"
+  | "analysisTriggerRequest"
   | "publicationIntent"
   | "publicationAttempt"
   | "outboxEnvelope"
@@ -206,6 +210,201 @@ export interface AnalysisRequestStore {
   ): Promise<void>;
 }
 
+/** Opaque target identifiers are validated at the transport/domain boundary. */
+export interface AnalysisTriggerTarget {
+  readonly connectorInstanceId: string;
+  readonly resourceType: string;
+  readonly externalId: string;
+}
+
+export type AnalysisTriggerSource = "manual" | "schedule" | "webhook";
+
+/**
+ * Unpersisted normalized case content. The persistence adapter assigns the
+ * snapshot identifier and deduplicates it under the exact workspace target.
+ * This port is server-private and must never be implemented at an HTTP/API
+ * boundary or populated with connector settings/credential locators.
+ */
+export interface CapturedCaseSnapshot {
+  readonly revision: string;
+  readonly capturedAt: UtcInstant;
+  readonly title: string;
+  readonly summary: string;
+  readonly contentHash: Sha256Digest;
+  readonly messages: readonly Readonly<{
+    readonly id: string;
+    readonly content: string;
+    readonly contentHash: Sha256Digest;
+  }>[];
+  /**
+   * Case-source attachment references observed with this immutable capture.
+   * They are opaque connector references only: PostgreSQL resolves them to
+   * already completed, verified derivatives while the snapshot transaction is
+   * open. A later attachment upload or derivative must never alter an existing
+   * snapshot's evidence set.
+   */
+  readonly attachmentReferences?: readonly Readonly<{
+    readonly connectorRegistrationId: string;
+    readonly resourceType: string;
+    readonly externalId: string;
+  }>[];
+}
+
+/** Immutable request material returned only from the durable trigger store. */
+export interface AnalysisTriggerRequest {
+  readonly id: AnalysisTriggerRequestId;
+  readonly workspaceId: WorkspaceId;
+  /** Principal authorized when the durable request was first accepted. */
+  readonly actorPrincipalId: PrincipalId;
+  readonly triggerId: AnalysisTriggerId;
+  readonly triggerVersionId: AnalysisTriggerVersionId;
+  readonly analysisProfileVersionId: AnalysisProfileVersionId;
+  readonly connectorRegistrationId: string;
+  readonly connectorConfigurationVersionId: string;
+  readonly source: AnalysisTriggerSource;
+  readonly occurrenceKey?: string;
+  readonly target: AnalysisTriggerTarget;
+  readonly idempotencyKeyDigest: Sha256Digest;
+  readonly requestDigest: Sha256Digest;
+}
+
+export interface ClaimedAnalysisTriggerRequest {
+  readonly request: AnalysisTriggerRequest;
+  /** Database-issued monotonic token required for capture writes. */
+  readonly fencingToken: bigint;
+}
+
+/**
+ * A captured request is converted to the existing PBI-011 command while the
+ * trigger-request row remains locked. The command carries only hashes and
+ * immutable IDs; profile settings and snapshot content stay server-private.
+ */
+export interface PreparedAnalysisTriggerSubmission {
+  readonly request: AnalysisTriggerRequest;
+  readonly command: import("./use-cases.js").RequestAnalysisCommand;
+}
+
+/**
+ * Creates server-owned durable trigger requests, and coordinates an expiring,
+ * fenced capture claim. It never exposes connector settings, secret locators,
+ * clients, or raw webhook input.
+ */
+export interface AnalysisTriggerRequestStore {
+  createOrFind(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly id: AnalysisTriggerRequestId;
+      readonly workspaceId: WorkspaceId;
+      readonly actorPrincipalId: PrincipalId;
+      readonly triggerId: AnalysisTriggerId;
+      /**
+       * Automated ingress may retain the exact immutable trigger revision that
+       * accepted an event. Omitting it is permitted only for an authorized
+       * interactive request that resolves the current active revision inside
+       * this transaction.
+       */
+      readonly expectedTriggerVersionId?: AnalysisTriggerVersionId;
+      readonly source: AnalysisTriggerSource;
+      readonly occurrenceKey?: string;
+      readonly target: AnalysisTriggerTarget;
+      readonly idempotencyKeyDigest: Sha256Digest;
+      readonly requestDigest: Sha256Digest;
+      readonly occurredAt: UtcInstant;
+    },
+  ): Promise<
+    | Readonly<{
+        readonly kind: "created";
+        readonly request: AnalysisTriggerRequest;
+      }>
+    | Readonly<{
+        readonly kind: "replayed";
+        readonly request: AnalysisTriggerRequest;
+      }>
+  >;
+  claimCapture(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly command: import("@caseweaver/domain").EnvelopeFor<"analysis.trigger.v2">;
+      readonly leaseMs: number;
+    },
+  ): Promise<
+    | Readonly<{
+        readonly kind: "claimed";
+        readonly claim: ClaimedAnalysisTriggerRequest;
+      }>
+    | Readonly<{
+        readonly kind: "captured";
+        readonly caseSnapshotId: CaseSnapshotId;
+        /** Exact immutable request that previously captured this snapshot. */
+        readonly request: AnalysisTriggerRequest;
+      }>
+    | Readonly<{ readonly kind: "alreadyCapturing" }>
+    | Readonly<{ readonly kind: "unavailable" }>
+    | Readonly<{ readonly kind: "notFound" }>
+  >;
+  persistCapture(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly claim: ClaimedAnalysisTriggerRequest;
+      readonly snapshot: CapturedCaseSnapshot;
+    },
+  ): Promise<CaseSnapshotId>;
+  failCapture(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly claim: ClaimedAnalysisTriggerRequest;
+      readonly error: { readonly code: string; readonly retryable: boolean };
+      readonly occurredAt: UtcInstant;
+    },
+  ): Promise<void>;
+  /**
+   * Locks and revalidates a captured v2 request, then derives the exact
+   * PBI-011 request command from the retained snapshot and profile version.
+   */
+  prepareAnalysisSubmission(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly command: import("@caseweaver/domain").EnvelopeFor<"analysis.trigger.v2">;
+    },
+  ): Promise<
+    | Readonly<{
+        readonly kind: "ready";
+        readonly submission: PreparedAnalysisTriggerSubmission;
+      }>
+    | Readonly<{
+        readonly kind: "submitted";
+        readonly analysisJobId: AnalysisJobId;
+      }>
+    | Readonly<{ readonly kind: "notCaptured" | "notFound" | "unavailable" }>
+  >;
+  /**
+   * Commits the immutable trigger-request to analysis-job relationship in the
+   * same transaction that creates/replays PBI-011 analysis work.
+   */
+  bindAnalysisJob(
+    transaction: ApplicationTransaction,
+    input: {
+      readonly workspaceId: WorkspaceId;
+      readonly triggerRequestId: AnalysisTriggerRequestId;
+      readonly analysisJobId: AnalysisJobId;
+      readonly occurredAt: UtcInstant;
+    },
+  ): Promise<void>;
+}
+
+/**
+ * Trusted composition resolves a CaseSource privately from the immutable pins
+ * in the claim and supplies only normalized case content for durable capture.
+ */
+export interface TriggeredCaseSnapshotCapture {
+  capture(
+    input: Readonly<{
+      readonly request: AnalysisTriggerRequest;
+      readonly signal: AbortSignal;
+    }>,
+  ): Promise<CapturedCaseSnapshot>;
+}
+
 /**
  * The source command store deliberately owns only source lifecycle, immutable
  * configuration resolution, and command idempotency.  It does not expose
@@ -216,7 +415,8 @@ export type KnowledgeSourceCommandKind = "synchronize" | "fullRescan";
 export interface StoredKnowledgeSourceCommand {
   readonly requestDigest: Sha256Digest;
   readonly outboxEnvelopeId: import("@caseweaver/domain").OutboxEnvelopeId;
-  readonly configurationVersion: string;
+  readonly sourceConfigurationVersionId: string;
+  readonly connectorConfigurationVersionId: string;
   readonly kind: KnowledgeSourceCommandKind;
 }
 
@@ -245,7 +445,8 @@ export interface KnowledgeSourceCommandStore {
       readonly keyDigest: Sha256Digest;
       readonly requestDigest: Sha256Digest;
       readonly outboxEnvelopeId: import("@caseweaver/domain").OutboxEnvelopeId;
-      readonly configurationVersion: string;
+      readonly sourceConfigurationVersionId: string;
+      readonly connectorConfigurationVersionId: string;
       readonly kind: KnowledgeSourceCommandKind;
       readonly occurredAt: UtcInstant;
     },
@@ -257,7 +458,8 @@ export interface KnowledgeSourceCommandStore {
     | Readonly<{
         readonly id: string;
         readonly lifecycle: "enabled" | "disabled";
-        readonly configurationVersion: string;
+        readonly sourceConfigurationVersionId: string;
+        readonly connectorConfigurationVersionId: string;
       }>
     | undefined
   >;
@@ -286,6 +488,8 @@ export interface StoredPublicationProfile {
   readonly id: string;
   readonly version: string;
   readonly destinationConnectorInstanceId: string;
+  /** Immutable connector-instance configuration selected by this profile version. */
+  readonly destinationConnectorConfigurationVersionId: string;
   readonly policy: {
     readonly mode: "previewOnly" | "approvalRequired" | "autoPublishInternal";
     readonly visibility: "internal";
@@ -474,9 +678,32 @@ export interface CostAttributionQuery {
   readonly limit: number;
 }
 
+/**
+ * Immutable, deployment-neutral identity for a retained object.
+ *
+ * A storage key is meaningful only together with the workspace and the
+ * backend that created it. Callers must never infer a backend from current
+ * runtime configuration when processing historical work.
+ */
+export interface RetentionObjectReference {
+  readonly workspaceId: WorkspaceId;
+  readonly storageBackendId: string;
+  readonly key: string;
+}
+
 export interface RetentionWorkItem {
   readonly id: string;
   readonly workspaceId: WorkspaceId;
+  /**
+   * Canonical deletion target. It is optional temporarily so adapters can
+   * read historical work during the backend-aware attachment migration.
+   */
+  readonly objectReference?: RetentionObjectReference;
+  /**
+   * Historical persistence shape retained only for adapter compatibility.
+   * Application code must not send it to object storage or choose a backend
+   * for it. Migrations must either populate `objectReference` or block it.
+   */
   readonly storageKey?: string;
 }
 

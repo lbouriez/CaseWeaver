@@ -1,11 +1,11 @@
 import {
   correlationId,
+  type Envelope,
   principalId,
   requestId,
   sha256Digest,
   utcInstant,
   workspaceId,
-  type Envelope,
 } from "@caseweaver/domain";
 import type { AuditRecord } from "@caseweaver/security";
 import { describe, expect, it } from "vitest";
@@ -57,12 +57,14 @@ class SourceStore implements KnowledgeSourceCommandStore {
     | {
         readonly id: string;
         readonly lifecycle: "enabled" | "disabled";
-        readonly configurationVersion: string;
+        readonly sourceConfigurationVersionId: string;
+        readonly connectorConfigurationVersionId: string;
       }
     | undefined = {
     id: "source-1",
     lifecycle: "enabled",
-    configurationVersion: "source-configuration-1",
+    sourceConfigurationVersionId: "source-configuration-1",
+    connectorConfigurationVersionId: "connector-configuration-1",
   };
   public fullRescanAvailable = true;
   public readonly idempotency = new Map<
@@ -86,7 +88,8 @@ class SourceStore implements KnowledgeSourceCommandStore {
     this.idempotency.set(input.keyDigest, {
       requestDigest: input.requestDigest,
       outboxEnvelopeId: input.outboxEnvelopeId,
-      configurationVersion: input.configurationVersion,
+      sourceConfigurationVersionId: input.sourceConfigurationVersionId,
+      connectorConfigurationVersionId: input.connectorConfigurationVersionId,
       kind: input.kind,
     });
   }
@@ -169,15 +172,17 @@ describe("RequestKnowledgeSourceSynchronization", () => {
 
     expect(result).toMatchObject({
       status: "queued",
-      configurationVersion: "source-configuration-1",
+      sourceConfigurationVersionId: "source-configuration-1",
+      connectorConfigurationVersionId: "connector-configuration-1",
       replayed: false,
     });
     expect(outbox.envelopes).toHaveLength(1);
     expect(outbox.envelopes[0]).toMatchObject({
-      type: "knowledge.synchronize.v1",
+      type: "knowledge.synchronize.v2",
       payload: {
         sourceId: "source-1",
-        configurationVersion: "source-configuration-1",
+        sourceConfigurationVersionId: "source-configuration-1",
+        connectorConfigurationVersionId: "connector-configuration-1",
         trigger: "manual",
       },
     });
@@ -253,8 +258,8 @@ describe("RequestKnowledgeSourceSynchronization", () => {
       ),
     ).resolves.toMatchObject({ status: "queued" });
     expect(outbox.envelopes.map((envelope) => envelope.type)).toEqual([
-      "knowledge.full-rescan.v1",
-      "knowledge.synchronize.v1",
+      "knowledge.full-rescan.v2",
+      "knowledge.synchronize.v2",
     ]);
     expect(audit.records.at(-1)).toMatchObject({
       action: "knowledgeSource.synchronization.queued",

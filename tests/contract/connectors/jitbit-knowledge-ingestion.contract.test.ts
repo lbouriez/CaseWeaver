@@ -1,3 +1,12 @@
+import { describe, expect, it } from "vitest";
+import {
+  createJitbitConfiguration,
+  createJitbitSecretResolver,
+  JitbitAnalysisDestination,
+  JitbitClient,
+  JitbitKnowledgeSource,
+  jsonResponse,
+} from "../../../connectors/jitbit/src/index.js";
 import type {
   AiExecutionContext,
   AiExecutionGateway,
@@ -15,16 +24,6 @@ import {
   normalizedContentHash,
   type StoredKnowledgeItem,
 } from "../../../packages/knowledge/src/index.js";
-import { describe, expect, it } from "vitest";
-
-import {
-  createJitbitConfiguration,
-  createJitbitSecretResolver,
-  JitbitAnalysisDestination,
-  JitbitClient,
-  JitbitKnowledgeSource,
-  jsonResponse,
-} from "../../../connectors/jitbit/src/index.js";
 
 const reference = {
   connectorInstanceId: "jitbit-helpdesk",
@@ -121,13 +120,20 @@ function synchronization(
     ai,
     ids: { next: () => "unused-revision" },
     clock: { now: () => "2026-07-13T20:00:00.000Z" },
-    normalizer: {
-      normalize: async () => ({ normalizedText: "same searchable content" }),
-    },
-    chunker: {
-      chunk: async () => {
-        throw new Error("A no-op must not chunk content.");
-      },
+    profiles: {
+      resolve: () =>
+        Object.freeze({
+          normalizer: {
+            normalize: async () => ({
+              normalizedText: "same searchable content",
+            }),
+          },
+          chunker: {
+            chunk: async () => {
+              throw new Error("A no-op must not chunk content.");
+            },
+          },
+        }),
     },
   });
 }
@@ -136,11 +142,18 @@ function request(source: JitbitKnowledgeSource) {
   return {
     source,
     signal: new AbortController().signal,
+    discovery: {
+      mode: "incremental" as const,
+      reset: false,
+      signal: new AbortController().signal,
+    },
     configuration: {
       id: "jitbit-knowledge",
       workspaceId: "workspace-1",
       connectorInstanceId: "jitbit-helpdesk",
+      normalizationProfileId: "text-normalization",
       normalizationProfileVersion: "normalization.v1",
+      chunkingProfileId: "text-chunking",
       chunkingProfileVersion: "chunking.v1",
       embeddingBatchSize: 10,
       synchronization: { triggers: [{ mode: "manual" as const }] },

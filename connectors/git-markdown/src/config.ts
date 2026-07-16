@@ -1,9 +1,9 @@
-import {
-  createConnectorConfigurationSchema,
-  type ConnectorConfiguration,
-} from "@caseweaver/connector-sdk";
 import { realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
+import {
+  type ConnectorConfiguration,
+  createConnectorConfigurationSchema,
+} from "@caseweaver/connector-sdk";
 import { z } from "zod";
 
 const defaultIncludePatterns = ["**/*.md", "**/*.mdx"];
@@ -290,6 +290,13 @@ export const gitMarkdownConfigurationSchema =
     }
 
     const authentication = configuration.settings.authentication;
+    if (repository.kind === "local" && authentication.kind !== "none") {
+      context.addIssue({
+        code: "custom",
+        path: ["settings", "authentication"],
+        message: "Local repositories do not support Git token authentication.",
+      });
+    }
     if (
       authentication.kind === "token" &&
       configuration.secrets[authentication.secretName] === undefined

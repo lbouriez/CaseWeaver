@@ -31,7 +31,65 @@ export interface KnowledgeCollection {
     readonly currency: string;
     readonly hard: boolean;
     readonly allowUnknownPricing?: boolean;
+    /** Opaque policy identity retained for execution diagnostics and audit only. */
+    readonly policyReference?: string;
   };
+}
+
+/** A source command selects its discovery semantics explicitly. */
+export type KnowledgeExecutionMode = "incremental" | "fullRescan";
+
+export interface KnowledgeDiscoveryControl {
+  readonly mode: KnowledgeExecutionMode;
+  /** Full rescans are explicit resets, never inferred solely from an absent cursor. */
+  readonly reset: boolean;
+  readonly cursor?: VersionedOpaqueValue;
+  readonly signal: AbortSignal;
+}
+
+/** Opaque durable fencing identity. Callers must not derive or reinterpret it. */
+export interface KnowledgeSourceExecutionFence {
+  readonly value: string;
+}
+
+export interface ImmutableKnowledgeCollectionExecution
+  extends KnowledgeCollection {
+  readonly runtimeVersionId: string;
+}
+
+/**
+ * Safe runtime projection of an immutable source/connector/collection selection.
+ * It intentionally excludes connector settings, credential locators, and clients.
+ */
+export interface PinnedKnowledgeSourceConfiguration {
+  readonly workspaceId: string;
+  readonly sourceId: string;
+  readonly sourceConfigurationVersionId: string;
+  readonly connectorConfigurationVersionId: string;
+  readonly connectorRegistrationId: string;
+  readonly collection: ImmutableKnowledgeCollectionExecution;
+  readonly normalizationProfile: Readonly<{
+    readonly id: string;
+    readonly version: string;
+  }>;
+  readonly chunkingProfile: Readonly<{
+    readonly id: string;
+    readonly version: string;
+  }>;
+  readonly synchronization: SourceSynchronizationPolicy;
+  readonly embeddingBatchSize: number;
+}
+
+/** Fail-closed private resolver: missing, legacy, disabled, or mismatched pins return undefined. */
+export interface PinnedKnowledgeSourceConfigurationResolver {
+  resolve(
+    input: Readonly<{
+      readonly workspaceId: string;
+      readonly sourceId: string;
+      readonly sourceConfigurationVersionId: string;
+      readonly connectorConfigurationVersionId: string;
+    }>,
+  ): Promise<PinnedKnowledgeSourceConfiguration | undefined>;
 }
 
 export type KnowledgeSynchronizationTrigger =
@@ -63,7 +121,9 @@ export interface KnowledgeSourceConfiguration {
   readonly workspaceId: string;
   readonly connectorInstanceId: string;
   readonly collection: KnowledgeCollection;
+  readonly normalizationProfileId: string;
   readonly normalizationProfileVersion: string;
+  readonly chunkingProfileId: string;
   readonly chunkingProfileVersion: string;
   readonly synchronization: SourceSynchronizationPolicy;
   readonly embeddingBatchSize: number;
@@ -126,6 +186,22 @@ export interface KnowledgeChunker {
     readonly attachments: readonly PreparedAttachment[];
     readonly chunkingProfileVersion: string;
   }): Promise<readonly ChunkCandidate[]>;
+}
+
+export interface KnowledgeTextProfileRegistry {
+  resolve(
+    input: Readonly<{
+      readonly normalizationProfileId: string;
+      readonly normalizationProfileVersion: string;
+      readonly chunkingProfileId: string;
+      readonly chunkingProfileVersion: string;
+    }>,
+  ):
+    | Readonly<{
+        readonly normalizer: KnowledgeNormalizer;
+        readonly chunker: KnowledgeChunker;
+      }>
+    | undefined;
 }
 
 export interface StoredKnowledgeItem {
@@ -250,6 +326,7 @@ export interface KnowledgeIngestionStore {
   commit(input: {
     readonly workspaceId: string;
     readonly sourceId: string;
+    readonly fence: KnowledgeSourceExecutionFence;
     readonly scan: CompletedScan;
     readonly mutations: readonly KnowledgeMutation[];
     readonly newEmbeddings: readonly NewCachedEmbedding[];
@@ -267,8 +344,8 @@ export interface KnowledgeClock {
 
 export interface KnowledgeIngestionDependencies {
   readonly store: KnowledgeIngestionStore;
-  readonly normalizer: KnowledgeNormalizer;
-  readonly chunker: KnowledgeChunker;
+  /** Immutable profile lookup; there is deliberately no mutable/default profile fallback. */
+  readonly profiles: KnowledgeTextProfileRegistry;
   readonly ai: AiExecutionGateway;
   readonly ids: KnowledgeIdGenerator;
   readonly clock: KnowledgeClock;
@@ -279,7 +356,8 @@ export interface KnowledgeSynchronizationRequest {
   readonly configuration: KnowledgeSourceConfiguration;
   readonly source: KnowledgeSource;
   readonly signal: AbortSignal;
-  readonly cursor?: VersionedOpaqueValue;
+  readonly discovery: KnowledgeDiscoveryControl;
+  readonly fence: KnowledgeSourceExecutionFence;
 }
 
 export interface KnowledgeSynchronizationResult {

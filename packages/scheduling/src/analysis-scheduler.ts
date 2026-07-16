@@ -4,7 +4,6 @@ import { isDue, nextRunAt } from "./cron.js";
 import type {
   CaseAnalysisSchedule,
   CaseAnalysisSchedulerDependencies,
-  CaseAnalysisTriggerCommand,
   SchedulerRunResult,
 } from "./types.js";
 
@@ -12,11 +11,14 @@ function occurrenceKey(schedule: CaseAnalysisSchedule): string {
   return createHash("sha256")
     .update(
       [
-        "case-analysis-schedule.v1",
+        "case-analysis-schedule.v2",
         schedule.workspaceId,
         schedule.id,
         schedule.triggerId,
-        schedule.configurationVersion,
+        schedule.analysisTriggerVersionId ?? "legacy",
+        schedule.target?.connectorInstanceId ?? "legacy",
+        schedule.target?.resourceType ?? "legacy",
+        schedule.target?.externalId ?? "legacy",
         schedule.nextRunAt,
       ].join(":"),
       "utf8",
@@ -24,17 +26,68 @@ function occurrenceKey(schedule: CaseAnalysisSchedule): string {
     .digest("hex");
 }
 
-function commandFor(
+/**
+ * A legacy schedule lacks at least one immutable trigger, target, actor, or
+ * connector pin. It cannot produce a safe v2 command and must never be rebound
+ * to a current trigger/configuration pointer.
+ */
+export class LegacyCaseAnalysisScheduleUnavailableError extends Error {
+  public readonly code = "scheduling.legacyAnalysisTriggerUnavailable";
+  public readonly retryable = false;
+
+  public constructor() {
+    super(
+      "Legacy case-analysis schedules have no immutable trigger configuration pin.",
+    );
+    this.name = "LegacyCaseAnalysisScheduleUnavailableError";
+  }
+}
+
+function isPinnedSchedule(
   schedule: CaseAnalysisSchedule,
-  key: string,
-): CaseAnalysisTriggerCommand {
+): schedule is CaseAnalysisSchedule & {
+  readonly analysisTriggerVersionId: string;
+  readonly automatedPrincipalId: string;
+  readonly connectorRegistrationId: string;
+  readonly connectorConfigurationVersionId: string;
+  readonly target: NonNullable<CaseAnalysisSchedule["target"]>;
+} {
+  return (
+    typeof schedule.analysisTriggerVersionId === "string" &&
+    schedule.analysisTriggerVersionId.length > 0 &&
+    typeof schedule.automatedPrincipalId === "string" &&
+    schedule.automatedPrincipalId.length > 0 &&
+    typeof schedule.connectorRegistrationId === "string" &&
+    schedule.connectorRegistrationId.length > 0 &&
+    typeof schedule.connectorConfigurationVersionId === "string" &&
+    schedule.connectorConfigurationVersionId.length > 0 &&
+    schedule.target !== undefined &&
+    schedule.target.connectorInstanceId.length > 0 &&
+    schedule.target.resourceType.length > 0 &&
+    schedule.target.externalId.length > 0
+  );
+}
+
+function commandFor(
+  schedule: Parameters<typeof isPinnedSchedule>[0] & {
+    readonly analysisTriggerVersionId: string;
+    readonly connectorRegistrationId: string;
+    readonly connectorConfigurationVersionId: string;
+    readonly target: NonNullable<CaseAnalysisSchedule["target"]>;
+  },
+  occurrenceKey: string,
+) {
   return {
-    type: "analysis.trigger.v1",
+    type: "analysis.trigger.v2" as const,
     workspaceId: schedule.workspaceId,
+    triggerRequestId: `analysis-trigger-request:schedule:${occurrenceKey}`,
     triggerId: schedule.triggerId,
-    configurationVersion: schedule.configurationVersion,
-    occurrenceKey: key,
-    scheduledFor: schedule.nextRunAt,
+    triggerVersionId: schedule.analysisTriggerVersionId,
+    connectorRegistrationId: schedule.connectorRegistrationId,
+    connectorConfigurationVersionId: schedule.connectorConfigurationVersionId,
+    source: "schedule" as const,
+    occurrenceKey,
+    target: schedule.target,
   };
 }
 
@@ -60,6 +113,9 @@ export class CaseAnalysisScheduler {
     let duplicate = 0;
     for (const schedule of due) {
       if (!isDue(schedule, now)) continue;
+      if (!isPinnedSchedule(schedule)) {
+        throw new LegacyCaseAnalysisScheduleUnavailableError();
+      }
       const lease = await this.dependencies.store.acquireLease({
         schedule,
         now,
@@ -76,8 +132,11 @@ export class CaseAnalysisScheduler {
         nextRunAt: nextRunAt(schedule, schedule.nextRunAt),
         now,
       });
-      if (result === "enqueued") enqueued += 1;
-      else duplicate += 1;
+      if (result === "enqueued") {
+        enqueued += 1;
+      } else {
+        duplicate += 1;
+      }
     }
     return { due: due.length, leased, enqueued, duplicate };
   }

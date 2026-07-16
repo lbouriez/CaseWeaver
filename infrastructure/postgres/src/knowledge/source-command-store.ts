@@ -9,23 +9,37 @@ import type { PostgresTransactionLookup } from "../index.js";
 interface SourceRow {
   readonly id: string;
   readonly lifecycle: string;
-  readonly configuration_version: string;
+  readonly source_configuration_version_id: string;
+  readonly connector_configuration_version_id: string;
 }
 
 function asDate(value: string): Date {
   return new Date(value);
 }
 
-function configurationVersionFromPayload(value: unknown): string {
+function runtimePinsFromPayload(value: unknown): Readonly<{
+  readonly sourceConfigurationVersionId: string;
+  readonly connectorConfigurationVersionId: string;
+}> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("Stored source command payload is invalid.");
   }
-  const version = (value as Readonly<Record<string, unknown>>)
-    .configurationVersion;
-  if (typeof version !== "string" || version.length === 0) {
+  const record = value as Readonly<Record<string, unknown>>;
+  const sourceConfigurationVersionId = record.sourceConfigurationVersionId;
+  const connectorConfigurationVersionId =
+    record.connectorConfigurationVersionId;
+  if (
+    typeof sourceConfigurationVersionId !== "string" ||
+    sourceConfigurationVersionId.length === 0 ||
+    typeof connectorConfigurationVersionId !== "string" ||
+    connectorConfigurationVersionId.length === 0
+  ) {
     throw new Error("Stored source command payload is invalid.");
   }
-  return version;
+  return Object.freeze({
+    sourceConfigurationVersionId,
+    connectorConfigurationVersionId,
+  });
 }
 
 /**
@@ -69,19 +83,28 @@ export class PostgresKnowledgeSourceCommandStore
     });
     if (
       envelope === null ||
-      (envelope.type !== "knowledge.synchronize.v1" &&
-        envelope.type !== "knowledge.full-rescan.v1")
+      (envelope.type !== "knowledge.synchronize.v2" &&
+        envelope.type !== "knowledge.full-rescan.v2")
     ) {
+      if (
+        envelope !== null &&
+        (envelope.type === "knowledge.synchronize.v1" ||
+          envelope.type === "knowledge.full-rescan.v1")
+      ) {
+        throw new Error("Stored source command is legacy and unavailable.");
+      }
       throw new Error("Stored source command idempotency record is invalid.");
     }
+    const pins = runtimePinsFromPayload(envelope.payload);
     return Object.freeze({
       requestDigest: record.requestDigest as Parameters<
         KnowledgeSourceCommandStore["recordIdempotency"]
       >[1]["requestDigest"],
       outboxEnvelopeId: outboxEnvelopeId(envelope.id),
-      configurationVersion: configurationVersionFromPayload(envelope.payload),
+      sourceConfigurationVersionId: pins.sourceConfigurationVersionId,
+      connectorConfigurationVersionId: pins.connectorConfigurationVersionId,
       kind:
-        envelope.type === "knowledge.full-rescan.v1"
+        envelope.type === "knowledge.full-rescan.v2"
           ? "fullRescan"
           : "synchronize",
     });
@@ -110,11 +133,20 @@ export class PostgresKnowledgeSourceCommandStore
     const rows = await this.transactions.get(transaction).$queryRaw<
       readonly SourceRow[]
     >`
-      SELECT id, lifecycle, configuration_version
-      FROM knowledge_sources
-      WHERE workspace_id = ${input.workspaceId}
-        AND id = ${input.sourceId}
-      FOR UPDATE
+      SELECT
+        source.id,
+        source.lifecycle,
+        runtime.source_configuration_version_id,
+        runtime.connector_configuration_version_id
+      FROM knowledge_sources AS source
+      INNER JOIN knowledge_source_runtime_versions AS runtime
+        ON runtime.workspace_id = source.workspace_id
+       AND runtime.knowledge_source_id = source.id
+       AND runtime.source_configuration_version_id = source.configuration_version
+       AND runtime.connector_configuration_version_id = source.connector_configuration_version_id
+      WHERE source.workspace_id = ${input.workspaceId}
+        AND source.id = ${input.sourceId}
+      FOR UPDATE OF source
     `;
     const source = rows[0];
     if (source === undefined) return undefined;
@@ -124,7 +156,9 @@ export class PostgresKnowledgeSourceCommandStore
     return Object.freeze({
       id: source.id,
       lifecycle: source.lifecycle,
-      configurationVersion: source.configuration_version,
+      sourceConfigurationVersionId: source.source_configuration_version_id,
+      connectorConfigurationVersionId:
+        source.connector_configuration_version_id,
     });
   }
 

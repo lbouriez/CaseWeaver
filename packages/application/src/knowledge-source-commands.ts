@@ -42,7 +42,8 @@ export type RequestKnowledgeSourceSynchronizationResult =
   | Readonly<{
       readonly status: "queued";
       readonly outboxEnvelopeId: string;
-      readonly configurationVersion: string;
+      readonly sourceConfigurationVersionId: string;
+      readonly connectorConfigurationVersionId: string;
       readonly replayed: boolean;
     }>
   | Readonly<{
@@ -108,7 +109,9 @@ export class RequestKnowledgeSourceSynchronization {
         return {
           status: "queued",
           outboxEnvelopeId: prior.outboxEnvelopeId,
-          configurationVersion: prior.configurationVersion,
+          sourceConfigurationVersionId: prior.sourceConfigurationVersionId,
+          connectorConfigurationVersionId:
+            prior.connectorConfigurationVersionId,
           replayed: true,
         };
       }
@@ -156,8 +159,8 @@ export class RequestKnowledgeSourceSynchronization {
           kind: "command",
           type:
             command.kind === "synchronize"
-              ? "knowledge.synchronize.v1"
-              : "knowledge.full-rescan.v1",
+              ? "knowledge.synchronize.v2"
+              : "knowledge.full-rescan.v2",
           schemaVersion: 1,
           workspaceId: context.workspaceId,
           occurredAt,
@@ -168,7 +171,9 @@ export class RequestKnowledgeSourceSynchronization {
             : { traceContext: context.traceContext }),
           payload: {
             sourceId: source.id,
-            configurationVersion: source.configurationVersion,
+            sourceConfigurationVersionId: source.sourceConfigurationVersionId,
+            connectorConfigurationVersionId:
+              source.connectorConfigurationVersionId,
             trigger: "manual",
           },
         }),
@@ -192,7 +197,8 @@ export class RequestKnowledgeSourceSynchronization {
         ...idempotency,
         requestDigest: command.requestDigest,
         outboxEnvelopeId: envelopeId,
-        configurationVersion: source.configurationVersion,
+        sourceConfigurationVersionId: source.sourceConfigurationVersionId,
+        connectorConfigurationVersionId: source.connectorConfigurationVersionId,
         kind: command.kind,
         occurredAt,
       });
@@ -200,7 +206,8 @@ export class RequestKnowledgeSourceSynchronization {
       return {
         status: "queued",
         outboxEnvelopeId: envelopeId,
-        configurationVersion: source.configurationVersion,
+        sourceConfigurationVersionId: source.sourceConfigurationVersionId,
+        connectorConfigurationVersionId: source.connectorConfigurationVersionId,
         replayed: false,
       };
     });

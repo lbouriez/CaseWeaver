@@ -40,6 +40,23 @@ const transactions: AdministrationTransactionRunner = {
     operation(),
 };
 
+const destinationDescriptor = {
+  kind: "connector",
+  type: "test-analysis-destination",
+  version: "1",
+  displayName: "Test analysis destination",
+  description: "A test-only destination descriptor.",
+  connectorCapabilities: ["analysisDestination"],
+  aiCapabilities: [],
+  supportedWireApis: [],
+  supportedWebhookEventTypes: [],
+  settingsSchema: { type: "object", additionalProperties: false },
+  uiGroups: [],
+  secretSlots: [],
+  supportsConfigurationMigration: false,
+  supportedTestOperations: [],
+};
+
 beforeEach(async () => {
   await pool.query("TRUNCATE TABLE workspaces RESTART IDENTITY CASCADE");
   await pool.query(`
@@ -54,6 +71,29 @@ beforeEach(async () => {
     ) VALUES
       ('workspace-a', 'destination-a', 'analysisDestination'),
       ('workspace-b', 'destination-b', 'analysisDestination');
+  `);
+  await pool.query(
+    `INSERT INTO administration_descriptor_revisions (
+       kind, type, version, descriptor, descriptor_hash
+     ) VALUES ('connector', 'test-analysis-destination', '1', $1::jsonb, $2)
+     ON CONFLICT (kind, type, version) DO NOTHING`,
+    [JSON.stringify(destinationDescriptor), "d".repeat(64)],
+  );
+  await pool.query(`
+    INSERT INTO administration_configurations (
+      id, workspace_id, resource_type, lifecycle, revision
+    ) VALUES ('destination-a', 'workspace-a', 'connector-instances', 'active', 1);
+    INSERT INTO administration_configuration_versions (
+      id, workspace_id, configuration_id, version, settings, secret_references,
+      descriptor_kind, descriptor_type, descriptor_version
+    ) VALUES (
+      'destination-a-configuration-v1', 'workspace-a', 'destination-a', 1,
+      '{}'::jsonb, '[]'::jsonb,
+      'connector', 'test-analysis-destination', '1'
+    );
+    UPDATE administration_configurations
+    SET current_version_id = 'destination-a-configuration-v1'
+    WHERE workspace_id = 'workspace-a' AND id = 'destination-a';
   `);
 });
 
@@ -106,11 +146,14 @@ describe("PostgreSQL publication profile administration projection", () => {
           readonly profile_version_id: string;
           readonly profile_id: string;
           readonly destination_id: string;
+          readonly destination_configuration_version_id: string;
         }>(
           `SELECT profile.lifecycle, version.version,
                   version.id AS profile_version_id,
                   version.publication_profile_id AS profile_id,
-                  version.definition #>> '{destination,connectorInstanceId}' AS destination_id
+                  version.definition #>> '{destination,connectorInstanceId}' AS destination_id,
+                  version.destination_connector_configuration_version_id
+                    AS destination_configuration_version_id
            FROM publication_profiles AS profile
            JOIN publication_profile_versions AS version
              ON version.workspace_id = profile.workspace_id
@@ -126,6 +169,8 @@ describe("PostgreSQL publication profile administration projection", () => {
             profile_version_id: active.version.id,
             profile_id: "publication-profile-a",
             destination_id: "destination-a",
+            destination_configuration_version_id:
+              "destination-a-configuration-v1",
           },
         ],
       });
@@ -294,6 +339,52 @@ describe("PostgreSQL publication profile administration projection", () => {
           },
         ],
       });
+    } finally {
+      await persistence.close();
+    }
+  });
+
+  it("rejects disabling a connector registration or configuration retained by an active profile", async () => {
+    const persistence = createPostgresPersistence({ databaseUrl });
+    try {
+      const draft = await persistence.unitOfWork.transaction((transaction) =>
+        manager(persistence, transaction, "workspace-a", "principal-a").create({
+          workspaceId: "workspace-a",
+          displayName: "Internal case publication",
+          definition: profileDefinition("destination-a"),
+          profile: { profileId: "publication-profile-a" },
+          mutation: mutation("publicationProfile.create", "h"),
+        }),
+      );
+      await persistence.unitOfWork.transaction((transaction) =>
+        manager(
+          persistence,
+          transaction,
+          "workspace-a",
+          "principal-a",
+        ).transition({
+          workspaceId: "workspace-a",
+          definition: profileDefinition("destination-a"),
+          profile: { profileId: "publication-profile-a" },
+          expectedRevision: draft.configuration.revision,
+          lifecycle: "active",
+          mutation: mutation("publicationProfile.activate", "i"),
+        }),
+      );
+      await expect(
+        pool.query(
+          `UPDATE connector_registrations
+           SET lifecycle = 'disabled'
+           WHERE workspace_id = 'workspace-a' AND id = 'destination-a'`,
+        ),
+      ).rejects.toThrow(/active publication profiles/i);
+      await expect(
+        pool.query(
+          `UPDATE administration_configurations
+           SET lifecycle = 'disabled'
+           WHERE workspace_id = 'workspace-a' AND id = 'destination-a'`,
+        ),
+      ).rejects.toThrow(/active publication profiles/i);
     } finally {
       await persistence.close();
     }

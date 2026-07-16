@@ -2,12 +2,14 @@ import type { ConfigurationDescriptor } from "@caseweaver/administration";
 
 import { jitbitSettingsSchema } from "./config.js";
 
-/** Safe discovery metadata; `jitbitSettingsSchema` remains authoritative. */
-export const jitbitAdministrationDescriptor: ConfigurationDescriptor =
-  Object.freeze({
+function descriptor(
+  version: "1" | "2",
+  timeoutField: "timeoutMs" | "requestTimeoutMs",
+): ConfigurationDescriptor {
+  return Object.freeze({
     kind: "connector",
     type: "jitbit",
-    version: "1",
+    version,
     displayName: "Jitbit",
     description:
       "Imports Jitbit tickets as cases and knowledge, and publishes approved analysis output.",
@@ -33,7 +35,7 @@ export const jitbitAdministrationDescriptor: ConfigurationDescriptor =
           description:
             "A reference in the configured secret backend; never the token value.",
         },
-        timeoutMs: { type: "integer", title: "Timeout (ms)" },
+        [timeoutField]: { type: "integer", title: "Timeout (ms)" },
         discoveryPageSize: { type: "integer", title: "Discovery page size" },
         maximumTicketCharacters: {
           type: "integer",
@@ -56,7 +58,7 @@ export const jitbitAdministrationDescriptor: ConfigurationDescriptor =
       {
         id: "connection",
         title: "Connection",
-        fields: ["baseUrl", "apiTokenReference", "timeoutMs"],
+        fields: ["baseUrl", "apiTokenReference", timeoutField],
         advanced: false,
       },
       {
@@ -83,6 +85,29 @@ export const jitbitAdministrationDescriptor: ConfigurationDescriptor =
     supportsConfigurationMigration: false,
     supportedTestOperations: ["connector.test"],
   } as const satisfies ConfigurationDescriptor);
+}
+
+/**
+ * Immutable descriptor retained for existing installations. Its `timeoutMs`
+ * field did not match the authoritative connector schema, so it is never
+ * registered for new drafts.
+ */
+export const legacyJitbitAdministrationDescriptor: ConfigurationDescriptor =
+  descriptor("1", "timeoutMs");
+
+/**
+ * Safe discovery metadata for new drafts. `jitbitSettingsSchema` remains the
+ * authoritative runtime validator.
+ */
+export const jitbitAdministrationDescriptor: ConfigurationDescriptor =
+  descriptor("2", "requestTimeoutMs");
+
+/** Descriptor revisions this adapter can execute for immutable durable work. */
+export const jitbitAdministrationDescriptorRevisions: readonly ConfigurationDescriptor[] =
+  Object.freeze([
+    legacyJitbitAdministrationDescriptor,
+    jitbitAdministrationDescriptor,
+  ]);
 
 /** Converts the safe console shape into this adapter's runtime-owned settings. */
 export function validateJitbitAdministrationSettings(

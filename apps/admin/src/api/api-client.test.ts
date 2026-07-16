@@ -12,7 +12,10 @@ function jsonResponse(body: unknown, status = 200): Response {
 describe("CaseWeaverApiClient", () => {
   it("uses the browser fetch global through a receiver-safe wrapper", async () => {
     const browserFetch = vi.fn<typeof fetch>(async () =>
-      jsonResponse({ authenticated: false }),
+      jsonResponse({
+        authenticated: false,
+        authentication: { password: true, oauth: false },
+      }),
     );
     vi.stubGlobal("fetch", browserFetch);
     try {
@@ -20,7 +23,10 @@ describe("CaseWeaverApiClient", () => {
         apiBaseUrl: "https://api.example.test",
         uiTitle: "Control",
       });
-      await expect(client.session()).resolves.toEqual({ authenticated: false });
+      await expect(client.session()).resolves.toEqual({
+        authenticated: false,
+        authentication: { password: true, oauth: false },
+      });
       expect(browserFetch).toHaveBeenCalledTimes(1);
     } finally {
       vi.unstubAllGlobals();
@@ -60,6 +66,40 @@ describe("CaseWeaverApiClient", () => {
     expect(new Headers(init?.headers).get("X-CaseWeaver-Request-Mode")).toBe(
       "user",
     );
+  });
+
+  it("submits a password only to the dedicated session endpoint and retains no browser credential", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async () =>
+      jsonResponse({
+        authenticated: true,
+        principal: {
+          id: "local-password-administrator",
+          displayName: "Local administrator",
+        },
+        activeWorkspace: { id: "workspace-1", name: "Operations" },
+        workspaces: [{ id: "workspace-1", name: "Operations" }],
+        permissions: ["configuration.read"],
+        csrfToken: "a-valid-csrf-token",
+        expiresAt: "2026-07-14T20:00:00.000Z",
+      }),
+    );
+    const client = new CaseWeaverApiClient(
+      { apiBaseUrl: "https://api.example.test", uiTitle: "Control" },
+      { fetchImplementation, createActionId: () => "password-login-action" },
+    );
+
+    await expect(
+      client.passwordLogin({ login: "admin", password: "admin" }),
+    ).resolves.toMatchObject({ authenticated: true });
+
+    expect(fetchImplementation.mock.calls[0]?.[0]).toEqual(
+      new URL("https://api.example.test/v1/auth/login/password"),
+    );
+    const request = fetchImplementation.mock.calls[0]?.[1];
+    expect(new Headers(request?.headers).get("Idempotency-Key")).toBe(
+      "password-login-action",
+    );
+    expect(localStorage.length).toBe(0);
   });
 
   it("sends the session CSRF token and idempotency header for workspace changes", async () => {
@@ -105,7 +145,12 @@ describe("CaseWeaverApiClient", () => {
   it("does not declare an empty logout POST as JSON", async () => {
     const fetchImplementation = vi
       .fn<typeof fetch>()
-      .mockResolvedValueOnce(jsonResponse({ authenticated: false }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          authenticated: false,
+          authentication: { password: true, oauth: false },
+        }),
+      )
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
     const client = new CaseWeaverApiClient(
       { apiBaseUrl: "https://api.example.test", uiTitle: "Control" },
@@ -243,8 +288,12 @@ describe("CaseWeaverApiClient", () => {
       displayName: "Support knowledge",
       connectorInstanceId: "connector-1",
       collectionId: "collection-1",
+      normalizationProfileId: "text-normalization",
       normalizationProfileVersion: "normalization-v1",
+      chunkingProfileId: "text-chunking",
       chunkingProfileVersion: "chunking-v1",
+      embeddingBatchSize: 16,
+      embeddingBudgetPolicyId: "budget-1",
       synchronizationPolicy: { trigger: "manual" },
       deletionBehavior: "tombstone",
     });
@@ -270,6 +319,75 @@ describe("CaseWeaverApiClient", () => {
     expect(JSON.stringify(fetchImplementation.mock.calls)).not.toMatch(
       /secret|token|password|locator/iu,
     );
+  });
+
+  it("uses exact provider-neutral policy-profile draft endpoints", async () => {
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: "retrieval-profile-1",
+          label: "Support evidence",
+          status: "draft",
+          version: "1",
+          fields: {},
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: "prompt-profile-1",
+          label: "Triage prompt",
+          status: "draft",
+          version: "1",
+          fields: {},
+        }),
+      );
+    const client = new CaseWeaverApiClient(
+      { apiBaseUrl: "https://api.example.test", uiTitle: "Control" },
+      { fetchImplementation },
+    );
+
+    await client.createPolicyProfileDraft("retrieval-profiles", {
+      displayName: "Support evidence",
+      settings: { maximumEvidence: 12 },
+    });
+    await client.createPolicyProfileDraft("prompt-profiles", {
+      displayName: "Triage prompt",
+      settings: { sections: ["summary", "evidence"] },
+    });
+
+    expect(fetchImplementation.mock.calls.map((call) => call[0])).toEqual([
+      new URL("https://api.example.test/v1/admin/retrieval-profiles/drafts"),
+      new URL("https://api.example.test/v1/admin/prompt-profiles/drafts"),
+    ]);
+    expect(
+      JSON.parse(String(fetchImplementation.mock.calls[0]?.[1]?.body)),
+    ).toEqual({
+      displayName: "Support evidence",
+      settings: { maximumEvidence: 12 },
+    });
+    expect(JSON.stringify(fetchImplementation.mock.calls)).not.toMatch(
+      /secret|token|password|locator/iu,
+    );
+  });
+
+  it("fails closed instead of deriving a policy draft route from an invalid resource", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>();
+    const client = new CaseWeaverApiClient(
+      { apiBaseUrl: "https://api.example.test", uiTitle: "Control" },
+      { fetchImplementation },
+    );
+
+    await expect(
+      client.createPolicyProfileDraft("unknown-profile" as never, {
+        displayName: "Invalid",
+        settings: {},
+      }),
+    ).rejects.toMatchObject({
+      kind: "invalid",
+      code: "client.invalidPolicyProfileResource",
+    });
+    expect(fetchImplementation).not.toHaveBeenCalled();
   });
 
   it("transitions source and schedule lifecycles without submitting their connector, collection, or settings", async () => {

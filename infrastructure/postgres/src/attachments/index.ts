@@ -1,5 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 
+import type {
+  AttachmentDerivativeEvidenceRecord,
+  AttachmentDerivativeEvidenceRecordStore,
+} from "@caseweaver/attachments";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
 
 export interface AttachmentDerivativeIdentity {
@@ -17,6 +21,8 @@ export interface AttachmentDerivativeIdentity {
 
 export interface AttachmentStorageHandle {
   readonly workspaceId: string;
+  /** Immutable deployment storage namespace; never a bucket or credential. */
+  readonly storageBackendId: string;
   readonly key: string;
 }
 
@@ -26,6 +32,8 @@ export interface PersistedAttachmentDerivative {
   readonly status: "completed";
   readonly output: AttachmentStorageHandle;
   readonly mimeType: "text/plain";
+  readonly outputContentHash: string;
+  readonly outputByteLength: number;
   readonly operationId?: string;
 }
 
@@ -39,8 +47,8 @@ export type AttachmentDerivativeClaim =
 
 /**
  * This is structurally compatible with the narrow cache-claim portion of
- * `AttachmentRepository`. It intentionally has no package dependency so that this
- * outer adapter remains composable without exposing PostgreSQL types inward.
+ * `AttachmentRepository`. The server-private evidence record port is imported
+ * from `@caseweaver/attachments` below; PostgreSQL details never cross inward.
  */
 export interface AttachmentDerivativeRepositoryPort {
   claimDerivative(
@@ -97,25 +105,6 @@ export interface AttachmentDerivativeSource {
   readonly operationId?: string;
 }
 
-export type RetentionCleanupCandidate =
-  | Readonly<{
-      readonly kind: "derivative";
-      readonly id: string;
-      readonly claimId: string;
-      readonly storage?: AttachmentStorageHandle;
-    }>
-  | Readonly<{
-      readonly kind: "attachmentReference";
-      readonly id: string;
-      readonly claimId: string;
-    }>
-  | Readonly<{
-      readonly kind: "blob";
-      readonly id: string;
-      readonly claimId: string;
-      readonly storage: AttachmentStorageHandle;
-    }>;
-
 export class PostgresAttachmentClaimOwnershipError extends Error {
   public readonly code = "attachment.claimOwnership";
   public readonly retryable = false;
@@ -155,7 +144,10 @@ interface DerivativeRow extends QueryResultRow {
   readonly status: "pending" | "completed" | "failed";
   readonly claim_id: string | null;
   readonly output_storage_key: string | null;
+  readonly output_storage_backend_id: string | null;
   readonly output_mime_type: string | null;
+  readonly output_content_hash: string | null;
+  readonly output_byte_length: string | null;
   readonly ai_operation_id: string | null;
   readonly failure_code: string | null;
   readonly failure_retryable: boolean | null;
@@ -172,6 +164,7 @@ interface AttachmentRow extends QueryResultRow {
   readonly workspace_id: string;
   readonly external_reference_id: string;
   readonly storage_key: string;
+  readonly storage_backend_id: string;
   readonly content_hash: string;
   readonly byte_length: string;
   readonly detected_mime_type: string;
@@ -186,16 +179,14 @@ interface SourceRow extends QueryResultRow {
   readonly ai_operation_id: string | null;
 }
 
-interface RetentionDerivativeRow extends QueryResultRow {
-  readonly id: string;
+interface EvidenceRecordRow extends QueryResultRow {
+  readonly workspace_id: string;
+  readonly attachment_id: string;
+  readonly derivative_id: string;
   readonly output_storage_key: string | null;
-  readonly workspace_id: string;
-}
-
-interface RetentionBlobRow extends QueryResultRow {
-  readonly id: string;
-  readonly storage_key: string;
-  readonly workspace_id: string;
+  readonly output_storage_backend_id: string | null;
+  readonly output_content_hash: string | null;
+  readonly output_byte_length: string | null;
 }
 
 function digest(value: string): string {
@@ -222,6 +213,32 @@ function assertOpaque(
   ) {
     throw new RangeError(`Attachment ${name} is invalid.`);
   }
+}
+
+function assertStorageBackendId(name: string, value: string): void {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/u.test(value)) {
+    throw new RangeError(`Attachment ${name} is invalid.`);
+  }
+}
+
+function assertOutputContentHash(value: string): void {
+  if (!/^[a-f0-9]{64}$/u.test(value)) {
+    throw new RangeError("Attachment derivative output SHA-256 is invalid.");
+  }
+}
+
+function assertOutputByteLength(value: number): void {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError(
+      "Attachment derivative output byte length is invalid.",
+    );
+  }
+}
+
+function toSafeOutputByteLength(value: string | null): number | undefined {
+  if (value === null || !/^(?:0|[1-9][0-9]*)$/u.test(value)) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : undefined;
 }
 
 function assertTimestamp(name: string, value: string): void {
@@ -314,10 +331,15 @@ function toIdentity(row: DerivativeRow): AttachmentDerivativeIdentity {
 function toCompletedDerivative(
   row: DerivativeRow,
 ): PersistedAttachmentDerivative {
+  const outputByteLength = toSafeOutputByteLength(row.output_byte_length);
   if (
     row.status !== "completed" ||
     row.output_storage_key === null ||
-    row.output_mime_type !== "text/plain"
+    row.output_storage_backend_id === null ||
+    row.output_mime_type !== "text/plain" ||
+    row.output_content_hash === null ||
+    !/^[a-f0-9]{64}$/u.test(row.output_content_hash) ||
+    outputByteLength === undefined
   ) {
     throw new Error("Persisted attachment derivative is incomplete.");
   }
@@ -327,9 +349,12 @@ function toCompletedDerivative(
     status: "completed",
     output: Object.freeze({
       workspaceId: row.workspace_id,
+      storageBackendId: row.output_storage_backend_id,
       key: row.output_storage_key,
     }),
     mimeType: "text/plain",
+    outputContentHash: row.output_content_hash,
+    outputByteLength,
     ...(row.ai_operation_id === null
       ? {}
       : { operationId: row.ai_operation_id }),
@@ -353,23 +378,16 @@ function toFailure(row: DerivativeRow): AttachmentDerivativeFailure {
   });
 }
 
-function validateRetentionLimit(value: number): void {
-  if (!Number.isInteger(value) || value < 1 || value > 100) {
-    throw new RangeError(
-      "Attachment retention claim limit must be between 1 and 100.",
-    );
-  }
-}
-
 export class PostgresAttachmentRepository
-  implements AttachmentDerivativeRepositoryPort
+  implements
+    AttachmentDerivativeRepositoryPort,
+    AttachmentDerivativeEvidenceRecordStore
 {
   public constructor(
     private readonly pool: Pool,
     private readonly claimLeaseMs = 15 * 60 * 1_000,
-    private readonly retentionClaimLeaseMs = 5 * 60 * 1_000,
   ) {
-    for (const value of [claimLeaseMs, retentionClaimLeaseMs]) {
+    for (const value of [claimLeaseMs]) {
       if (!Number.isSafeInteger(value) || value < 1) {
         throw new RangeError(
           "Attachment claim lease duration must be positive.",
@@ -388,13 +406,14 @@ export class PostgresAttachmentRepository
       const id = blobId(input);
       const blob = await client.query<IdRow>(
         `INSERT INTO attachment_blobs (
-           id, workspace_id, storage_key, content_hash, byte_length,
-           detected_mime_type
-         ) VALUES ($1, $2, $3, $4, $5, $6)
+           id, workspace_id, storage_key, storage_backend_id, content_hash,
+           byte_length, detected_mime_type, retention_expires_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          ON CONFLICT (workspace_id, id) DO UPDATE
            SET id = attachment_blobs.id
          WHERE attachment_blobs.retention_state = 'active'
            AND attachment_blobs.storage_key = EXCLUDED.storage_key
+           AND attachment_blobs.storage_backend_id = EXCLUDED.storage_backend_id
            AND attachment_blobs.content_hash = EXCLUDED.content_hash
            AND attachment_blobs.byte_length = EXCLUDED.byte_length
            AND attachment_blobs.detected_mime_type = EXCLUDED.detected_mime_type
@@ -403,9 +422,11 @@ export class PostgresAttachmentRepository
           id,
           input.workspaceId,
           input.storage.key,
+          input.storage.storageBackendId,
           input.sha256,
           input.byteLength,
           input.detectedMimeType,
+          input.retentionExpiresAt ?? null,
         ],
       );
       if (blob.rows[0] === undefined) {
@@ -443,6 +464,9 @@ export class PostgresAttachmentRepository
            (SELECT storage_key FROM attachment_blobs
             WHERE workspace_id = attachments.workspace_id
               AND id = attachments.blob_id) AS storage_key,
+           (SELECT storage_backend_id FROM attachment_blobs
+            WHERE workspace_id = attachments.workspace_id
+              AND id = attachments.blob_id) AS storage_backend_id,
            attachments.content_hash,
            attachments.byte_length,
            attachments.detected_mime_type,
@@ -475,6 +499,7 @@ export class PostgresAttachmentRepository
         sourceReferenceId: row.external_reference_id,
         storage: Object.freeze({
           workspaceId: row.workspace_id,
+          storageBackendId: row.storage_backend_id,
           key: row.storage_key,
         }),
         sha256: row.content_hash,
@@ -612,7 +637,13 @@ export class PostgresAttachmentRepository
     if (input.derivative.output.workspaceId !== identity.workspaceId) {
       throw new RangeError("Attachment derivative output crosses a workspace.");
     }
+    assertStorageBackendId(
+      "output storage backend",
+      input.derivative.output.storageBackendId,
+    );
     assertOpaque("output storage key", input.derivative.output.key, 2_048);
+    assertOutputContentHash(input.derivative.outputContentHash);
+    assertOutputByteLength(input.derivative.outputByteLength);
     if (input.derivative.operationId !== undefined) {
       assertOpaque("operationId", input.derivative.operationId);
     }
@@ -622,19 +653,25 @@ export class PostgresAttachmentRepository
            claim_id = NULL,
            claim_expires_at = NULL,
            output_storage_key = $1,
+           output_storage_backend_id = $2,
            output_mime_type = 'text/plain',
-           ai_operation_id = $2,
+           output_content_hash = $3,
+           output_byte_length = $4,
+           ai_operation_id = $5,
            failure_code = NULL,
            failure_retryable = NULL,
            failed_at = NULL,
            completed_at = NOW()
-       WHERE workspace_id = $3
-         AND id = $4
+       WHERE workspace_id = $6
+         AND id = $7
          AND status = 'pending'
-         AND claim_id = $5
+         AND claim_id = $8
        RETURNING id`,
       [
         input.derivative.output.key,
+        input.derivative.output.storageBackendId,
+        input.derivative.outputContentHash,
+        input.derivative.outputByteLength,
         input.derivative.operationId ?? null,
         identity.workspaceId,
         input.derivative.id,
@@ -773,6 +810,92 @@ export class PostgresAttachmentRepository
     );
   }
 
+  /**
+   * Resolves private storage identity only for an exact retained derivative
+   * source association. The returned handle is consumed by trusted server
+   * composition and is never an API response.
+   */
+  public async findDerivativeEvidenceRecord(input: {
+    readonly workspaceId: string;
+    readonly attachmentId: string;
+    readonly derivativeId: string;
+    readonly signal: AbortSignal;
+  }): Promise<AttachmentDerivativeEvidenceRecord | undefined> {
+    assertOpaque("workspaceId", input.workspaceId);
+    assertOpaque("attachmentId", input.attachmentId);
+    assertOpaque("derivativeId", input.derivativeId);
+    if (input.signal.aborted) {
+      throw new Error(
+        "Attachment derivative evidence resolution was cancelled.",
+      );
+    }
+    const result = await this.pool.query<EvidenceRecordRow>(
+      `SELECT
+         derivative.workspace_id,
+         source.attachment_id,
+         derivative.id AS derivative_id,
+         derivative.output_storage_key,
+         derivative.output_storage_backend_id,
+         derivative.output_content_hash,
+         derivative.output_byte_length
+       FROM attachment_derivative_sources AS source
+       JOIN attachments AS attachment
+         ON attachment.workspace_id = source.workspace_id
+        AND attachment.id = source.attachment_id
+       JOIN attachment_derivatives AS derivative
+         ON derivative.workspace_id = source.workspace_id
+        AND derivative.id = source.attachment_derivative_id
+       WHERE source.workspace_id = $1
+         AND source.attachment_id = $2
+         AND source.attachment_derivative_id = $3
+         AND attachment.lifecycle = 'accepted'
+         AND attachment.retention_state = 'active'
+         AND derivative.status = 'completed'
+         AND derivative.retention_state = 'active'
+         AND derivative.output_mime_type = 'text/plain'
+       LIMIT 1`,
+      [input.workspaceId, input.attachmentId, input.derivativeId],
+    );
+    if (input.signal.aborted) {
+      throw new Error(
+        "Attachment derivative evidence resolution was cancelled.",
+      );
+    }
+    const row = result.rows[0];
+    if (
+      row === undefined ||
+      row.output_storage_key === null ||
+      row.output_storage_backend_id === null ||
+      row.output_content_hash === null
+    ) {
+      return undefined;
+    }
+    const outputByteLength = toSafeOutputByteLength(row.output_byte_length);
+    if (outputByteLength === undefined) return undefined;
+    try {
+      assertStorageBackendId(
+        "output storage backend",
+        row.output_storage_backend_id,
+      );
+      assertOpaque("output storage key", row.output_storage_key, 2_048);
+      assertOutputContentHash(row.output_content_hash);
+    } catch {
+      return undefined;
+    }
+    return Object.freeze({
+      workspaceId: row.workspace_id,
+      attachmentId: row.attachment_id,
+      derivativeId: row.derivative_id,
+      output: Object.freeze({
+        workspaceId: row.workspace_id,
+        storageBackendId: row.output_storage_backend_id,
+        key: row.output_storage_key,
+      }),
+      outputContentHash: row.output_content_hash,
+      outputByteLength,
+    });
+  }
+
   public async scheduleDerivativeRetention(input: {
     readonly workspaceId: string;
     readonly derivativeId: string;
@@ -798,174 +921,12 @@ export class PostgresAttachmentRepository
     }
   }
 
-  public async claimExpiredRetention(input: {
-    readonly limit: number;
-  }): Promise<readonly RetentionCleanupCandidate[]> {
-    validateRetentionLimit(input.limit);
-    const claimId = randomUUID();
-    const client = await this.pool.connect();
-    try {
-      await client.query("BEGIN");
-      const candidates: RetentionCleanupCandidate[] = [];
-      const derivatives = await client.query<RetentionDerivativeRow>(
-        `WITH selected AS (
-           SELECT id
-           FROM attachment_derivatives
-           WHERE status IN ('completed', 'failed')
-             AND retention_expires_at <= NOW()
-             AND (
-               retention_state = 'active'
-               OR (
-                 retention_state = 'claimed'
-                 AND retention_claim_expires_at <= NOW()
-               )
-             )
-           ORDER BY retention_expires_at, id
-           LIMIT $1
-           FOR UPDATE SKIP LOCKED
-         )
-         UPDATE attachment_derivatives AS derivative
-         SET retention_state = 'claimed',
-             retention_claim_id = $2,
-             retention_claimed_at = NOW(),
-             retention_claim_expires_at =
-               NOW() + ($3 * INTERVAL '1 millisecond')
-         FROM selected
-         WHERE derivative.id = selected.id
-         RETURNING derivative.id, derivative.workspace_id,
-                   derivative.output_storage_key`,
-        [input.limit, claimId, this.retentionClaimLeaseMs],
-      );
-      candidates.push(
-        ...derivatives.rows.map((row) =>
-          Object.freeze({
-            kind: "derivative" as const,
-            id: row.id,
-            claimId,
-            ...(row.output_storage_key === null
-              ? {}
-              : {
-                  storage: Object.freeze({
-                    workspaceId: row.workspace_id,
-                    key: row.output_storage_key,
-                  }),
-                }),
-          }),
-        ),
-      );
-      const remainingAfterDerivatives = input.limit - candidates.length;
-      if (remainingAfterDerivatives > 0) {
-        const references = await client.query<IdRow>(
-          `WITH selected AS (
-             SELECT id
-             FROM attachments
-             WHERE retention_expires_at <= NOW()
-               AND (
-                 retention_state = 'active'
-                 OR (
-                   retention_state = 'claimed'
-                   AND retention_claim_expires_at <= NOW()
-                 )
-               )
-             ORDER BY retention_expires_at, id
-             LIMIT $1
-             FOR UPDATE SKIP LOCKED
-           )
-           UPDATE attachments AS attachment
-           SET retention_state = 'claimed',
-               retention_claim_id = $2,
-               retention_claimed_at = NOW(),
-               retention_claim_expires_at =
-                 NOW() + ($3 * INTERVAL '1 millisecond')
-           FROM selected
-           WHERE attachment.id = selected.id
-           RETURNING attachment.id`,
-          [remainingAfterDerivatives, claimId, this.retentionClaimLeaseMs],
-        );
-        candidates.push(
-          ...references.rows.map((row) =>
-            Object.freeze({
-              kind: "attachmentReference" as const,
-              id: row.id,
-              claimId,
-            }),
-          ),
-        );
-      }
-      const remainingAfterReferences = input.limit - candidates.length;
-      if (remainingAfterReferences > 0) {
-        const blobs = await client.query<RetentionBlobRow>(
-          `WITH selected AS (
-             SELECT blob.id
-             FROM attachment_blobs AS blob
-             WHERE blob.retention_state = 'active'
-               AND NOT EXISTS (
-                 SELECT 1
-                 FROM attachments AS attachment
-                 WHERE attachment.workspace_id = blob.workspace_id
-                   AND attachment.blob_id = blob.id
-                   AND attachment.retention_state <> 'deleted'
-               )
-             ORDER BY blob.id
-             LIMIT $1
-             FOR UPDATE SKIP LOCKED
-           )
-           UPDATE attachment_blobs AS blob
-           SET retention_state = 'claimed',
-               retention_claim_id = $2,
-               retention_claimed_at = NOW(),
-               retention_claim_expires_at =
-                 NOW() + ($3 * INTERVAL '1 millisecond')
-           FROM selected
-           WHERE blob.id = selected.id
-           RETURNING blob.id, blob.workspace_id, blob.storage_key`,
-          [remainingAfterReferences, claimId, this.retentionClaimLeaseMs],
-        );
-        for (const row of blobs.rows) {
-          if (row.storage_key === null) {
-            throw new Error(
-              "Retention-active attachment blob has no storage key.",
-            );
-          }
-          candidates.push(
-            Object.freeze({
-              kind: "blob",
-              id: row.id,
-              claimId,
-              storage: Object.freeze({
-                workspaceId: row.workspace_id,
-                key: row.storage_key,
-              }),
-            }),
-          );
-        }
-      }
-      await client.query("COMMIT");
-      return Object.freeze(candidates);
-    } catch (error) {
-      await client.query("ROLLBACK");
-      throw error;
-    } finally {
-      client.release();
-    }
-  }
-
-  public async completeRetentionCleanup(
-    candidate: RetentionCleanupCandidate,
-  ): Promise<void> {
-    assertOpaque("retention claimId", candidate.claimId);
-    const completed = await this.completeRetentionCleanupCandidate(candidate);
-    if (completed.rows[0] === undefined) {
-      throw new PostgresAttachmentClaimOwnershipError();
-    }
-  }
-
   private derivativeColumns(): string {
     return `id, workspace_id, identity_key, access_policy_hash, content_hash,
       processor, processor_version, security_policy_version, normalization_version,
       vision_prompt_version, vision_binding_version_id, status, claim_id,
-      output_storage_key, output_mime_type, ai_operation_id, failure_code,
-      failure_retryable, failed_at, retention_state`;
+      output_storage_key, output_storage_backend_id, output_mime_type, ai_operation_id, failure_code,
+      output_content_hash, output_byte_length, failure_retryable, failed_at, retention_state`;
   }
 
   private async reclaimDeletedDerivative(
@@ -980,7 +941,10 @@ export class PostgresAttachmentRepository
            claim_expires_at = NOW() + ($2 * INTERVAL '1 millisecond'),
            claim_attempts = claim_attempts + 1,
            output_storage_key = NULL,
+           output_storage_backend_id = NULL,
            output_mime_type = NULL,
+           output_content_hash = NULL,
+           output_byte_length = NULL,
            ai_operation_id = NULL,
            failure_code = NULL,
            failure_retryable = NULL,
@@ -1030,59 +994,6 @@ export class PostgresAttachmentRepository
     }
   }
 
-  private async completeRetentionCleanupCandidate(
-    candidate: RetentionCleanupCandidate,
-  ): Promise<{ readonly rows: readonly IdRow[] }> {
-    const values = [candidate.id, candidate.claimId];
-    switch (candidate.kind) {
-      case "derivative":
-        return this.pool.query<IdRow>(
-          `UPDATE attachment_derivatives
-           SET retention_state = 'deleted',
-               retention_claim_id = NULL,
-               retention_claimed_at = NULL,
-               retention_claim_expires_at = NULL,
-               retention_deleted_at = NOW(),
-               output_storage_key = NULL,
-               output_mime_type = NULL
-           WHERE id = $1
-             AND retention_state = 'claimed'
-             AND retention_claim_id = $2
-           RETURNING id`,
-          values,
-        );
-      case "attachmentReference":
-        return this.pool.query<IdRow>(
-          `UPDATE attachments
-           SET retention_state = 'deleted',
-               retention_claim_id = NULL,
-               retention_claimed_at = NULL,
-               retention_claim_expires_at = NULL,
-               retention_deleted_at = NOW()
-           WHERE id = $1
-             AND retention_state = 'claimed'
-             AND retention_claim_id = $2
-           RETURNING id`,
-          values,
-        );
-      case "blob":
-        return this.pool.query<IdRow>(
-          `UPDATE attachment_blobs
-           SET retention_state = 'deleted',
-               retention_claim_id = NULL,
-               retention_claimed_at = NULL,
-               retention_claim_expires_at = NULL,
-               retention_deleted_at = NOW(),
-               storage_key = NULL
-           WHERE id = $1
-             AND retention_state = 'claimed'
-             AND retention_claim_id = $2
-           RETURNING id`,
-          values,
-        );
-    }
-  }
-
   private assertAttachmentInput(input: AttachmentReferenceInput): void {
     assertOpaque("attachment ID", input.id);
     assertOpaque("workspaceId", input.workspaceId);
@@ -1090,6 +1001,7 @@ export class PostgresAttachmentRepository
     if (input.storage.workspaceId !== input.workspaceId) {
       throw new RangeError("Attachment storage handle crosses a workspace.");
     }
+    assertStorageBackendId("storage backend", input.storage.storageBackendId);
     assertOpaque("storage key", input.storage.key, 2_048);
     if (!/^[a-f0-9]{64}$/u.test(input.sha256)) {
       throw new RangeError("Attachment content SHA-256 is invalid.");
@@ -1122,7 +1034,6 @@ export interface PostgresAttachmentPersistence {
 export interface PostgresAttachmentPersistenceConfiguration {
   readonly databaseUrl: string;
   readonly claimLeaseMs?: number;
-  readonly retentionClaimLeaseMs?: number;
 }
 
 /**
@@ -1137,7 +1048,6 @@ export function createPostgresAttachmentPersistence(
     repository: new PostgresAttachmentRepository(
       pool,
       configuration.claimLeaseMs,
-      configuration.retentionClaimLeaseMs,
     ),
     close: async () => pool.end(),
   });

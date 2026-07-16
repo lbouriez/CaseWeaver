@@ -1,5 +1,10 @@
 name: caseweaver
 
+# This file is an operator topology, not a development shortcut.  Every runtime
+# image is pinned independently so an operator can select verified OCI digests.
+# Choose exactly one application profile: `standalone` or `distributed`.
+# `migrate` is deliberately separate and must finish before either profile starts.
+
 x-runtime-environment: &runtime-environment
   NODE_ENV: production
   DATABASE_URL_FILE: /run/secrets/database-url
@@ -8,14 +13,10 @@ x-runtime-environment: &runtime-environment
   OTEL_SERVICE_VERSION: ${CASEWEAVER_RELEASE_VERSION:-unknown}
 
 x-runtime: &runtime
-  image: ${CASEWEAVER_IMAGE:?Set CASEWEAVER_IMAGE to an immutable CaseWeaver release image.}
   restart: unless-stopped
-  entrypoint: ["/bin/sh", "/caseweaver-entrypoint.sh"]
   environment: *runtime-environment
   secrets:
     - database-url
-  volumes:
-    - ./entrypoint.sh:/caseweaver-entrypoint.sh:ro
   networks:
     - caseweaver-data
     - caseweaver-egress
@@ -23,6 +24,46 @@ x-runtime: &runtime
     postgres:
       condition: service_healthy
       required: true
+
+x-api-environment: &api-environment
+  HOST: "0.0.0.0"
+  PORT: "3000"
+  DATABASE_READINESS_TIMEOUT_MS: ${DATABASE_READINESS_TIMEOUT_MS:-5000}
+  API_WORKSPACE_ID: ${API_WORKSPACE_ID:?Set API_WORKSPACE_ID.}
+  API_PRINCIPAL_ID: ${API_PRINCIPAL_ID:?Set API_PRINCIPAL_ID.}
+  ADMIN_ALLOWED_ORIGINS: ${ADMIN_ALLOWED_ORIGINS:?Set the HTTPS admin UI origin.}
+  # Password authentication is off by default in production.  Set this to true
+  # and provide non-default ADMIN_LOGIN/ADMIN_PASSWORD only for an explicitly
+  # accepted break-glass/local deployment; otherwise configure OIDC below.
+  ADMIN_DISABLE_LOGIN_AUTHENTICATION: ${ADMIN_DISABLE_LOGIN_AUTHENTICATION:-true}
+  ADMIN_ENABLE_PASSWORD_AUTHENTICATION: ${ADMIN_ENABLE_PASSWORD_AUTHENTICATION:-false}
+  ADMIN_LOGIN:
+  ADMIN_PASSWORD:
+  OIDC_ISSUER:
+  OIDC_CLIENT_ID:
+  OIDC_CLIENT_SECRET:
+  OIDC_CALLBACK_URL:
+  OIDC_EPHEMERAL_ENCRYPTION_KEY:
+  OIDC_EPHEMERAL_KEY_ID:
+  ADMIN_BOOTSTRAP_OIDC_SUBJECT:
+  ADMIN_BOOTSTRAP_DISPLAY_NAME:
+  TRUSTED_PROXY_CIDRS:
+
+x-worker-environment: &worker-environment
+  # Object storage, provider and connector configuration are deployment-owned.
+  # The image has neither a credential nor a fallback secret; unset values fail
+  # closed when the relevant workload is selected.
+  OBJECT_STORAGE_KIND:
+  OBJECT_STORAGE_BACKEND_ID:
+  OBJECT_STORAGE_KEY_DERIVATION_SECRET:
+  OBJECT_STORAGE_LOCAL_ROOT:
+  OBJECT_STORAGE_S3_ENDPOINT:
+  OBJECT_STORAGE_S3_REGION:
+  OBJECT_STORAGE_S3_BUCKET:
+  OBJECT_STORAGE_S3_ACCESS_KEY_ID:
+  OBJECT_STORAGE_S3_SECRET_ACCESS_KEY:
+  WORKER_GIT_TEMPORARY_DIRECTORY: ${WORKER_GIT_TEMPORARY_DIRECTORY:-/tmp/caseweaver-git}
+  WORKER_GIT_REMOTE_CACHE_DIRECTORY: ${WORKER_GIT_REMOTE_CACHE_DIRECTORY:-/tmp/caseweaver-git-cache}
 
 services:
   postgres:
@@ -53,61 +94,67 @@ services:
       - caseweaver-data
 
   migrate:
-    <<: *runtime
+    image: ${CASEWEAVER_MIGRATION_IMAGE:?Set CASEWEAVER_MIGRATION_IMAGE to a pinned migration image.}
     profiles: ["migrate"]
     restart: "no"
-    command: ["caseweaver-migrate"]
     environment:
       <<: *runtime-environment
       OTEL_SDK_DISABLED: "true"
+    secrets:
+      - database-url
+    networks:
+      - caseweaver-data
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: true
 
   standalone:
     <<: *runtime
+    image: ${CASEWEAVER_STANDALONE_IMAGE:?Set CASEWEAVER_STANDALONE_IMAGE to a pinned standalone image.}
     profiles: ["standalone"]
-    command: ["caseweaver-standalone"]
     environment:
-      <<: *runtime-environment
+      <<: [*runtime-environment, *api-environment, *worker-environment]
       OTEL_SERVICE_NAME: caseweaver-standalone
-      PORT: "3000"
     ports:
       - "127.0.0.1:${CASEWEAVER_STANDALONE_PORT:-8080}:3000"
 
   api:
     <<: *runtime
+    image: ${CASEWEAVER_API_IMAGE:?Set CASEWEAVER_API_IMAGE to a pinned API image.}
     profiles: ["distributed"]
-    command: ["caseweaver-api"]
     environment:
-      <<: *runtime-environment
+      <<: [*runtime-environment, *api-environment]
       OTEL_SERVICE_NAME: caseweaver-api
-      PORT: "3000"
     ports:
       - "127.0.0.1:${CASEWEAVER_API_PORT:-8080}:3000"
 
   webhook:
     <<: *runtime
+    image: ${CASEWEAVER_WEBHOOK_IMAGE:?Set CASEWEAVER_WEBHOOK_IMAGE to a pinned webhook image.}
     profiles: ["distributed"]
-    command: ["caseweaver-webhook"]
     environment:
       <<: *runtime-environment
       OTEL_SERVICE_NAME: caseweaver-webhook
-      PORT: "3001"
+      WEBHOOK_HOST: "0.0.0.0"
+      WEBHOOK_PORT: "8081"
     ports:
-      - "127.0.0.1:${CASEWEAVER_WEBHOOK_PORT:-8081}:3001"
+      - "127.0.0.1:${CASEWEAVER_WEBHOOK_PORT:-8081}:8081"
 
   scheduler:
     <<: *runtime
+    image: ${CASEWEAVER_SCHEDULER_IMAGE:?Set CASEWEAVER_SCHEDULER_IMAGE to a pinned scheduler image.}
     profiles: ["distributed"]
-    command: ["caseweaver-scheduler"]
     environment:
       <<: *runtime-environment
       OTEL_SERVICE_NAME: caseweaver-scheduler
 
   worker:
     <<: *runtime
+    image: ${CASEWEAVER_WORKER_IMAGE:?Set CASEWEAVER_WORKER_IMAGE to a pinned worker image.}
     profiles: ["distributed"]
-    command: ["caseweaver-worker"]
     environment:
-      <<: *runtime-environment
+      <<: [*runtime-environment, *worker-environment]
       OTEL_SERVICE_NAME: caseweaver-worker
 
 secrets:

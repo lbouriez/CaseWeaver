@@ -11,6 +11,7 @@ import type {
   RetrievalProfile,
   RetrievalRequest,
   RetrievalSnapshot,
+  RetrievalTokenCountPurpose,
 } from "./contracts.js";
 
 export class RetrievalError extends Error {
@@ -182,6 +183,10 @@ function groupsFor(profile: RetrievalProfile): readonly EmbeddingGroup[] {
 function validateProfile(profile: RetrievalProfile): void {
   requireNonEmpty(profile.id, "Retrieval profile ID");
   requireNonEmpty(profile.version, "Retrieval profile version");
+  requireNonEmpty(
+    profile.contextTokenBindingVersionId,
+    "Context token binding version ID",
+  );
   if (profile.collections.length === 0) {
     throw new RetrievalError(
       "A retrieval profile must select at least one collection.",
@@ -374,11 +379,7 @@ export class RetrievalService {
       new Set(request.profile.collections.map((collection) => collection.id)),
     );
     const candidateBounded = this.applyCandidateQuotas(fused, request.profile);
-    const reranked = await this.rerank(
-      candidateBounded,
-      request,
-      this.dependencies.tokens.count(request.query),
-    );
+    const reranked = await this.rerank(candidateBounded, request);
     const evidence = this.applyFinalBudgets(
       reranked.candidates,
       request.profile,
@@ -406,21 +407,30 @@ export class RetrievalService {
       readonly operationId: string;
     }[]
   > {
-    const queryTokens = this.dependencies.tokens.count(request.query);
-    requireNonNegativeInteger(queryTokens, "Query token count");
-    if (queryTokens > request.profile.queryEmbedding.maximumInputTokens) {
-      throw new RetrievalError(
-        "The retrieval query exceeds the configured embedding token limit.",
-        "retrieval.invalidConfiguration",
-      );
-    }
     const embedded = await Promise.all(
       groups.map(async (group) => {
+        const queryTokens = this.countTokens({
+          text: request.query,
+          bindingVersionId: group.bindingVersionId,
+          purpose: "embedding",
+        });
+        if (queryTokens > request.profile.queryEmbedding.maximumInputTokens) {
+          throw new RetrievalError(
+            "The retrieval query exceeds the configured embedding token limit.",
+            "retrieval.invalidConfiguration",
+          );
+        }
         const result = await this.dependencies.ai.execute<EmbeddingResult>(
           {
             kind: "embedding",
             role: "embedding",
             bindingVersionId: group.bindingVersionId,
+            ...(request.snapshot.analysisId === undefined
+              ? {}
+              : { analysisId: request.snapshot.analysisId }),
+            ...(request.attribution === undefined
+              ? {}
+              : { attribution: request.attribution }),
             maximumInputTokens:
               request.profile.queryEmbedding.maximumInputTokens,
             budget: request.profile.queryEmbedding.budget,
@@ -578,13 +588,17 @@ export class RetrievalService {
   private async rerank(
     candidates: readonly FusedCandidate[],
     request: RetrievalRequest,
-    queryTokens: number,
   ): Promise<{
     readonly candidates: readonly FusedCandidate[];
     readonly operationId?: string;
   }> {
     const policy = request.profile.reranker;
     if (policy === undefined) return { candidates };
+    const queryTokens = this.countTokens({
+      text: request.query,
+      bindingVersionId: policy.bindingVersionId,
+      purpose: "reranking",
+    });
     if (queryTokens > policy.maximumInputTokens) {
       throw new RetrievalError(
         "The retrieval query exceeds the configured reranker token limit.",
@@ -594,10 +608,11 @@ export class RetrievalService {
     let consumedTokens = queryTokens;
     const bounded: FusedCandidate[] = [];
     for (const candidate of candidates.slice(0, policy.maximumCandidates)) {
-      const tokenCount = this.dependencies.tokens.count(
-        candidate.candidate.content,
-      );
-      requireNonNegativeInteger(tokenCount, "Candidate token count");
+      const tokenCount = this.countTokens({
+        text: candidate.candidate.content,
+        bindingVersionId: policy.bindingVersionId,
+        purpose: "reranking",
+      });
       if (consumedTokens + tokenCount > policy.maximumInputTokens) continue;
       consumedTokens += tokenCount;
       bounded.push(candidate);
@@ -608,6 +623,12 @@ export class RetrievalService {
         kind: "reranker",
         role: "reranker",
         bindingVersionId: policy.bindingVersionId,
+        ...(request.snapshot.analysisId === undefined
+          ? {}
+          : { analysisId: request.snapshot.analysisId }),
+        ...(request.attribution === undefined
+          ? {}
+          : { attribution: request.attribution }),
         requiredCapabilities: ["reranking"],
         maximumInputTokens: policy.maximumInputTokens,
         ...(policy.timeoutMs === undefined
@@ -659,10 +680,11 @@ export class RetrievalService {
         continue;
       }
       const characterCount = candidate.candidate.content.length;
-      const tokenCount = this.dependencies.tokens.count(
-        candidate.candidate.content,
-      );
-      requireNonNegativeInteger(tokenCount, "Candidate token count");
+      const tokenCount = this.countTokens({
+        text: candidate.candidate.content,
+        bindingVersionId: profile.contextTokenBindingVersionId,
+        purpose: "context",
+      });
       if (
         characters + characterCount > profile.policy.maximumCharacters ||
         tokens + tokenCount > profile.policy.maximumTokens
@@ -675,6 +697,16 @@ export class RetrievalService {
       evidence.push(immutableEvidence(candidate, tokenCount));
     }
     return Object.freeze(evidence);
+  }
+
+  private countTokens(input: {
+    readonly text: string;
+    readonly bindingVersionId: string;
+    readonly purpose: RetrievalTokenCountPurpose;
+  }): number {
+    const count = this.dependencies.tokens.count(input);
+    requireNonNegativeInteger(count, "Token count");
+    return count;
   }
 
   private async persistSnapshot(

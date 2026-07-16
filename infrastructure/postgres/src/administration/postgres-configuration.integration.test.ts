@@ -379,7 +379,11 @@ describe("PostgreSQL configuration lifecycle", () => {
     const registry = new PostgresDescriptorRegistry(client);
     const descriptor = {
       kind: "connector" as const,
-      type: "synthetic-source",
+      // This isolated registry test runs alongside feature integration tests
+      // that seed valid-but-minimal descriptors directly for their own
+      // projections. Keep this test's cursor range distinct from those
+      // immutable fixtures; production registration remains strict.
+      type: "000-synthetic-source",
       version: "1",
       displayName: "Synthetic source",
       description: "Safe test descriptor",
@@ -409,16 +413,16 @@ describe("PostgreSQL configuration lifecycle", () => {
       await registry.register(descriptor);
       await registry.register({
         ...descriptor,
-        type: "synthetic-source-second",
+        type: "001-synthetic-source-second",
       });
       await expect(registry.register(descriptor)).resolves.toMatchObject({
-        type: "synthetic-source",
+        type: "000-synthetic-source",
       });
       await expect(
         registry.register({ ...descriptor, displayName: "Changed" }),
       ).rejects.toThrow(/different content/i);
       const firstPage = await registry.list({ limit: 1 });
-      expect(firstPage).toMatchObject([{ type: "synthetic-source" }]);
+      expect(firstPage).toMatchObject([{ type: "000-synthetic-source" }]);
       const first = firstPage[0];
       if (first === undefined)
         throw new Error("Expected descriptor page item.");
@@ -427,9 +431,9 @@ describe("PostgreSQL configuration lifecycle", () => {
           limit: 1,
           after: PostgresDescriptorRegistry.cursorFor(first),
         }),
-      ).resolves.toMatchObject([{ type: "synthetic-source-second" }]);
+      ).resolves.toMatchObject([{ type: "001-synthetic-source-second" }]);
       await expect(
-        registry.find({ kind: "connector", type: "synthetic-source" }),
+        registry.find({ kind: "connector", type: "000-synthetic-source" }),
       ).resolves.toMatchObject({ version: "1" });
 
       await persistence.unitOfWork.transaction(async (transaction) => {
@@ -446,7 +450,7 @@ describe("PostgreSQL configuration lifecycle", () => {
           secretReferenceIds: ["secret-reference-a"],
           descriptor: {
             kind: "connector",
-            type: "synthetic-source",
+            type: "000-synthetic-source",
             version: "1",
           },
         });
@@ -454,7 +458,7 @@ describe("PostgreSQL configuration lifecycle", () => {
           displayName: "Descriptor-backed connector",
           descriptor: {
             kind: "connector",
-            type: "synthetic-source",
+            type: "000-synthetic-source",
             version: "1",
           },
           secretReferenceIds: ["secret-reference-a"],
@@ -476,7 +480,7 @@ describe("PostgreSQL configuration lifecycle", () => {
         expect(transitioned?.version).toMatchObject({
           descriptor: {
             kind: "connector",
-            type: "synthetic-source",
+            type: "000-synthetic-source",
             version: "1",
           },
           displayName: "Descriptor-backed connector",
@@ -525,7 +529,7 @@ describe("PostgreSQL configuration lifecycle", () => {
       });
       await expect(
         pool.query(
-          "DELETE FROM administration_descriptor_revisions WHERE type = 'synthetic-source'",
+          "DELETE FROM administration_descriptor_revisions WHERE type = '000-synthetic-source'",
         ),
       ).rejects.toThrow(/immutable/i);
     } finally {

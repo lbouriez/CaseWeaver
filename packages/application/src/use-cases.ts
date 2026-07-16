@@ -9,6 +9,7 @@ import {
   createEnvelope,
   IdempotencyConflictError,
   outboxEnvelopeId,
+  type PrincipalId,
   type Sha256Digest,
   transitionAnalysisJob,
   workspaceId,
@@ -121,6 +122,140 @@ export interface RequestAnalysisResult {
   readonly replayed: boolean;
 }
 
+/**
+ * A trusted caller that has already established authorization may use this
+ * transaction-local context to create the same durable analysis request as an
+ * interactive caller. The optional actor is retained for automated work whose
+ * originating principal was recorded before it reached a worker.
+ */
+export type AuthorizedAnalysisRequestContext = Omit<
+  ExecutionContext,
+  "principalId"
+> & {
+  readonly principalId?: PrincipalId;
+};
+
+/** Dependencies shared by interactive and pre-authorized trigger requests. */
+export interface AnalysisRequestTransactionDependencies {
+  readonly store: AnalysisRequestStore;
+  readonly outbox: OutboxStore;
+  readonly audit: AuditStore;
+  readonly ids: IdGenerator;
+  readonly clock: Clock;
+}
+
+/**
+ * Creates/replays one analysis identity, job, idempotency record, outbox
+ * command, and audit record in the caller's existing transaction. It contains
+ * the PBI-011 durable request policy; authorization remains at the outer
+ * use-case boundary.
+ */
+export async function requestAnalysisInTransaction(
+  dependencies: AnalysisRequestTransactionDependencies,
+  transaction: import("./ports.js").ApplicationTransaction,
+  command: RequestAnalysisCommand,
+  context: AuthorizedAnalysisRequestContext,
+): Promise<RequestAnalysisResult> {
+  throwIfAborted(context.signal);
+  const idempotency = {
+    workspaceId: context.workspaceId,
+    operation: "analysis.request" as const,
+    keyDigest: command.idempotencyKeyDigest,
+  };
+  await dependencies.store.lockIdempotencyKey(transaction, idempotency);
+  const prior = await dependencies.store.findIdempotency(
+    transaction,
+    idempotency,
+  );
+  if (prior !== undefined) {
+    if (prior.requestDigest !== command.requestDigest) {
+      throw new IdempotencyConflictError("analysis.request");
+    }
+    const job = await dependencies.store.findJob(transaction, {
+      workspaceId: context.workspaceId,
+      analysisJobId: prior.resourceId,
+    });
+    if (job === undefined) {
+      throw new Error("Stored idempotency resource is missing.");
+    }
+    return {
+      analysisJobId: job.id,
+      analysisIdentityId: job.analysisIdentityId,
+      replayed: true,
+    };
+  }
+
+  const occurredAt = dependencies.clock.now();
+  const identity = await dependencies.store.findOrCreateIdentity(transaction, {
+    id: analysisIdentityId(dependencies.ids.next("analysisIdentity")),
+    workspaceId: context.workspaceId,
+    identityHash: command.identityHash,
+    analysisProfileVersionId: command.analysisProfileVersionId,
+    caseSnapshotId: command.caseSnapshotId,
+    occurredAt,
+  });
+  let job = await dependencies.store.findJobByRunOrdinal(transaction, {
+    workspaceId: context.workspaceId,
+    analysisIdentityId: identity.id,
+    runOrdinal: 0,
+  });
+  if (job === undefined) {
+    job = {
+      id: analysisJobId(dependencies.ids.next("analysisJob")),
+      workspaceId: context.workspaceId,
+      analysisIdentityId: identity.id,
+      runOrdinal: 0,
+      state: "queued",
+      createdAt: occurredAt,
+      updatedAt: occurredAt,
+    };
+    await dependencies.store.createJob(transaction, job);
+    await dependencies.outbox.append(
+      transaction,
+      createEnvelope({
+        id: outboxEnvelopeId(dependencies.ids.next("outboxEnvelope")),
+        kind: "command",
+        type: "analysis.execute.v1",
+        schemaVersion: 1,
+        workspaceId: context.workspaceId,
+        occurredAt,
+        correlationId: context.correlationId,
+        causationId: causationId(context.requestId),
+        ...(context.traceContext === undefined
+          ? {}
+          : { traceContext: context.traceContext }),
+        payload: {
+          analysisJobId: job.id,
+          analysisIdentityId: identity.id,
+        },
+      }),
+    );
+    await dependencies.audit.append(transaction, {
+      id: auditEventId(dependencies.ids.next("auditEvent")),
+      workspaceId: context.workspaceId,
+      ...(context.principalId === undefined
+        ? {}
+        : { actorPrincipalId: context.principalId }),
+      action: "analysis.requested",
+      targetId: job.id,
+      afterHash: command.requestDigest,
+      occurredAt,
+    });
+  }
+  await dependencies.store.recordIdempotency(transaction, {
+    ...idempotency,
+    requestDigest: command.requestDigest,
+    resourceId: job.id,
+    occurredAt,
+  });
+
+  return {
+    analysisJobId: job.id,
+    analysisIdentityId: job.analysisIdentityId,
+    replayed: false,
+  };
+}
+
 export class RequestAnalysis {
   public constructor(
     private readonly unitOfWork: UnitOfWork,
@@ -139,100 +274,20 @@ export class RequestAnalysis {
     await requirePermission(this.authorization, context, "analysis.request");
     throwIfAborted(context.signal);
 
-    return this.unitOfWork.transaction(async (transaction) => {
-      const idempotency = {
-        workspaceId: context.workspaceId,
-        operation: "analysis.request" as const,
-        keyDigest: command.idempotencyKeyDigest,
-      };
-      await this.store.lockIdempotencyKey(transaction, idempotency);
-      const prior = await this.store.findIdempotency(transaction, idempotency);
-      if (prior !== undefined) {
-        if (prior.requestDigest !== command.requestDigest) {
-          throw new IdempotencyConflictError("analysis.request");
-        }
-        const job = await this.store.findJob(transaction, {
-          workspaceId: context.workspaceId,
-          analysisJobId: prior.resourceId,
-        });
-        if (job === undefined) {
-          throw new Error("Stored idempotency resource is missing.");
-        }
-        return {
-          analysisJobId: job.id,
-          analysisIdentityId: job.analysisIdentityId,
-          replayed: true,
-        };
-      }
-
-      const occurredAt = this.clock.now();
-      const identity = await this.store.findOrCreateIdentity(transaction, {
-        id: analysisIdentityId(this.ids.next("analysisIdentity")),
-        workspaceId: context.workspaceId,
-        identityHash: command.identityHash,
-        analysisProfileVersionId: command.analysisProfileVersionId,
-        caseSnapshotId: command.caseSnapshotId,
-        occurredAt,
-      });
-      let job = await this.store.findJobByRunOrdinal(transaction, {
-        workspaceId: context.workspaceId,
-        analysisIdentityId: identity.id,
-        runOrdinal: 0,
-      });
-      if (job === undefined) {
-        job = {
-          id: analysisJobId(this.ids.next("analysisJob")),
-          workspaceId: context.workspaceId,
-          analysisIdentityId: identity.id,
-          runOrdinal: 0,
-          state: "queued",
-          createdAt: occurredAt,
-          updatedAt: occurredAt,
-        };
-        await this.store.createJob(transaction, job);
-        await this.outbox.append(
-          transaction,
-          createEnvelope({
-            id: outboxEnvelopeId(this.ids.next("outboxEnvelope")),
-            kind: "command",
-            type: "analysis.execute.v1",
-            schemaVersion: 1,
-            workspaceId: context.workspaceId,
-            occurredAt,
-            correlationId: context.correlationId,
-            causationId: causationId(context.requestId),
-            ...(context.traceContext === undefined
-              ? {}
-              : { traceContext: context.traceContext }),
-            payload: {
-              analysisJobId: job.id,
-              analysisIdentityId: identity.id,
-            },
-          }),
-        );
-        await this.audit.append(transaction, {
-          id: auditEventId(this.ids.next("auditEvent")),
-          workspaceId: context.workspaceId,
-          actorPrincipalId: context.principalId,
-          action: "analysis.requested",
-          targetId: job.id,
-          afterHash: command.requestDigest,
-          occurredAt,
-        });
-      }
-      await this.store.recordIdempotency(transaction, {
-        ...idempotency,
-        requestDigest: command.requestDigest,
-        resourceId: job.id,
-        occurredAt,
-      });
-
-      return {
-        analysisJobId: job.id,
-        analysisIdentityId: identity.id,
-        replayed: false,
-      };
-    });
+    return this.unitOfWork.transaction((transaction) =>
+      requestAnalysisInTransaction(
+        {
+          store: this.store,
+          outbox: this.outbox,
+          audit: this.audit,
+          ids: this.ids,
+          clock: this.clock,
+        },
+        transaction,
+        command,
+        context,
+      ),
+    );
   }
 }
 

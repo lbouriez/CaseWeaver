@@ -111,7 +111,9 @@ export function buildApi({
               : administrationCode === "administration.notFound"
                 ? 404
                 : error instanceof AuthSessionServiceError &&
-                    error.code === "auth.session.required"
+                    (error.code === "auth.session.required" ||
+                      error.code === "auth.login.invalid" ||
+                      error.code === "auth.login.disabled")
                   ? 401
                   : error instanceof AuthSessionServiceError
                     ? 403

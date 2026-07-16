@@ -173,6 +173,124 @@ describe("AdministrationApiOperations audit boundary", () => {
     );
   });
 
+  it("audits malformed authenticated requests with route-owned metadata only", async () => {
+    const append = vi.fn(async () => undefined);
+    const transaction = {};
+    const api = operations({
+      auth: {
+        resolve: vi.fn(async () => ({
+          principalId: "principal-1",
+          workspaceId: "workspace-1",
+          session: { id: "session-1" },
+          permissions: ["configuration.manage"],
+        })),
+      },
+      unitOfWork: {
+        transaction: async (operation: (value: unknown) => unknown) =>
+          operation(transaction),
+      },
+      auditStore: { append },
+    });
+
+    await api.rejectInvalidRequest(
+      {
+        id: "request-1",
+        headers: { "idempotency-key": "browser-idempotency-key" },
+        query: { private: "query-value-must-not-be-audited" },
+        body: { secret: "body-value-must-not-be-audited" },
+      },
+      {
+        action: "admin.configuration.draft.create.invalid",
+        permission: "configuration.manage",
+        targetType: "connector-instances",
+        targetId: "new",
+        mutation: true,
+        reasonCode: "request.invalid",
+      },
+    );
+
+    const record = append.mock.calls[0]?.[1];
+    expect(record).toMatchObject({
+      action: "admin.configuration.draft.create.invalid",
+      permission: "configuration.manage",
+      targetType: "connector-instances",
+      targetId: "new",
+      outcome: "failed",
+      reasonCode: "request.invalid",
+      workspaceId: "workspace-1",
+      actorPrincipalId: "principal-1",
+    });
+    expect(JSON.stringify(record)).not.toContain(
+      "query-value-must-not-be-audited",
+    );
+    expect(JSON.stringify(record)).not.toContain(
+      "body-value-must-not-be-audited",
+    );
+    expect(JSON.stringify(record)).not.toContain("browser-idempotency-key");
+    expect(record).toMatchObject({
+      idempotencyKeyDigest: expect.stringMatching(/^[a-f0-9]{64}$/u),
+    });
+  });
+
+  it("fails closed when an invalid-request audit cannot persist", async () => {
+    const api = operations({
+      auth: {
+        resolve: vi.fn(async () => ({
+          principalId: "principal-1",
+          workspaceId: "workspace-1",
+          session: { id: "session-1" },
+          permissions: ["configuration.manage"],
+        })),
+      },
+      unitOfWork: {
+        transaction: async (operation: (value: unknown) => unknown) =>
+          operation({}),
+      },
+      auditStore: {
+        append: vi.fn(async () => {
+          throw new Error("audit storage unavailable");
+        }),
+      },
+    });
+
+    await expect(
+      api.rejectInvalidRequest(
+        { headers: {} },
+        {
+          action: "admin.configuration.draft.create.invalid",
+          permission: "configuration.manage",
+          targetType: "connector-instances",
+          targetId: "new",
+          mutation: true,
+          reasonCode: "request.invalid",
+        },
+      ),
+    ).rejects.toMatchObject({ name: "AdministrationUnavailableError" });
+  });
+
+  it("records malformed password login without retaining supplied credentials", async () => {
+    const record = vi.fn(async () => undefined);
+    const api = operations({ authAudits: { record } });
+
+    await api.rejectInvalidPasswordLogin({
+      headers: { "idempotency-key": "password-login-request-0002" },
+      body: { login: "operator", password: "password-must-not-be-audited" },
+    });
+
+    const plan = record.mock.calls[0]?.[0];
+    expect(plan).toMatchObject({
+      event: {
+        action: "auth.login.failed",
+        outcome: "failed",
+        targetType: "password-login",
+        targetId: "configured-login",
+        reasonCode: "credentials.invalid",
+      },
+    });
+    expect(JSON.stringify(plan)).not.toContain("password-must-not-be-audited");
+    expect(JSON.stringify(plan)).not.toContain("password-login-request-0002");
+  });
+
   it("stores an idempotency digest in canonical SHA-256 form rather than a browser token", async () => {
     const append = vi.fn(async () => undefined);
     const api = operations({

@@ -218,6 +218,10 @@ export interface OidcAdministrationApiFixture {
 export function createOidcAdministrationApiFixture(
   input: Readonly<{
     readonly allowedAdminOrigins: readonly string[];
+    readonly passwordAuthentication?: Readonly<{
+      readonly login: string;
+      readonly password: string;
+    }>;
   }>,
 ): OidcAdministrationApiFixture {
   const sessions = new MemorySessionStore();
@@ -288,6 +292,16 @@ export function createOidcAdministrationApiFixture(
     now: () => new Date("2030-01-01T00:00:00.000Z"),
     secureCookies: false,
     allowedOrigins: input.allowedAdminOrigins,
+    ...(input.passwordAuthentication === undefined
+      ? {}
+      : {
+          passwordAuthentication: {
+            ...input.passwordAuthentication,
+            workspaceId: "workspace-a",
+            principalId: "local-password-administrator",
+            displayName: "Local administrator",
+          },
+        }),
   };
   const authAudits: AuthAuditRecorder = {
     record: async (plan) => {

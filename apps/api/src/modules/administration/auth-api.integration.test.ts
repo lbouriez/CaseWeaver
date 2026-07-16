@@ -13,6 +13,58 @@ function sessionCookie(setCookie: string): string {
 }
 
 describe("OIDC administration API integration", () => {
+  it("accepts deployment-configured password credentials without exposing them and creates the normal server session", async () => {
+    const built = createOidcAdministrationApiFixture({
+      allowedAdminOrigins: [adminOrigin],
+      passwordAuthentication: { login: "admin", password: "admin" },
+    });
+    const signedIn = await built.app.inject({
+      method: "POST",
+      url: "/v1/auth/login/password",
+      headers: {
+        origin: adminOrigin,
+        "idempotency-key": "password-login-request-0001",
+      },
+      payload: { login: "admin", password: "admin" },
+    });
+
+    expect(signedIn.statusCode).toBe(200);
+    expect(signedIn.json()).toMatchObject({
+      authenticated: true,
+      principal: {
+        id: "local-password-administrator",
+        displayName: "Local administrator",
+      },
+    });
+    expect(signedIn.headers["set-cookie"]).toContain("HttpOnly");
+    expect(signedIn.body).not.toContain('"password"');
+
+    const rejected = await built.app.inject({
+      method: "POST",
+      url: "/v1/auth/login/password",
+      headers: {
+        origin: adminOrigin,
+        "idempotency-key": "password-login-request-0002",
+      },
+      payload: { login: "admin", password: "incorrect" },
+    });
+    expect(rejected.statusCode).toBe(401);
+    expect(rejected.body).not.toContain("incorrect");
+    expect(JSON.stringify(built.auditPlans)).not.toContain(
+      '"password":"admin"',
+    );
+    expect(built.auditPlans).toContainEqual(
+      expect.objectContaining({
+        event: expect.objectContaining({
+          action: "auth.login.failed",
+          targetType: "password-login",
+          reasonCode: "credentials.invalid",
+        }),
+      }),
+    );
+    await built.app.close();
+  });
+
   it("runs the token-free login, callback, session, workspace rotation, and logout journey with server-owned audit", async () => {
     const built = createOidcAdministrationApiFixture({
       allowedAdminOrigins: [adminOrigin],
@@ -77,7 +129,10 @@ describe("OIDC administration API integration", () => {
       url: "/v1/auth/session",
       headers: { cookie: firstCookie },
     });
-    expect(staleSession.json()).toEqual({ authenticated: false });
+    expect(staleSession.json()).toEqual({
+      authenticated: false,
+      authentication: { password: false, oauth: true },
+    });
 
     const switchedBody = switched.json();
     const logout = await built.app.inject({
@@ -98,7 +153,10 @@ describe("OIDC administration API integration", () => {
       url: "/v1/auth/session",
       headers: { cookie: secondCookie },
     });
-    expect(loggedOutSession.json()).toEqual({ authenticated: false });
+    expect(loggedOutSession.json()).toEqual({
+      authenticated: false,
+      authentication: { password: false, oauth: true },
+    });
 
     expect(built.auditPlans.map((plan) => plan.event.action)).toEqual(
       expect.arrayContaining([

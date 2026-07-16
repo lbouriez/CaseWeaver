@@ -17,18 +17,27 @@ import { derivativeCacheIdentity } from "./identity.js";
 import { intakeAttachment } from "./intake.js";
 import { processAttachment } from "./processing.js";
 import { normalizeText } from "./text.js";
+import { verifyNormalizedAttachmentOutput } from "./verified-output.js";
 import { inspectZipArchive, validateArchiveEntries } from "./zip.js";
 
 class TestBlobStore implements BlobStore, AttachmentOutputStore {
+  public readonly storageBackendId = "test-memory";
   public readonly chunks: Uint8Array[] = [];
   public readonly createdOutputs: BlobHandle[] = [];
   public aborted = 0;
   public written = "";
+  private readonly blobs = new Map<string, Uint8Array>([
+    ["input", Uint8Array.of(137, 80, 78, 71, 13, 10, 26, 10)],
+  ]);
 
   public async beginStaging(input: {
     readonly workspaceId: string;
   }): Promise<BlobStagingHandle> {
-    return { workspaceId: input.workspaceId, id: "stage-1" };
+    return {
+      workspaceId: input.workspaceId,
+      storageBackendId: this.storageBackendId,
+      id: "stage-1",
+    };
   }
 
   public async append(
@@ -39,19 +48,23 @@ class TestBlobStore implements BlobStore, AttachmentOutputStore {
   }
 
   public async commit(staging: BlobStagingHandle): Promise<BlobHandle> {
-    return { workspaceId: staging.workspaceId, key: "input" };
+    return {
+      workspaceId: staging.workspaceId,
+      storageBackendId: this.storageBackendId,
+      key: "input",
+    };
   }
 
   public async abort(): Promise<void> {
     this.aborted += 1;
   }
 
-  public async privateUrl(): Promise<string> {
-    return "caseweaver-blob://private/workspace-1/input";
-  }
-
-  public async open(): Promise<AsyncIterable<Uint8Array>> {
-    return (async function* () {})();
+  public async open(handle: BlobHandle): Promise<AsyncIterable<Uint8Array>> {
+    const content = this.blobs.get(handle.key);
+    if (content === undefined) throw new Error("Test blob was not found.");
+    return (async function* () {
+      yield content.slice();
+    })();
   }
 
   public async writeText(
@@ -60,9 +73,12 @@ class TestBlobStore implements BlobStore, AttachmentOutputStore {
     text: string,
   ): Promise<void> {
     this.written = text;
+    this.blobs.set(_handle.key, new TextEncoder().encode(text));
   }
 
-  public async delete(): Promise<void> {}
+  public async delete(handle: BlobHandle): Promise<void> {
+    this.blobs.delete(handle.key);
+  }
 
   public async createOutput(
     workspaceId: string,
@@ -71,6 +87,7 @@ class TestBlobStore implements BlobStore, AttachmentOutputStore {
     if (signal.aborted) throw new DOMException("aborted", "AbortError");
     const output = {
       workspaceId,
+      storageBackendId: this.storageBackendId,
       key: `output-${this.createdOutputs.length}`,
     };
     this.createdOutputs.push(output);
@@ -195,6 +212,7 @@ describe("attachment derivative identity and processing", () => {
     prompt: "immutable prompt",
     promptVersion: base.visionPromptVersion,
     bindingVersionId: base.visionBindingVersionId,
+    maximumInlineBytes: 8,
     maximumInputTokens: 10,
     maximumOutputTokens: 10,
     budget: { currency: "USD", hard: true },
@@ -248,7 +266,11 @@ describe("attachment derivative identity and processing", () => {
     const input = {
       workspaceId: "workspace-1",
       sourceReference: reference,
-      blob: { workspaceId: "workspace-1", key: "input" },
+      blob: {
+        workspaceId: "workspace-1",
+        storageBackendId: "test-memory",
+        key: "input",
+      },
       byteLength: 8,
       sha256: "a".repeat(64),
       detectedMimeType: "image/png",
@@ -292,13 +314,159 @@ describe("attachment derivative identity and processing", () => {
         bindingVersionId: "binding.v1",
         request: {
           prompt: "immutable prompt",
-          images: [{ url: "caseweaver-blob://private/workspace-1/input" }],
+          images: [{ url: "data:image/png;base64,iVBORw0KGgo=" }],
         },
       },
     ]);
     expect(store.written).toBe("visible error 42");
     expect(derivative?.operationId).toBe("vision-operation-1");
+    expect(derivative).toMatchObject({
+      outputByteLength: 16,
+      outputContentHash:
+        "b42fcf6ca458bc164a3f5732ace859dfbfd46a0e11931de3a0401fb230bd5936",
+    });
     expect(completed?.operationId).toBe("vision-operation-1");
+  });
+
+  it("rejects a runtime output whose stored length differs from its attested count", async () => {
+    const store = new TestBlobStore();
+    const textIdentity = derivativeCacheIdentity({
+      workspaceId: base.workspaceId,
+      accessPolicyHash: base.accessPolicyHash,
+      contentSha256: base.contentSha256,
+      processor: "text",
+      processorVersion: base.processorVersion,
+      securityPolicyVersion: base.securityPolicyVersion,
+      normalizationVersion: base.normalizationVersion,
+    });
+    const failures: string[] = [];
+    await expect(
+      processAttachment({
+        attachment: {
+          workspaceId: "workspace-1",
+          sourceReference: reference,
+          blob: {
+            workspaceId: "workspace-1",
+            storageBackendId: "test-memory",
+            key: "input",
+          },
+          byteLength: 8,
+          sha256: "a".repeat(64),
+          detectedMimeType: "text/plain",
+        },
+        accessPolicyHash: "access-a",
+        identity: textIdentity,
+        processing: { ...processing, processor: "text" },
+        repository: {
+          claimDerivative: async () => ({
+            kind: "claimed",
+            claimId: "claim-1",
+          }),
+          completeDerivative: async () => {
+            throw new Error("mismatched output must not complete");
+          },
+          failDerivative: async ({ code }) => {
+            failures.push(code);
+          },
+        },
+        blobStore: store,
+        outputStore: store,
+        runtime: {
+          execute: async (request) => {
+            await store.writeText(
+              request.output,
+              request.workspaceId,
+              "runtime text",
+              request.signal,
+            );
+            return {
+              output: request.output,
+              outputByteLength: 999,
+              attestation: {
+                networkDisabled: true,
+                credentialsUnavailable: true,
+                disposableFilesystem: true,
+                quotasEnforced: true,
+              },
+            };
+          },
+          cleanup: async ({ handles, workspaceId }) => {
+            await Promise.all(
+              handles.map((handle) => store.delete(handle, workspaceId)),
+            );
+          },
+        },
+        quotas: {
+          timeoutMs: 100,
+          maximumMemoryBytes: 1_024,
+          maximumOutputBytes: 1_024,
+          maximumFiles: 1,
+          maximumExpandedBytes: 1_024,
+          maximumExtractedFileBytes: 1_024,
+          maximumArchiveDepth: 1,
+          maximumCompressionRatio: 10,
+        },
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toMatchObject({ code: "attachment.storageLengthMismatch" });
+    expect(failures).toEqual(["attachment.storageLengthMismatch"]);
+  });
+
+  it("rejects an image above the explicit inline vision limit before claiming or allocating output", async () => {
+    const store = new TestBlobStore();
+    let claims = 0;
+    await expect(
+      processAttachment({
+        attachment: {
+          workspaceId: "workspace-1",
+          sourceReference: reference,
+          blob: {
+            workspaceId: "workspace-1",
+            storageBackendId: "test-memory",
+            key: "input",
+          },
+          byteLength: vision.maximumInlineBytes + 1,
+          sha256: "a".repeat(64),
+          detectedMimeType: "image/png",
+        },
+        accessPolicyHash: "access-a",
+        identity: derivativeCacheIdentity(base),
+        processing,
+        repository: {
+          claimDerivative: async () => {
+            claims += 1;
+            return { kind: "claimed", claimId: "claim-1" };
+          },
+          completeDerivative: async () => {},
+          failDerivative: async () => {},
+        },
+        blobStore: store,
+        outputStore: store,
+        runtime: {
+          execute: async () => {
+            throw new Error("bounded vision input must not reach the runtime");
+          },
+          cleanup: async () => {},
+        },
+        quotas: {
+          timeoutMs: 100,
+          maximumMemoryBytes: 100,
+          maximumOutputBytes: 100,
+          maximumFiles: 1,
+          maximumExpandedBytes: 100,
+          maximumExtractedFileBytes: 100,
+          maximumArchiveDepth: 1,
+          maximumCompressionRatio: 10,
+        },
+        vision,
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toMatchObject({
+      code: "attachment.visionInputTooLarge",
+      retryable: false,
+    });
+    expect(claims).toBe(0);
+    expect(store.createdOutputs).toEqual([]);
   });
 
   it("does not allocate or clean output for cache hits and active claims", async () => {
@@ -308,8 +476,14 @@ describe("attachment derivative identity and processing", () => {
       id: "cached",
       identity,
       status: "completed",
-      output: { workspaceId: "workspace-1", key: "cached-output" },
+      output: {
+        workspaceId: "workspace-1",
+        storageBackendId: "test-memory",
+        key: "cached-output",
+      },
       mimeType: "text/plain",
+      outputContentHash: "a".repeat(64),
+      outputByteLength: 1,
     };
     const noRuntime = {
       execute: async () => {
@@ -323,7 +497,11 @@ describe("attachment derivative identity and processing", () => {
       attachment: {
         workspaceId: "workspace-1",
         sourceReference: reference,
-        blob: { workspaceId: "workspace-1", key: "input" },
+        blob: {
+          workspaceId: "workspace-1",
+          storageBackendId: "test-memory",
+          key: "input",
+        },
         byteLength: 1,
         sha256: "a".repeat(64),
         detectedMimeType: "image/png",
@@ -400,7 +578,11 @@ describe("attachment derivative identity and processing", () => {
         attachment: {
           workspaceId: "workspace-1",
           sourceReference: reference,
-          blob: { workspaceId: "workspace-1", key: "input" },
+          blob: {
+            workspaceId: "workspace-1",
+            storageBackendId: "test-memory",
+            key: "input",
+          },
           byteLength: 1,
           sha256: "a".repeat(64),
           detectedMimeType: "image/png",
@@ -483,7 +665,11 @@ describe("attachment derivative identity and processing", () => {
         attachment: {
           workspaceId: "workspace-1",
           sourceReference: reference,
-          blob: { workspaceId: "workspace-1", key: "input" },
+          blob: {
+            workspaceId: "workspace-1",
+            storageBackendId: "test-memory",
+            key: "input",
+          },
           byteLength: 1,
           sha256: "a".repeat(64),
           detectedMimeType: "image/png",
@@ -527,6 +713,41 @@ describe("attachment derivative identity and processing", () => {
 });
 
 describe("safe text and archive boundaries", () => {
+  it("seals only exact canonical normalized output bytes", async () => {
+    const store = new TestBlobStore();
+    const signal = new AbortController().signal;
+    const output = await store.createOutput("workspace-1", signal);
+    await store.writeText(output, "workspace-1", "canonical\ntext", signal);
+
+    await expect(
+      verifyNormalizedAttachmentOutput({
+        blobStore: store,
+        output,
+        workspaceId: "workspace-1",
+        maximumBytes: 100,
+        signal,
+        expectedByteLength: 14,
+      }),
+    ).resolves.toMatchObject({
+      text: "canonical\ntext",
+      byteLength: 14,
+      contentHash:
+        "db34c90ccacf1283fa7f6a4beee52ef42daaedd303b97d4743417d642990abcd",
+    });
+
+    const nonCanonical = await store.createOutput("workspace-1", signal);
+    await store.writeText(nonCanonical, "workspace-1", "line\r\n", signal);
+    await expect(
+      verifyNormalizedAttachmentOutput({
+        blobStore: store,
+        output: nonCanonical,
+        workspaceId: "workspace-1",
+        maximumBytes: 100,
+        signal,
+      }),
+    ).rejects.toMatchObject({ code: "attachment.outputNotNormalized" });
+  });
+
   it("rejects malformed UTF-8 and bounds normalized output without breaking characters", () => {
     expect(() => normalizeText(Uint8Array.of(0xc3, 0x28), 100)).toThrow(
       "valid UTF-8",

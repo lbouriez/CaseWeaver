@@ -31,3 +31,21 @@ Publishing scopes marker lookup to the target case before a form-encoded
 The exported administration descriptor supplies safe discovery/form metadata only. API
 composition registers it dynamically, while this adapter remains authoritative for
 Jitbit settings and secret-reference validation.
+
+## Production runtime contribution
+
+`createJitbitRuntimeContribution` is the connector-owned construction boundary for a
+trusted worker/runtime registry. It accepts only an exact
+`ServerPrivateConnectorConfiguration` version plus the registry-injected server-side
+secret resolver, validates the descriptor/settings/opaque credential locator
+relationship, and returns the declared knowledge-source, case-source, and
+analysis-destination ports sharing one `JitbitClient`. It resolves no secret while it
+is constructed; the client resolves the opaque reference only for a cancellable outbound
+request.
+
+The current descriptor revision is `2`, whose `requestTimeoutMs` field matches the
+authoritative settings schema. Revision `1` is retained only so durable historical
+configuration versions can be read by trusted runtime composition through
+`createJitbitRuntimeContributions`; new API drafts must use revision `2`. Neither
+revision exposes a secret value, locator, client, or runtime exception through
+descriptor metadata.

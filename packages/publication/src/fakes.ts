@@ -60,6 +60,11 @@ export class InMemoryPublicationDestinationResolver
   implements PublicationDestinationResolver
 {
   private readonly destinations = new Map<string, AnalysisDestination>();
+  public readonly resolveRequests: Array<{
+    readonly workspaceId: import("@caseweaver/domain").WorkspaceId;
+    readonly connectorRegistrationId: string;
+    readonly connectorConfigurationVersionId: string;
+  }> = [];
 
   public register(
     connectorInstanceId: string,
@@ -73,7 +78,14 @@ export class InMemoryPublicationDestinationResolver
     this.destinations.set(connectorInstanceId, destination);
   }
 
-  public resolve(connectorInstanceId: string): AnalysisDestination | undefined {
-    return this.destinations.get(connectorInstanceId);
+  public async resolve(
+    input: Parameters<PublicationDestinationResolver["resolve"]>[0],
+  ): Promise<AnalysisDestination | undefined> {
+    this.resolveRequests.push({
+      workspaceId: input.workspaceId,
+      connectorRegistrationId: input.connectorRegistrationId,
+      connectorConfigurationVersionId: input.connectorConfigurationVersionId,
+    });
+    return this.destinations.get(input.connectorRegistrationId);
   }
 }

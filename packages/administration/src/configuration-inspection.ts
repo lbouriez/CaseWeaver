@@ -55,6 +55,8 @@ export type ConfigurationSurfaceReasonCode =
 
 export const configurationWorkflowCapabilities = [
   "create_draft",
+  "create",
+  "replace",
   "validate",
   "activate",
   "disable",

@@ -15,8 +15,8 @@ PBI-014 MCP and PBI-015 chat remain deferred and are not prerequisites.
 
 ## Current delivery state
 
-**Completed.** The frontend slice delivered in commit `3f52bc6` is now wired to the
-completed administration control plane:
+**Completed.** The frontend slice delivered in commit `3f52bc6` is wired to the
+completed administration control plane and production runtime host:
 
 - `apps/admin` provides a Vite/React-Admin console with deployment-time
   `runtime-config.json`, no browser secrets, and a self-hosting-safe static artifact.
@@ -47,10 +47,32 @@ completed administration control plane:
   no-browser-token boundaries. The E2E journey ran through the Docker static bridge with
   deployment-injected runtime configuration.
 
+## Acceptance evidence
+
+- `packages/administration` provides provider-neutral contracts/use cases; PostgreSQL
+  persistence supplies immutable configuration/version history, descriptor reads,
+  optimistic concurrency, cache invalidation, and transactional audit/outbox behavior.
+- The API exposes typed, authorized, workspace-scoped `/v1/auth/*` and `/v1/admin/*`
+  routes. OIDC Authorization Code + PKCE uses API-managed HttpOnly sessions, validated
+  state/nonce/issuer/audience/signature/time claims, CSRF, trusted origin/proxy policy,
+  identity mapping, workspace selection, and login/logout/session audit records.
+- Connector and AI-provider configuration is descriptor-driven. Secret values are
+  write-only; only opaque secret-reference metadata is returned, persisted in audit
+  events, or made available to the browser.
+- Administration commands delegate to the PBI-011, PBI-012, and PBI-013 use cases.
+  They preserve server-side authorization, workspace isolation, idempotency, immutable
+  references, guarded server previews, and fail-closed audit behavior for sensitive
+  reads and downloads.
+- Focused administration, API, PostgreSQL, Admin component, contract, and Chromium
+  browser tests pass. The Compose browser journey logs in using the API cookie session,
+  proves browser storage has no token/session data, creates a descriptor-neutral
+  retrieval-profile draft, reads its server audit event, and logs out through the
+  built static Admin artifact.
+
 ## Remaining work
 
-None for PBI-016. PBI-017 remains a separate, pending release-packaging and production
-TLS-edge delivery; it does not add administration behavior or browser secrets.
+None for PBI-016. PBI-017 continues separately with production TLS, backup/restore,
+vulnerability scanning, and provenance/attestation verification.
 
 ## Existing implementation references
 
@@ -132,6 +154,16 @@ Implement provider-neutral OAuth 2.0/OIDC Authorization Code with PKCE. Auth0, E
 Keycloak, or another standards-compliant issuer must work through configuration rather
 than provider-specific application code.
 
+For private self-hosted and test deployments, also provide deployment-owned password
+authentication. It defaults to login `admin` and password `admin`, with both values
+overridable in Compose/deployment configuration. Password authentication remains enabled
+alongside configured OAuth/OIDC by default; only a deployment-only
+`ADMIN_DISABLE_LOGIN_AUTHENTICATION=true` setting paired with complete OIDC configuration
+may force OAuth-only access. Password sign-in creates the same bounded server-side,
+HttpOnly cookie session and CSRF boundary as OIDC, is audited without credential values,
+and is never stored in browser state after a terminal response. Anonymous session status
+must advertise enabled sign-in methods without exposing credentials.
+
 Preferred topology:
 
 1. The browser starts login through the CaseWeaver API.
@@ -149,6 +181,7 @@ trusted identity. Workspace selection is allowed only among server-resolved memb
 Required endpoints:
 
 - `GET /v1/auth/login`
+- `POST /v1/auth/login/password`
 - `GET /v1/auth/callback`
 - `GET /v1/auth/session`
 - `POST /v1/auth/logout`

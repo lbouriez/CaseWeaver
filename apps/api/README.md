@@ -15,10 +15,15 @@ work, implement connector logic, or duplicate domain authorization.
 
 ## PBI-016 administration API
 
-`modules/auth` implements provider-neutral OIDC Authorization Code + PKCE with
-server-managed encrypted state/nonce/verifier material, HttpOnly cookie sessions,
-CSRF, trusted-origin enforcement, workspace selection, and redacted append-only auth
-audits. `modules/administration` exposes the typed `/v1/auth/*` and `/v1/admin/*`
+`modules/auth` implements deployment-owned password login and provider-neutral OIDC
+Authorization Code + PKCE with server-managed encrypted state/nonce/verifier material,
+HttpOnly cookie sessions, CSRF, trusted-origin enforcement, workspace selection, and
+redacted append-only auth audits. Password login defaults to `admin` / `admin` only in
+development and test, and is disabled by default in production. A production deployment
+must deliberately set `ADMIN_ENABLE_PASSWORD_AUTHENTICATION=true` plus explicit,
+non-default `ADMIN_LOGIN` and `ADMIN_PASSWORD` values; otherwise it must configure
+OIDC. `ADMIN_DISABLE_LOGIN_AUTHENTICATION=true` explicitly selects OIDC-only login.
+`modules/administration` exposes the typed `/v1/auth/*` and `/v1/admin/*`
 surface consumed by `apps/admin`; it validates descriptors server-side, scopes all
 records to the session workspace, uses persistent one-use action previews, and composes
 existing publication/operations use cases rather than duplicating their policy.
@@ -57,7 +62,26 @@ overrides, and budget policies. Provider capability-test preview/execute routes 
 exclusive `@caseweaver/ai-execution` gateway and require server-owned known pricing,
 budget policy, confirmation, rate limit, deadline, idempotency, and atomic audit state.
 
-OIDC startup requires `ADMIN_ALLOWED_ORIGINS`. A fresh installation may set the paired
+`POST /v1/admin/retrieval-profiles/drafts` and
+`POST /v1/admin/prompt-profiles/drafts` create descriptor-free, secret-free immutable
+policy documents. Their matching lifecycle routes create successor versions using only
+the server-reloaded document and an expected revision. The configuration-surface catalog
+advertises those workflows only when this composition is installed; the Admin console
+therefore never fabricates a profile editor for an unavailable backend.
+
+Malformed authenticated administration requests, invalid idempotency keys, and rejected
+sensitive exports are audited with fixed route-owned metadata after session/CSRF
+validation. Request payload, query, credentials, tokens, and secret-like values never
+become audit targets or diagnostic data; inability to persist the required audit fails
+closed.
+
+All interactive authentication requires `ADMIN_ALLOWED_ORIGINS`. A fresh OIDC installation may set the paired
 deployment-only `ADMIN_BOOTSTRAP_OIDC_SUBJECT` and
 `ADMIN_BOOTSTRAP_DISPLAY_NAME` values to create the first workspace administrator
 mapping atomically. They are never an HTTP API, browser value, or diagnostic output.
+
+For PBI-013 process composition, `createApiRuntimeFromEnvironment` builds the ordinary
+API lifecycle without binding its port. `startApi` retains the executable behavior by
+starting that runtime. A standalone host passes `startTelemetry: false` so it can own a
+single process-wide OpenTelemetry lifecycle; API resources still close with the Fastify
+application and no policy or transport behavior is duplicated.

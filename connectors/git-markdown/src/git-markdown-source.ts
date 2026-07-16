@@ -13,24 +13,24 @@ import {
 } from "@caseweaver/connector-sdk";
 
 import {
-  gitMarkdownConfigurationSchema,
   type GitMarkdownConfiguration,
+  gitMarkdownConfigurationSchema,
 } from "./config.js";
 import {
   assertActive,
+  type GitRepository,
+  type GitRepositoryAuthentication,
   parseGitRepositoryDelta,
   parseGitRepositoryFile,
   parseGitRepositorySnapshot,
   requireGitObjectId,
   requireRepositoryPath,
-  type GitRepository,
-  type GitRepositoryAuthentication,
 } from "./git-repository.js";
 import {
   docusaurusDocumentUrl,
   gitBlobSourceUrl,
-  parseMarkdownDocument,
   type ParsedMarkdownDocument,
+  parseMarkdownDocument,
 } from "./markdown.js";
 
 const documentResourceType = "document";
@@ -188,6 +188,7 @@ export class GitMarkdownKnowledgeSource implements KnowledgeSource {
     const snapshot = parseGitRepositorySnapshot(
       await this.repository.inspect({
         repository: this.configuration.settings.repository,
+        allowedLocalRoots: this.configuration.settings.allowedLocalRoots,
         ref: this.configuration.settings.ref,
         authentication,
         signal: request.signal,
@@ -280,6 +281,7 @@ export class GitMarkdownKnowledgeSource implements KnowledgeSource {
     const file = parseGitRepositoryFile(
       await this.repository.readFile({
         repository: this.configuration.settings.repository,
+        allowedLocalRoots: this.configuration.settings.allowedLocalRoots,
         ref: this.configuration.settings.ref,
         authentication,
         path,
@@ -368,6 +370,7 @@ export class GitMarkdownKnowledgeSource implements KnowledgeSource {
     const diff = parseGitRepositoryDelta(
       await diffRepository.call(this.repository, {
         repository: this.configuration.settings.repository,
+        allowedLocalRoots: this.configuration.settings.allowedLocalRoots,
         ref: this.configuration.settings.ref,
         authentication,
         fromCommitSha,

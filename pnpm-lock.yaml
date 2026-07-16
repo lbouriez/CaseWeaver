@@ -96,6 +96,9 @@ importers:
       '@caseweaver/ai-execution':
         specifier: workspace:*
         version: link:../../packages/ai-execution
+      '@caseweaver/ai-provider-runtime':
+        specifier: workspace:*
+        version: link:../../infrastructure/ai-provider-runtime
       '@caseweaver/ai-sdk':
         specifier: workspace:*
         version: link:../../packages/ai-sdk
@@ -179,13 +182,22 @@ importers:
 
   apps/scheduler:
     dependencies:
+      '@caseweaver/postgres':
+        specifier: workspace:*
+        version: link:../../infrastructure/postgres
       '@caseweaver/scheduling':
         specifier: workspace:*
         version: link:../../packages/scheduling
+      pg:
+        specifier: ^8.16.3
+        version: 8.22.0
     devDependencies:
       '@types/node':
         specifier: 22.19.7
         version: 22.19.7
+      '@types/pg':
+        specifier: ^8.15.6
+        version: 8.20.0
       typescript:
         specifier: 5.9.3
         version: 5.9.3
@@ -195,6 +207,9 @@ importers:
 
   apps/standalone:
     dependencies:
+      '@caseweaver/api':
+        specifier: workspace:*
+        version: link:../api
       '@caseweaver/application':
         specifier: workspace:*
         version: link:../../packages/application
@@ -204,6 +219,15 @@ importers:
       '@caseweaver/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@caseweaver/scheduler':
+        specifier: workspace:*
+        version: link:../scheduler
+      '@caseweaver/webhook':
+        specifier: workspace:*
+        version: link:../webhook
+      '@caseweaver/worker':
+        specifier: workspace:*
+        version: link:../worker
     devDependencies:
       '@types/node':
         specifier: 22.19.7
@@ -223,6 +247,9 @@ importers:
       '@caseweaver/connector-sdk':
         specifier: workspace:*
         version: link:../../packages/connector-sdk
+      '@caseweaver/postgres':
+        specifier: workspace:*
+        version: link:../../infrastructure/postgres
       '@caseweaver/webhooks':
         specifier: workspace:*
         version: link:../../packages/webhooks
@@ -248,19 +275,85 @@ importers:
       '@caseweaver/administration':
         specifier: workspace:*
         version: link:../../packages/administration
+      '@caseweaver/ai-execution':
+        specifier: workspace:*
+        version: link:../../packages/ai-execution
+      '@caseweaver/ai-provider-runtime':
+        specifier: workspace:*
+        version: link:../../infrastructure/ai-provider-runtime
+      '@caseweaver/ai-sdk':
+        specifier: workspace:*
+        version: link:../../packages/ai-sdk
+      '@caseweaver/analysis':
+        specifier: workspace:*
+        version: link:../../packages/analysis
+      '@caseweaver/application':
+        specifier: workspace:*
+        version: link:../../packages/application
+      '@caseweaver/attachment-runtime':
+        specifier: workspace:*
+        version: link:../../infrastructure/attachment-runtime
+      '@caseweaver/attachments':
+        specifier: workspace:*
+        version: link:../../packages/attachments
+      '@caseweaver/connector-git-markdown':
+        specifier: workspace:*
+        version: link:../../connectors/git-markdown
+      '@caseweaver/connector-jitbit':
+        specifier: workspace:*
+        version: link:../../connectors/jitbit
+      '@caseweaver/connector-runtime':
+        specifier: workspace:*
+        version: link:../../infrastructure/connector-runtime
+      '@caseweaver/connector-sdk':
+        specifier: workspace:*
+        version: link:../../packages/connector-sdk
+      '@caseweaver/copilot-sdk-agent':
+        specifier: workspace:*
+        version: link:../../providers/copilot-sdk-agent
       '@caseweaver/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@caseweaver/git-repository-runtime':
+        specifier: workspace:*
+        version: link:../../infrastructure/git-repository-runtime
+      '@caseweaver/knowledge':
+        specifier: workspace:*
+        version: link:../../packages/knowledge
+      '@caseweaver/object-storage':
+        specifier: workspace:*
+        version: link:../../infrastructure/object-storage
       '@caseweaver/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@caseweaver/openai-compatible':
+        specifier: workspace:*
+        version: link:../../providers/openai-compatible
       '@caseweaver/postgres':
         specifier: workspace:*
         version: link:../../infrastructure/postgres
+      '@caseweaver/publication':
+        specifier: workspace:*
+        version: link:../../packages/publication
+      '@caseweaver/queue-postgres':
+        specifier: workspace:*
+        version: link:../../infrastructure/queue-postgres
+      '@caseweaver/repository-runtime':
+        specifier: workspace:*
+        version: link:../../infrastructure/repository-runtime
+      '@caseweaver/retrieval':
+        specifier: workspace:*
+        version: link:../../packages/retrieval
+      pg:
+        specifier: ^8.16.3
+        version: 8.22.0
     devDependencies:
       '@types/node':
         specifier: 22.19.7
         version: 22.19.7
+      '@types/pg':
+        specifier: ^8.15.6
+        version: 8.20.0
       typescript:
         specifier: 5.9.3
         version: 5.9.3
@@ -273,6 +366,9 @@ importers:
       '@caseweaver/administration':
         specifier: workspace:*
         version: link:../../packages/administration
+      '@caseweaver/connector-runtime':
+        specifier: workspace:*
+        version: link:../../infrastructure/connector-runtime
       '@caseweaver/connector-sdk':
         specifier: workspace:*
         version: link:../../packages/connector-sdk
@@ -292,6 +388,9 @@ importers:
       '@caseweaver/administration':
         specifier: workspace:*
         version: link:../../packages/administration
+      '@caseweaver/connector-runtime':
+        specifier: workspace:*
+        version: link:../../infrastructure/connector-runtime
       '@caseweaver/connector-sdk':
         specifier: workspace:*
         version: link:../../packages/connector-sdk
@@ -306,8 +405,30 @@ importers:
         specifier: 4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.1)(@types/node@22.19.7)(jiti@2.7.0)(jsdom@26.1.0)(tsx@4.21.0)(yaml@2.9.0)
 
+  infrastructure/ai-provider-runtime:
+    dependencies:
+      '@caseweaver/ai-config':
+        specifier: workspace:*
+        version: link:../../packages/ai-config
+      '@caseweaver/ai-sdk':
+        specifier: workspace:*
+        version: link:../../packages/ai-sdk
+    devDependencies:
+      '@types/node':
+        specifier: 22.19.7
+        version: 22.19.7
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.0.18
+        version: 4.0.18(@opentelemetry/api@1.9.1)(@types/node@22.19.7)(jiti@2.7.0)(jsdom@26.1.0)(tsx@4.21.0)(yaml@2.9.0)
+
   infrastructure/attachment-runtime:
     dependencies:
+      '@caseweaver/analysis':
+        specifier: workspace:*
+        version: link:../../packages/analysis
       '@caseweaver/attachments':
         specifier: workspace:*
         version: link:../../packages/attachments
@@ -322,8 +443,52 @@ importers:
         specifier: 4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.1)(@types/node@22.19.7)(jiti@2.7.0)(jsdom@26.1.0)(tsx@4.21.0)(yaml@2.9.0)
 
+  infrastructure/connector-runtime:
+    dependencies:
+      '@caseweaver/administration':
+        specifier: workspace:*
+        version: link:../../packages/administration
+      '@caseweaver/connector-sdk':
+        specifier: workspace:*
+        version: link:../../packages/connector-sdk
+    devDependencies:
+      '@types/node':
+        specifier: 22.19.7
+        version: 22.19.7
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.0.18
+        version: 4.0.18(@opentelemetry/api@1.9.1)(@types/node@22.19.7)(jiti@2.7.0)(jsdom@26.1.0)(tsx@4.21.0)(yaml@2.9.0)
+
+  infrastructure/git-repository-runtime:
+    dependencies:
+      '@caseweaver/connector-git-markdown':
+        specifier: workspace:*
+        version: link:../../connectors/git-markdown
+      '@caseweaver/connector-sdk':
+        specifier: workspace:*
+        version: link:../../packages/connector-sdk
+    devDependencies:
+      '@types/node':
+        specifier: 22.19.7
+        version: 22.19.7
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.0.18
+        version: 4.0.18(@opentelemetry/api@1.9.1)(@types/node@22.19.7)(jiti@2.7.0)(jsdom@26.1.0)(tsx@4.21.0)(yaml@2.9.0)
+
   infrastructure/object-storage:
     dependencies:
+      '@aws-sdk/client-s3':
+        specifier: ^3.1087.0
+        version: 3.1087.0
+      '@caseweaver/application':
+        specifier: workspace:*
+        version: link:../../packages/application
       '@caseweaver/attachments':
         specifier: workspace:*
         version: link:../../packages/attachments
@@ -352,6 +517,9 @@ importers:
       '@caseweaver/application':
         specifier: workspace:*
         version: link:../../packages/application
+      '@caseweaver/attachments':
+        specifier: workspace:*
+        version: link:../../packages/attachments
       '@caseweaver/domain':
         specifier: workspace:*
         version: link:../../packages/domain
@@ -792,6 +960,9 @@ importers:
       '@caseweaver/ai-sdk':
         specifier: workspace:*
         version: link:../../packages/ai-sdk
+      '@github/copilot-sdk':
+        specifier: 1.0.6
+        version: 1.0.6
       zod:
         specifier: ^4.0.0
         version: 4.4.3
@@ -814,6 +985,9 @@ importers:
       '@caseweaver/ai-sdk':
         specifier: workspace:*
         version: link:../../packages/ai-sdk
+      js-tiktoken:
+        specifier: 1.0.21
+        version: 1.0.21
       zod:
         specifier: ^4.0.0
         version: 4.4.3
@@ -832,6 +1006,78 @@ packages:
 
   '@asamuzakjp/css-color@3.2.0':
     resolution: {integrity: sha512-K1A6z8tS3XsmCMM86xoWdn7Fkdn9m6RSVtocUrJYIwZnFVkng/PvkEoWtOWmP+Scc6saYWHWZYbndEEXxl24jw==}
+
+  '@aws-sdk/checksums@3.1000.17':
+    resolution: {integrity: sha512-k45iXM7w8Pyknnz/vTXSS/IkLDNFdgnBQI7Hmq+uhsrW7NGT/BiUJGlv20QSKzihmH1XDvSCRILICaKi57/35w==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/client-s3@3.1087.0':
+    resolution: {integrity: sha512-44ua5vo5JiFFSnG3oeeWTMfSjOtblQSoJiGbf37s0W4Lr7IY9NmIVkBHIfD4hBI1VEKdvJhDmvuJawwTfi2pvw==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/core@3.975.2':
+    resolution: {integrity: sha512-iyeXwziyjJpixq5OmhsIyrSWx8vwcI7gDo4yRUC3EP7NQtOo9iAJiIEc3G+/HkhtNXqOhofiCK7Lc34Sq+fJWg==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/credential-provider-env@3.972.58':
+    resolution: {integrity: sha512-vyGtvK1rY940eq7JT0yIGKuZ+2kpPSJcHibSvGlit5oiMFDamzC7cxBGLl4FLnd6suihMXDI2FSF2dL6TmBqPA==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/credential-provider-http@3.972.60':
+    resolution: {integrity: sha512-g9b9YzDrD5pcKiPBJfCSXRfFMrA39eR0guUhZ5SRm+7vMAVc43+effxbcamxBjSd5bUhrdKo5te/yQuWurLXLA==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/credential-provider-ini@3.973.2':
+    resolution: {integrity: sha512-Yr7yxNyQ8aHt9Ww0RPFUZx+xiem+vl7vuwhP0tniTijoesJNV5jou9HCgVpI0GEPAF+89TkOvilE5uRrZJnjaw==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/credential-provider-login@3.972.64':
+    resolution: {integrity: sha512-YQoSI4d6kXvoenoG/0Jv/PqaAuukHzGmGXGyHBQYeEUNsYovlNAn/Sw1wp/WQbhcQ3HsEMGgjEahvD3igz6ecQ==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/credential-provider-node@3.972.68':
+    resolution: {integrity: sha512-4akjzW9CjorByYfqXBXmYUh/h7Io3U4DtVgGGh9TQraZ7ZlyJqNyHwDRGiUFnHD+BTOeTbCesCa4sJaK7BGZ7A==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/credential-provider-process@3.972.58':
+    resolution: {integrity: sha512-1nYitRCaDmXWUrpBJt6WlcGjLx1JVsMY8rlYuHHsTYTSaYikbixYdQSyINN2VYq1F798uTO9qHAzytL25M8g3A==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/credential-provider-sso@3.973.2':
+    resolution: {integrity: sha512-pjMLaLU/JZi5lVfmR14V1OZqRBTuMHf6AwGNZA0K9hK+JKtO3jcLBarfD8iq5oc8cSowvc/9R32sqMVXZPo6xQ==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/credential-provider-web-identity@3.972.64':
+    resolution: {integrity: sha512-7Buc7p0OvDHW7iBsu4b+YdS0WnaFBDGKDfbVQqaac9dkWiSiUtIoarBDsA1RmOVXZijaZJDoHJFIQiicQvWRlQ==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/middleware-sdk-s3@3.972.63':
+    resolution: {integrity: sha512-EklitJscj/Aq2Pk8nz0xSxvL+VMSP29iFqouQU0Ow05JKn5y/OhI81ujkfVS72MjD1yeoU9uIdT8c/W6vhktQw==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/nested-clients@3.997.32':
+    resolution: {integrity: sha512-6Yj2fr9XF67cndITea48rchTdVr3VGx6PN47bIKNinJAjLkmaIlz/4EBPCgJ8UmhVopiXmeAuPLI3+DXDDbMhQ==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/signature-v4-multi-region@3.996.40':
+    resolution: {integrity: sha512-wrGZ/authosokclY1DXsiWT/1WjfCI22FuZGgdcilF+XLTXs5dCjAtiFYSPsEToZkbm3Lj2YP8PoWg0yoMNu0g==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/token-providers@3.1087.0':
+    resolution: {integrity: sha512-umM+qNq16f2fH+VLM5MqXW4ORNQAjk+TOSto73xbUHcKaU41L48j786r3UWQYlejeJk37NlvRYgxBT+MBkfaYQ==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/types@3.974.1':
+    resolution: {integrity: sha512-W0IQZR0eaBqlBFIIofMapaWkw1W0U+Xi4dvW+BqwmCEMd8Ng2U6IhkxuPSjMVnR8klLjfuS9PeZWUl1N6UaZdg==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws-sdk/xml-builder@3.972.35':
+    resolution: {integrity: sha512-pXzaWe3evZhjxDXAlMnqISe/XefTCGwBJG4nFTXaWSgAnMkqPEhxEPqJNhhpGesEvKFhvNpnozJJ4GTL11bRYw==}
+    engines: {node: '>=20.0.0'}
+
+  '@aws/lambda-invoke-store@0.3.0':
+    resolution: {integrity: sha512-sl4Bm6yiMNYrZKkqqDFWN0UfnWhlS8ivKxrYl+6t0gCLrqr8y3B2IqZZbFRkfaVVp7C/baApyh71P+LeE1A2sQ==}
+    engines: {node: '>=18.0.0'}
 
   '@babel/code-frame@7.29.7':
     resolution: {integrity: sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw==}
@@ -1403,6 +1649,66 @@ packages:
   '@fastify/proxy-addr@5.1.0':
     resolution: {integrity: sha512-INS+6gh91cLUjB+PVHfu1UqcB76Sqtpyp7bnL+FYojhjygvOPA9ctiD/JDKsyD9Xgu4hUhCSJBPig/w7duNajw==}
 
+  '@github/copilot-darwin-arm64@1.0.70':
+    resolution: {integrity: sha512-NewReqBmTxtAzApZNmUsY4Xqy8N086MiQm7k35i9i+WrGyRiHxdZ/n/lMLCkqWoelr7pZhcZ7gQ7fHbEq1KdoQ==}
+    cpu: [arm64]
+    os: [darwin]
+    hasBin: true
+
+  '@github/copilot-darwin-x64@1.0.70':
+    resolution: {integrity: sha512-ydUEYI3udNAjdMsLPFQLH/JG9YFKcxuAUxYIyOK+F/m/Of9nODKdYa2hw2mlLanP4cNyuxGLflu+rtIqIb+cPw==}
+    cpu: [x64]
+    os: [darwin]
+    hasBin: true
+
+  '@github/copilot-linux-arm64@1.0.70':
+    resolution: {integrity: sha512-EpR3VEEqMy5M9t3cs+6FtjX/AhyfoefzmcMAjBls+RGv1fILjaAby+rhKHzX5YVSxOu9OyQDlQVHK3kxznTU5Q==}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+    hasBin: true
+
+  '@github/copilot-linux-x64@1.0.70':
+    resolution: {integrity: sha512-4pyNKunm7GEzQZ+09Dwr4BwixJVNcQGBeqiZPKWBGxcSipwj90t8tidLYdNjgmXJoLerANhXZcY52wJW/HubEA==}
+    cpu: [x64]
+    os: [linux]
+    libc: [glibc]
+    hasBin: true
+
+  '@github/copilot-linuxmusl-arm64@1.0.70':
+    resolution: {integrity: sha512-Xy3tDjIMmMkZZzJjCrK5aDCLLV5+pyOfIcT1lWLmqVWJG0erpHXL6KU82nGW+0nc0TPqGZFHvOyQeLuXl+s3ZA==}
+    cpu: [arm64]
+    os: [linux]
+    libc: [musl]
+    hasBin: true
+
+  '@github/copilot-linuxmusl-x64@1.0.70':
+    resolution: {integrity: sha512-AHWayI1lVTzxYkNkKrCBOo3XPG+Fb67zcqFivRjGaXG5tr9Bt870LIjIAWoJqQ1Clc3K2PsxyYZ1d8T6vjpWnA==}
+    cpu: [x64]
+    os: [linux]
+    libc: [musl]
+    hasBin: true
+
+  '@github/copilot-sdk@1.0.6':
+    resolution: {integrity: sha512-24eI5UNY3dWjGBNTLhNJf8ki3dNIE2o2jlEZv2F79N5MHzVpnDWbpM8vUI8L1furBXqc9dWRhLPJG/4Z7Me8Ow==}
+    engines: {node: ^20.19.0 || >=22.12.0}
+
+  '@github/copilot-win32-arm64@1.0.70':
+    resolution: {integrity: sha512-oWsWCTlUyIv4S3FdYoBNCscndLrUv+C3qgbfJ9mf+5igPqbIYL8alkc8FBHWPB/cornDNj65yd4s8dZrSkFPpg==}
+    cpu: [arm64]
+    os: [win32]
+    hasBin: true
+
+  '@github/copilot-win32-x64@1.0.70':
+    resolution: {integrity: sha512-KFDZ750CwhjKF6uATQ1pv1XrYHI+/qTQta954gYZaa+YJEXRstGd284uJ6NI3YXfshZwhTs64JdjN4xLodYwrA==}
+    cpu: [x64]
+    os: [win32]
+    hasBin: true
+
+  '@github/copilot@1.0.70':
+    resolution: {integrity: sha512-onEwx5tod9t31Lc2rT5ns6s/fY6jtdwVWS3Fzs8hKUjCv7LFIMGf71MLcikl4GBXn6cq44+HVdNzCMWnLjYl3g==}
+    hasBin: true
+
   '@hono/node-server@1.19.11':
     resolution: {integrity: sha512-dr8/3zEaB+p0D2n/IUrlPF1HZm586qgJNXK1a9fhg/PzdtkK7Ksd5l312tJX2yBuALqDYBlG20QEbayqPyxn+g==}
     engines: {node: '>=18.14.1'}
@@ -1896,6 +2202,30 @@ packages:
     cpu: [x64]
     os: [win32]
 
+  '@smithy/core@3.29.3':
+    resolution: {integrity: sha512-L+Ys6ecjk5vwPMAKHBpPKlJ3DkqwNcnfEISXBZIsVvWG/XKXfsAP8mwIYlTeLcd2ElHdesPI8OuOmJSFAPhm6A==}
+    engines: {node: '>=18.0.0'}
+
+  '@smithy/credential-provider-imds@4.4.8':
+    resolution: {integrity: sha512-q9J7JTiXrAhB8sDp4px97uEPT7CwKH61Co78grdNQvU8QZAdiuaSRhP0tUVf2ogy36RZTrlMU1rBmDEH+cnkiA==}
+    engines: {node: '>=18.0.0'}
+
+  '@smithy/fetch-http-handler@5.6.5':
+    resolution: {integrity: sha512-SuqeisTyPoiIPtIYru/sGxGyXzmZ+8nnFOhC+qRPglt06Ebd1yH//CDltZB2J/3WBNVhwfUaZ0EtHB3cm2X32g==}
+    engines: {node: '>=18.0.0'}
+
+  '@smithy/node-http-handler@4.9.5':
+    resolution: {integrity: sha512-bNqdxTQTxmLbomSmlkZFz8L6B/feQ2HHzw4L2zY7Ecp2XffYAZq2uzdWDdxJHJFbEvqd+SRuluJso0P8+xPdbw==}
+    engines: {node: '>=18.0.0'}
+
+  '@smithy/signature-v4@5.6.4':
+    resolution: {integrity: sha512-B89bpf2t/y/wia6LZ+4JfHXYQT9PnVftsH05rgJKKIStS7r/4XSs9HOjtPoLtgcA6HCW9jVqX5DBbq7E0PAkiQ==}
+    engines: {node: '>=18.0.0'}
+
+  '@smithy/types@4.16.1':
+    resolution: {integrity: sha512-0JFs3V2y2M9tKW5na/qxe69Zv+uxLMO7QBbhxF/FHu/Gp2NFZAAL9tWl9PU02xxo07pb3G9FTyjNc6D5uZrJIg==}
+    engines: {node: '>=18.0.0'}
+
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
 
@@ -2099,6 +2429,9 @@ packages:
     resolution: {integrity: sha512-Cg7TFGpIr01vOQNODXOOaGz2NpCU5gl8x1qJFbb6hbZxR7XrcE2vtbAsTAbJ7/xwJtUuJEw8K8Zr/AE0LHlesg==}
     engines: {node: '>=10', npm: '>=6'}
 
+  base64-js@1.5.1:
+    resolution: {integrity: sha512-AKpaYlHn8t4SVbOHCy+b5+KKgvR4vrsD8vbvrbiQJps7fKDTkjkDry6ji0rUJjC0kzbNePLwzxq8iypo41qeWA==}
+
   baseline-browser-mapping@2.10.43:
     resolution: {integrity: sha512-AjYpR78kDWAY3Efj+cDTFH9t9SCoL7OoTp1BOb0mQV7S+6CiLwnWM3FyxhJtdPufDFKzmCSFoUncKjWgJEZTCQ==}
     engines: {node: '>=6.0.0'}
@@ -2106,6 +2439,9 @@ packages:
 
   better-result@2.9.2:
     resolution: {integrity: sha512-WIFoBPCdnTOdk9inkE1ZRvCZ4P0CpSkAiLlchC65N7n9DcjZ3NhqkBOlafzpOVnO8ixyi37kicmSJ3ENhPZl7Q==}
+
+  bowser@2.14.1:
+    resolution: {integrity: sha512-tzPjzCxygAKWFOJP011oxFHs57HzIhOEracIgAePE4pqB3LikALKnSzUyU4MGs9/iCEUuHlAJTjTc5M+u7YEGg==}
 
   browserslist@4.28.6:
     resolution: {integrity: sha512-FQBYNK15VMslhLHpA7+n+n1GOlF1kId2xcCg7/j95f24AOF6VDYMNH4mFxF7KuaTdv627faazpOAjFzMrfJOUw==}
@@ -2258,6 +2594,10 @@ packages:
 
   destr@2.0.5:
     resolution: {integrity: sha512-ugFTXCtDZunbzasqBxrK93Ik/DRYsO6S/fedkWEMKqt04xZ4csmnmwGDBAb07QWNaGMAmnTIemsYZCksjATwsA==}
+
+  detect-libc@2.1.2:
+    resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
+    engines: {node: '>=8'}
 
   diacritic@0.0.2:
     resolution: {integrity: sha512-iQCeDkSPwkfwWPr+HZZ49WRrM2FSI9097Q9w7agyRCdLcF9Eh2Ek0sHKcmMWx2oZVBjRBE/sziGFjZu0uf1Jbg==}
@@ -2557,6 +2897,9 @@ packages:
   jiti@2.7.0:
     resolution: {integrity: sha512-AC/7JofJvZGrrneWNaEnJeOLUx+JlGt7tNa0wZiRPT4MY1wmfKjt2+6O2p2uz2+skll8OZZmJMNqeke7kKbNgQ==}
     hasBin: true
+
+  js-tiktoken@1.0.21:
+    resolution: {integrity: sha512-biOj/6M5qdgx5TKjDnFT1ymSpM5tbd3ylwDtrQvFQSu0Z7bBYko2dF+W/aUkXUPuk6IVpRxk/3Q2sHOzGlS36g==}
 
   js-tokens@4.0.0:
     resolution: {integrity: sha512-RdJUflcE3cUzKiMqQgsCu06FPu9UdIJO0beYbPhHN4k6apgJtifcoCtT9bcxOpYBtpD2kCM6Sbzg4CausW/PKQ==}
@@ -3322,6 +3665,10 @@ packages:
       jsdom:
         optional: true
 
+  vscode-jsonrpc@8.2.1:
+    resolution: {integrity: sha512-kdjOSJ2lLIn7r1rtrMbbNCHjyMPfRnowdKjBQ+mGq6NAW5QY2bEZC/khaC5OR8svbbjvLEaIXkOq45e2X9BIbQ==}
+    engines: {node: '>=14.0.0'}
+
   w3c-xmlserializer@5.0.0:
     resolution: {integrity: sha512-o8qghlI8NZHU1lLPrpi2+Uq7abh4GGPpYANlalzWxyWteJOCsr/P+oPBA49TOLu5FTZO4d3F9MnWJfiMo4BkmA==}
     engines: {node: '>=18'}
@@ -3411,6 +3758,171 @@ snapshots:
       '@csstools/css-parser-algorithms': 3.0.5(@csstools/css-tokenizer@3.0.4)
       '@csstools/css-tokenizer': 3.0.4
       lru-cache: 10.4.3
+
+  '@aws-sdk/checksums@3.1000.17':
+    dependencies:
+      '@aws-sdk/core': 3.975.2
+      '@aws-sdk/types': 3.974.1
+      '@smithy/core': 3.29.3
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@aws-sdk/client-s3@3.1087.0':
+    dependencies:
+      '@aws-sdk/checksums': 3.1000.17
+      '@aws-sdk/core': 3.975.2
+      '@aws-sdk/credential-provider-node': 3.972.68
+      '@aws-sdk/middleware-sdk-s3': 3.972.63
+      '@aws-sdk/signature-v4-multi-region': 3.996.40
+      '@aws-sdk/types': 3.974.1
+      '@smithy/core': 3.29.3
+      '@smithy/fetch-http-handler': 5.6.5
+      '@smithy/node-http-handler': 4.9.5
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@aws-sdk/core@3.975.2':
+    dependencies:
+      '@aws-sdk/types': 3.974.1
+      '@aws-sdk/xml-builder': 3.972.35
+      '@aws/lambda-invoke-store': 0.3.0
+      '@smithy/core': 3.29.3
+      '@smithy/signature-v4': 5.6.4
+      '@smithy/types': 4.16.1
+      bowser: 2.14.1
+      tslib: 2.8.1
+
+  '@aws-sdk/credential-provider-env@3.972.58':
+    dependencies:
+      '@aws-sdk/core': 3.975.2
+      '@aws-sdk/types': 3.974.1
+      '@smithy/core': 3.29.3
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@aws-sdk/credential-provider-http@3.972.60':
+    dependencies:
+      '@aws-sdk/core': 3.975.2
+      '@aws-sdk/types': 3.974.1
+      '@smithy/core': 3.29.3
+      '@smithy/fetch-http-handler': 5.6.5
+      '@smithy/node-http-handler': 4.9.5
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@aws-sdk/credential-provider-ini@3.973.2':
+    dependencies:
+      '@aws-sdk/core': 3.975.2
+      '@aws-sdk/credential-provider-env': 3.972.58
+      '@aws-sdk/credential-provider-http': 3.972.60
+      '@aws-sdk/credential-provider-login': 3.972.64
+      '@aws-sdk/credential-provider-process': 3.972.58
+      '@aws-sdk/credential-provider-sso': 3.973.2
+      '@aws-sdk/credential-provider-web-identity': 3.972.64
+      '@aws-sdk/nested-clients': 3.997.32
+      '@aws-sdk/types': 3.974.1
+      '@smithy/core': 3.29.3
+      '@smithy/credential-provider-imds': 4.4.8
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@aws-sdk/credential-provider-login@3.972.64':
+    dependencies:
+      '@aws-sdk/core': 3.975.2
+      '@aws-sdk/nested-clients': 3.997.32
+      '@aws-sdk/types': 3.974.1
+      '@smithy/core': 3.29.3
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@aws-sdk/credential-provider-node@3.972.68':
+    dependencies:
+      '@aws-sdk/credential-provider-env': 3.972.58
+      '@aws-sdk/credential-provider-http': 3.972.60
+      '@aws-sdk/credential-provider-ini': 3.973.2
+      '@aws-sdk/credential-provider-process': 3.972.58
+      '@aws-sdk/credential-provider-sso': 3.973.2
+      '@aws-sdk/credential-provider-web-identity': 3.972.64
+      '@aws-sdk/types': 3.974.1
+      '@smithy/core': 3.29.3
+      '@smithy/credential-provider-imds': 4.4.8
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@aws-sdk/credential-provider-process@3.972.58':
+    dependencies:
+      '@aws-sdk/core': 3.975.2
+      '@aws-sdk/types': 3.974.1
+      '@smithy/core': 3.29.3
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@aws-sdk/credential-provider-sso@3.973.2':
+    dependencies:
+      '@aws-sdk/core': 3.975.2
+      '@aws-sdk/nested-clients': 3.997.32
+      '@aws-sdk/token-providers': 3.1087.0
+      '@aws-sdk/types': 3.974.1
+      '@smithy/core': 3.29.3
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@aws-sdk/credential-provider-web-identity@3.972.64':
+    dependencies:
+      '@aws-sdk/core': 3.975.2
+      '@aws-sdk/nested-clients': 3.997.32
+      '@aws-sdk/types': 3.974.1
+      '@smithy/core': 3.29.3
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@aws-sdk/middleware-sdk-s3@3.972.63':
+    dependencies:
+      '@aws-sdk/core': 3.975.2
+      '@aws-sdk/signature-v4-multi-region': 3.996.40
+      '@aws-sdk/types': 3.974.1
+      '@smithy/core': 3.29.3
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@aws-sdk/nested-clients@3.997.32':
+    dependencies:
+      '@aws-sdk/core': 3.975.2
+      '@aws-sdk/signature-v4-multi-region': 3.996.40
+      '@aws-sdk/types': 3.974.1
+      '@smithy/core': 3.29.3
+      '@smithy/fetch-http-handler': 5.6.5
+      '@smithy/node-http-handler': 4.9.5
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@aws-sdk/signature-v4-multi-region@3.996.40':
+    dependencies:
+      '@aws-sdk/types': 3.974.1
+      '@smithy/signature-v4': 5.6.4
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@aws-sdk/token-providers@3.1087.0':
+    dependencies:
+      '@aws-sdk/core': 3.975.2
+      '@aws-sdk/nested-clients': 3.997.32
+      '@aws-sdk/types': 3.974.1
+      '@smithy/core': 3.29.3
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@aws-sdk/types@3.974.1':
+    dependencies:
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@aws-sdk/xml-builder@3.972.35':
+    dependencies:
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@aws/lambda-invoke-store@0.3.0': {}
 
   '@babel/code-frame@7.29.7':
     dependencies:
@@ -3852,6 +4364,49 @@ snapshots:
     dependencies:
       '@fastify/forwarded': 3.0.1
       ipaddr.js: 2.4.0
+
+  '@github/copilot-darwin-arm64@1.0.70':
+    optional: true
+
+  '@github/copilot-darwin-x64@1.0.70':
+    optional: true
+
+  '@github/copilot-linux-arm64@1.0.70':
+    optional: true
+
+  '@github/copilot-linux-x64@1.0.70':
+    optional: true
+
+  '@github/copilot-linuxmusl-arm64@1.0.70':
+    optional: true
+
+  '@github/copilot-linuxmusl-x64@1.0.70':
+    optional: true
+
+  '@github/copilot-sdk@1.0.6':
+    dependencies:
+      '@github/copilot': 1.0.70
+      vscode-jsonrpc: 8.2.1
+      zod: 4.4.3
+
+  '@github/copilot-win32-arm64@1.0.70':
+    optional: true
+
+  '@github/copilot-win32-x64@1.0.70':
+    optional: true
+
+  '@github/copilot@1.0.70':
+    dependencies:
+      detect-libc: 2.1.2
+    optionalDependencies:
+      '@github/copilot-darwin-arm64': 1.0.70
+      '@github/copilot-darwin-x64': 1.0.70
+      '@github/copilot-linux-arm64': 1.0.70
+      '@github/copilot-linux-x64': 1.0.70
+      '@github/copilot-linuxmusl-arm64': 1.0.70
+      '@github/copilot-linuxmusl-x64': 1.0.70
+      '@github/copilot-win32-arm64': 1.0.70
+      '@github/copilot-win32-x64': 1.0.70
 
   '@hono/node-server@1.19.11(hono@4.12.29)':
     dependencies:
@@ -4300,6 +4855,39 @@ snapshots:
   '@rollup/rollup-win32-x64-msvc@4.62.2':
     optional: true
 
+  '@smithy/core@3.29.3':
+    dependencies:
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@smithy/credential-provider-imds@4.4.8':
+    dependencies:
+      '@smithy/core': 3.29.3
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@smithy/fetch-http-handler@5.6.5':
+    dependencies:
+      '@smithy/core': 3.29.3
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@smithy/node-http-handler@4.9.5':
+    dependencies:
+      '@smithy/core': 3.29.3
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@smithy/signature-v4@5.6.4':
+    dependencies:
+      '@smithy/core': 3.29.3
+      '@smithy/types': 4.16.1
+      tslib: 2.8.1
+
+  '@smithy/types@4.16.1':
+    dependencies:
+      tslib: 2.8.1
+
   '@standard-schema/spec@1.1.0': {}
 
   '@tanstack/query-core@5.101.2': {}
@@ -4512,9 +5100,13 @@ snapshots:
       cosmiconfig: 7.1.0
       resolve: 1.22.12
 
+  base64-js@1.5.1: {}
+
   baseline-browser-mapping@2.10.43: {}
 
   better-result@2.9.2: {}
+
+  bowser@2.14.1: {}
 
   browserslist@4.28.6:
     dependencies:
@@ -4677,6 +5269,8 @@ snapshots:
   dequal@2.0.3: {}
 
   destr@2.0.5: {}
+
+  detect-libc@2.1.2: {}
 
   diacritic@0.0.2: {}
 
@@ -5006,6 +5600,10 @@ snapshots:
   isexe@2.0.0: {}
 
   jiti@2.7.0: {}
+
+  js-tiktoken@1.0.21:
+    dependencies:
+      base64-js: 1.5.1
 
   js-tokens@4.0.0: {}
 
@@ -5803,6 +6401,8 @@ snapshots:
       - terser
       - tsx
       - yaml
+
+  vscode-jsonrpc@8.2.1: {}
 
   w3c-xmlserializer@5.0.0:
     dependencies:

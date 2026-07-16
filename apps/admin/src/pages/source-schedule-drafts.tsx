@@ -36,6 +36,7 @@ export function SourceScheduleDrafts({
   const client = useApiClient();
   const [connectors, setConnectors] = useState<readonly AdminListItem[]>();
   const [collections, setCollections] = useState<readonly AdminListItem[]>();
+  const [budgets, setBudgets] = useState<readonly AdminListItem[]>();
   const [sources, setSources] = useState<readonly AdminListItem[]>();
   const [sourceId, setSourceId] = useState("");
   const [sourceVersionId, setSourceVersionId] = useState<string>();
@@ -51,11 +52,17 @@ export function SourceScheduleDrafts({
   const [sourceName, setSourceName] = useState("");
   const [connectorId, setConnectorId] = useState("");
   const [collectionId, setCollectionId] = useState("");
+  const [normalizationProfileId, setNormalizationProfileId] =
+    useState("text-normalization");
   const [normalizationProfileVersion, setNormalizationProfileVersion] =
-    useState("normalization-v1");
-  const [chunkingProfileVersion, setChunkingProfileVersion] =
-    useState("chunking-v1");
-  const [synchronizationPolicy, setSynchronizationPolicy] = useState("{}");
+    useState("v1");
+  const [chunkingProfileId, setChunkingProfileId] = useState("text-chunking");
+  const [chunkingProfileVersion, setChunkingProfileVersion] = useState("v1");
+  const [embeddingBatchSize, setEmbeddingBatchSize] = useState("16");
+  const [embeddingBudgetPolicyId, setEmbeddingBudgetPolicyId] = useState("");
+  const [synchronizationPolicy, setSynchronizationPolicy] = useState(
+    '{"triggers":[{"mode":"manual"}]}',
+  );
   const [deletionBehavior, setDeletionBehavior] = useState<
     "tombstone" | "retain"
   >("tombstone");
@@ -98,6 +105,7 @@ export function SourceScheduleDrafts({
       ),
       client.listDescriptors("connector", controller.signal),
       client.list("collections", { limit: 200 }, { signal: controller.signal }),
+      client.list("ai-budgets", { limit: 200 }, { signal: controller.signal }),
       client.list(
         "knowledge-sources",
         { limit: 200 },
@@ -105,7 +113,13 @@ export function SourceScheduleDrafts({
       ),
     ])
       .then(
-        ([connectorResult, descriptors, collectionResult, sourceResult]) => {
+        ([
+          connectorResult,
+          descriptors,
+          collectionResult,
+          budgetResult,
+          sourceResult,
+        ]) => {
           const knowledgeSourceTypes = new Set(
             descriptors
               .filter((descriptor) =>
@@ -121,9 +135,14 @@ export function SourceScheduleDrafts({
           );
           setConnectors(eligibleConnectors);
           setCollections(collectionResult.items);
+          const hardBudgets = budgetResult.items.filter(
+            (item) => item.status === "hard",
+          );
+          setBudgets(hardBudgets);
           setSources(sourceResult.items);
           setConnectorId(eligibleConnectors[0]?.id ?? "");
           setCollectionId(collectionResult.items[0]?.id ?? "");
+          setEmbeddingBudgetPolicyId(hardBudgets[0]?.id ?? "");
           setSourceId(sourceResult.items[0]?.id ?? "");
         },
       )
@@ -168,8 +187,14 @@ export function SourceScheduleDrafts({
       sourceName.trim().length === 0 ||
       connectorId.length === 0 ||
       collectionId.length === 0 ||
+      normalizationProfileId.trim().length === 0 ||
       normalizationProfileVersion.trim().length === 0 ||
-      chunkingProfileVersion.trim().length === 0
+      chunkingProfileId.trim().length === 0 ||
+      chunkingProfileVersion.trim().length === 0 ||
+      embeddingBudgetPolicyId.length === 0 ||
+      !Number.isSafeInteger(Number(embeddingBatchSize)) ||
+      Number(embeddingBatchSize) < 1 ||
+      Number(embeddingBatchSize) > 1_000
     ) {
       setSourceError(
         new Error("Complete every source field before creating a draft."),
@@ -184,8 +209,12 @@ export function SourceScheduleDrafts({
         displayName: sourceName.trim(),
         connectorInstanceId: connectorId,
         collectionId,
+        normalizationProfileId: normalizationProfileId.trim(),
         normalizationProfileVersion: normalizationProfileVersion.trim(),
+        chunkingProfileId: chunkingProfileId.trim(),
         chunkingProfileVersion: chunkingProfileVersion.trim(),
+        embeddingBatchSize: Number(embeddingBatchSize),
+        embeddingBudgetPolicyId,
         synchronizationPolicy: policy,
         deletionBehavior,
       });
@@ -279,7 +308,8 @@ export function SourceScheduleDrafts({
               <Typography variant="h5">Create an inert source draft</Typography>
               <Typography color="text.secondary" variant="body2">
                 The API validates the selected active connector capability and
-                collection workspace before storing an immutable draft.
+                collection workspace, text-profile revisions, and a hard budget
+                before storing an immutable draft.
               </Typography>
             </Box>
             {sourceError === undefined ? null : (
@@ -342,12 +372,28 @@ export function SourceScheduleDrafts({
             </TextField>
             <TextField
               fullWidth
+              label="Normalization profile ID"
+              onChange={(event) =>
+                setNormalizationProfileId(event.target.value)
+              }
+              required
+              value={normalizationProfileId}
+            />
+            <TextField
+              fullWidth
               label="Normalization profile version"
               onChange={(event) =>
                 setNormalizationProfileVersion(event.target.value)
               }
               required
               value={normalizationProfileVersion}
+            />
+            <TextField
+              fullWidth
+              label="Chunking profile ID"
+              onChange={(event) => setChunkingProfileId(event.target.value)}
+              required
+              value={chunkingProfileId}
             />
             <TextField
               fullWidth
@@ -358,6 +404,34 @@ export function SourceScheduleDrafts({
               required
               value={chunkingProfileVersion}
             />
+            <TextField
+              fullWidth
+              helperText="The maximum number of chunks sent to the metered embedding gateway in one operation."
+              label="Embedding batch size"
+              onChange={(event) => setEmbeddingBatchSize(event.target.value)}
+              required
+              type="number"
+              value={embeddingBatchSize}
+            />
+            <TextField
+              fullWidth
+              label="Hard embedding budget"
+              onChange={(event) =>
+                setEmbeddingBudgetPolicyId(event.target.value)
+              }
+              required
+              select
+              value={embeddingBudgetPolicyId}
+            >
+              <MenuItem disabled value="">
+                Select an active hard budget
+              </MenuItem>
+              {budgets?.map((item) => (
+                <MenuItem key={item.id} value={item.id}>
+                  {item.label}
+                </MenuItem>
+              ))}
+            </TextField>
             <TextField
               fullWidth
               helperText="JSON object only. Connector-specific filters stay in the connector configuration."
@@ -388,7 +462,8 @@ export function SourceScheduleDrafts({
                 disabled={
                   sourceBusy ||
                   activeConnectors === undefined ||
-                  collections === undefined
+                  collections === undefined ||
+                  budgets === undefined
                 }
                 onClick={() => void createSource()}
                 variant="contained"

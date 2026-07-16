@@ -217,6 +217,7 @@ function createService() {
   };
   return {
     service: new AuthSessionService(dependencies),
+    dependencies,
     sessions,
     sessionAuditMutations,
     oidc,
@@ -332,6 +333,7 @@ describe("server-managed OIDC session service", () => {
     });
     await expect(service.session(callback.setCookie)).resolves.toEqual({
       authenticated: false,
+      authentication: { password: false, oauth: true },
     });
   });
 
@@ -363,6 +365,7 @@ describe("server-managed OIDC session service", () => {
     });
     await expect(service.session(callback.setCookie)).resolves.toEqual({
       authenticated: false,
+      authentication: { password: false, oauth: true },
     });
   });
 
@@ -378,5 +381,71 @@ describe("server-managed OIDC session service", () => {
       service.callback({ code: "authorization-code", state, audit }),
     ).rejects.toThrow("audit.persistence.failed");
     expect(sessions.sessions.size).toBe(0);
+  });
+});
+
+describe("server-managed password session service", () => {
+  it("creates the same token-free, CSRF-protected session for a configured password and rejects invalid credentials", async () => {
+    const { dependencies, sessionAuditMutations } = createService();
+    const service = new AuthSessionService({
+      ...dependencies,
+      oidc: undefined,
+      passwordAuthentication: {
+        login: "admin",
+        password: "admin",
+        workspaceId: "workspace-a",
+        principalId: "local-password-administrator",
+        displayName: "Local administrator",
+      },
+    });
+
+    await expect(
+      service.passwordLogin({
+        login: "admin",
+        password: "incorrect",
+        origin: "https://admin.example",
+        audit,
+      }),
+    ).rejects.toMatchObject({ code: "auth.login.invalid" });
+    const authenticated = await service.passwordLogin({
+      login: "admin",
+      password: "admin",
+      origin: "https://admin.example",
+      audit,
+    });
+
+    expect(authenticated.session).toMatchObject({
+      authenticated: true,
+      principal: {
+        id: "local-password-administrator",
+        displayName: "Local administrator",
+      },
+      activeWorkspace: { id: "workspace-a", name: "Operations" },
+      workspaces: [{ id: "workspace-a", name: "Operations" }],
+    });
+    expect(authenticated.setCookie).toContain("HttpOnly");
+    expect(JSON.stringify(sessionAuditMutations.audits)).not.toContain(
+      '"password":"admin"',
+    );
+    await expect(service.session(undefined)).resolves.toEqual({
+      authenticated: false,
+      authentication: { password: true, oauth: false },
+    });
+  });
+
+  it("does not expose a password sign-in method after OAuth-only mode disables it", async () => {
+    const { service } = createService();
+    await expect(service.session(undefined)).resolves.toEqual({
+      authenticated: false,
+      authentication: { password: false, oauth: true },
+    });
+    await expect(
+      service.passwordLogin({
+        login: "admin",
+        password: "admin",
+        origin: "https://admin.example",
+        audit,
+      }),
+    ).rejects.toMatchObject({ code: "auth.login.disabled" });
   });
 });

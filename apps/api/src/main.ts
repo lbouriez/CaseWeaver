@@ -1,26 +1,28 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import {
-  AdministrationConflictError,
   ActivateAiModelBinding,
+  AdministrationConflictError,
   type ConfigurationDescriptor,
+  CreateAiModelBindingDraft,
+  CreateAiModelBindingVersionDraft,
+  CreateAiPriceOverride,
+  CreateConfigurationDraft,
   canonicalizeConfiguration,
+  DisableAiModelBinding,
   IdempotencyConflictError,
   ManageKnowledgeScheduleConfiguration,
   ManageKnowledgeSourceConfiguration,
   ManagePlatformLinkConfiguration,
   ManagePublicationProfileConfiguration,
   ManageWebhookEndpointConfiguration,
-  CreateAiModelBindingDraft,
-  CreateAiModelBindingVersionDraft,
-  CreateAiPriceOverride,
-  DisableAiModelBinding,
-  ReplaceAiBudgetPolicy,
-  SetAiWorkspaceRoleDefault,
-  ReplaceWorkspacePrincipalRoles,
   PreviewProviderCapabilityTest,
+  ReplaceAiBudgetPolicy,
+  ReplaceWorkspacePrincipalRoles,
   RunProviderCapabilityTest,
+  SetAiWorkspaceRoleDefault,
   sha256Base64Url,
+  TransitionConfigurationVersion,
 } from "@caseweaver/administration";
 import { DefaultAiExecutionGateway } from "@caseweaver/ai-execution";
 import {
@@ -50,20 +52,25 @@ import {
   startOpenTelemetry,
 } from "@caseweaver/observability";
 import {
-  createPostgresPersistence,
   createPostgresAiPersistence,
+  createPostgresPersistence,
   PostgresConfigurationLifecycleStore,
   PostgresPlatformLinkConfigurationStore,
   PostgresPublicationProfileConfigurationStore,
   PostgresSourceScheduleConfigurationStore,
-  PostgresWebhookEndpointConfigurationStore,
   type PostgresTransactionLookup,
+  PostgresWebhookEndpointConfigurationStore,
 } from "@caseweaver/postgres";
 import { buildApi } from "./app.js";
 import { parseApiConfig } from "./config.js";
 import { createDatabaseReadiness } from "./database-readiness.js";
 import { ConfiguredApiExecutionContextResolver } from "./execution-context.js";
 import { createLogger } from "./logger.js";
+import {
+  EnvironmentSecretResolver,
+  providerCapabilityTestTemplates,
+  registeredAiProviderDispatcher,
+} from "./modules/administration/ai-runtime.js";
 import { PostgresDescriptorConfigurationLifecycle } from "./modules/administration/configuration-lifecycle-action.js";
 import {
   AdministrationOperationDispatcher,
@@ -77,14 +84,19 @@ import {
 } from "./modules/administration/runtime-descriptors.js";
 import { PostgresSecretReferenceLifecycle } from "./modules/administration/secret-reference-lifecycle.js";
 import {
-  EnvironmentSecretResolver,
-  providerCapabilityTestTemplates,
-  registeredAiProviderDispatcher,
-} from "./modules/administration/ai-runtime.js";
-import { ensureBootstrapAdministrator } from "./modules/auth/bootstrap-administrator.js";
+  ensureBootstrapAdministrator,
+  ensureBootstrapPasswordAdministrator,
+} from "./modules/auth/bootstrap-administrator.js";
 import { AesGcmEphemeralSecretProtector } from "./modules/auth/ephemeral-secret-protector.js";
 import { StandardsOidcClient } from "./modules/auth/oidc-client.js";
 import { AuthSessionService } from "./modules/auth/session-service.js";
+import {
+  type ApiRuntime,
+  attachApiShutdownSignals,
+  createApiRuntime,
+} from "./runtime.js";
+
+export type { ApiRuntime } from "./runtime.js";
 
 function createIds(): IdGenerator {
   return {
@@ -96,9 +108,19 @@ const clock: Clock = {
   now: () => utcInstant(new Date()),
 };
 
-export async function startApi(
+export interface ApiRuntimeBootstrapOptions {
+  /** Standalone owns one process-wide telemetry lifecycle. */
+  readonly startTelemetry?: boolean;
+}
+
+/**
+ * Composes the API transport without binding a port. This lets standalone use
+ * the exact ordinary API runtime while owning one shared telemetry lifecycle.
+ */
+export async function createApiRuntimeFromEnvironment(
   env: NodeJS.ProcessEnv = process.env,
-): Promise<void> {
+  options: ApiRuntimeBootstrapOptions = {},
+): Promise<ApiRuntime> {
   const config = parseApiConfig(env);
   const logger = createLogger(config);
   const databaseReadiness = createDatabaseReadiness(config);
@@ -141,29 +163,46 @@ export async function startApi(
     }),
   });
   if (
-    config.oidc !== undefined &&
-    config.administrationBootstrap !== undefined
+    config.localAuthentication !== undefined ||
+    (config.oidc !== undefined && config.administrationBootstrap !== undefined)
   ) {
     try {
-      await ensureBootstrapAdministrator({
-        unitOfWork: persistence.unitOfWork as typeof persistence.unitOfWork &
-          PostgresTransactionLookup,
-        auditStore: persistence.auditStore,
-        workspaceId: config.workspaceId,
-        principalId: config.principalId,
-        issuer: config.oidc.issuer,
-        subject: config.administrationBootstrap.oidcSubject,
-        displayName: config.administrationBootstrap.displayName,
-      });
+      if (config.localAuthentication !== undefined) {
+        await ensureBootstrapPasswordAdministrator({
+          unitOfWork: persistence.unitOfWork as typeof persistence.unitOfWork &
+            PostgresTransactionLookup,
+          auditStore: persistence.auditStore,
+          workspaceId: config.workspaceId,
+          principalId: config.localAuthentication.principalId,
+        });
+      }
+      if (
+        config.oidc !== undefined &&
+        config.administrationBootstrap !== undefined
+      ) {
+        await ensureBootstrapAdministrator({
+          unitOfWork: persistence.unitOfWork as typeof persistence.unitOfWork &
+            PostgresTransactionLookup,
+          auditStore: persistence.auditStore,
+          workspaceId: config.workspaceId,
+          principalId: config.principalId,
+          issuer: config.oidc.issuer,
+          subject: config.administrationBootstrap.oidcSubject,
+          displayName: config.administrationBootstrap.displayName,
+        });
+      }
     } catch {
       await persistence.close();
       await aiExecutionPersistence.close();
       throw new Error("Administration bootstrap failed.");
     }
   }
-  const telemetry = await startOpenTelemetry(
-    resolveOpenTelemetryConfig(env, "caseweaver-api"),
-  );
+  const telemetry =
+    options.startTelemetry === false
+      ? undefined
+      : await startOpenTelemetry(
+          resolveOpenTelemetryConfig(env, "caseweaver-api"),
+        );
   const ids = createIds();
   const requestAnalysis = new RequestAnalysisWithPublication(
     persistence.unitOfWork,
@@ -248,19 +287,20 @@ export async function startApi(
       ids,
       clock,
     );
-  const administration =
-    config.oidc === undefined
-      ? undefined
-      : await createAdministrationOperations(config, persistence, {
-          retryDeadLetter,
-          cancelJob,
-          recoverJob: recoverExpiredJob,
-          queueRetention,
-          approvePublication,
-          purgeCaseSnapshot,
-          requestKnowledgeSourceSynchronization,
-          providerCapabilityTests,
-        });
+  const administration = await createAdministrationOperations(
+    config,
+    persistence,
+    {
+      retryDeadLetter,
+      cancelJob,
+      recoverJob: recoverExpiredJob,
+      queueRetention,
+      approvePublication,
+      purgeCaseSnapshot,
+      requestKnowledgeSourceSynchronization,
+      providerCapabilityTests,
+    },
+  );
   const app = buildApi({
     config,
     logger,
@@ -292,7 +332,7 @@ export async function startApi(
           queueRetention.execute(mutation, context, limit),
       },
     },
-    ...(administration === undefined ? {} : { administration }),
+    administration,
   });
 
   app.addHook("onClose", async () => {
@@ -302,10 +342,24 @@ export async function startApi(
     await telemetry?.shutdown();
   });
 
+  const runtime = createApiRuntime({
+    app,
+    host: config.host,
+    port: config.port,
+  });
+  return runtime;
+}
+
+/** Backward-compatible executable convenience that starts the composed API. */
+export async function startApi(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<ApiRuntime> {
+  const runtime = await createApiRuntimeFromEnvironment(env);
   try {
-    await app.listen({ host: config.host, port: config.port });
+    await runtime.start();
+    return runtime;
   } catch {
-    await app.close();
+    await runtime.stop().catch(() => undefined);
     throw new Error("API startup failed.");
   }
 }
@@ -327,25 +381,36 @@ async function createAdministrationOperations(
     }>;
   }>,
 ): Promise<AdministrationApiOperations> {
-  if (config.oidc === undefined)
-    throw new Error("OIDC configuration is required.");
-  const oidc = new StandardsOidcClient({
-    issuer: config.oidc.issuer,
-    clientId: config.oidc.clientId,
-    ...(config.oidc.clientSecret === undefined
-      ? {}
-      : { clientSecret: config.oidc.clientSecret }),
-    redirectUri: config.oidc.callbackUrl,
-    scopes: ["openid", "profile"],
-  });
+  const oidc =
+    config.oidc === undefined
+      ? undefined
+      : new StandardsOidcClient({
+          issuer: config.oidc.issuer,
+          clientId: config.oidc.clientId,
+          ...(config.oidc.clientSecret === undefined
+            ? {}
+            : { clientSecret: config.oidc.clientSecret }),
+          redirectUri: config.oidc.callbackUrl,
+          scopes: ["openid", "profile"],
+        });
+  const sessionProtection =
+    config.oidc === undefined
+      ? {
+          keyId: "local-session-key",
+          encodedKey: randomBytes(32).toString("base64url"),
+        }
+      : {
+          keyId: config.oidc.ephemeralKeyId,
+          encodedKey: config.oidc.ephemeralEncryptionKey,
+        };
   const auth = new AuthSessionService({
-    oidc,
+    ...(oidc === undefined ? {} : { oidc }),
     sessions: persistence.authSessionStore,
     sessionAuditMutations: persistence.authSessionAuditMutationStore,
     mappings: persistence.oidcIdentityMappingStore,
     protector: new AesGcmEphemeralSecretProtector(
-      config.oidc.ephemeralKeyId,
-      config.oidc.ephemeralEncryptionKey,
+      sessionProtection.keyId,
+      sessionProtection.encodedKey,
     ),
     ids: { next: () => randomUUID() },
     workspaceName: (id) =>
@@ -354,6 +419,14 @@ async function createAdministrationOperations(
       persistence.administrationReadStore.permissionsFor(input),
     secureCookies: config.nodeEnv !== "development",
     allowedOrigins: config.allowedAdminOrigins,
+    ...(config.localAuthentication === undefined
+      ? {}
+      : {
+          passwordAuthentication: {
+            ...config.localAuthentication,
+            workspaceId: config.workspaceId,
+          },
+        }),
   });
   await Promise.all(
     runtimeDescriptorRegistrations.map(({ descriptor }) =>
@@ -376,8 +449,12 @@ async function createAdministrationOperations(
       readonly displayName: string;
       readonly connectorInstanceId: string;
       readonly collectionId: string;
+      readonly normalizationProfileId: string;
       readonly normalizationProfileVersion: string;
+      readonly chunkingProfileId: string;
       readonly chunkingProfileVersion: string;
+      readonly embeddingBatchSize: number;
+      readonly embeddingBudgetPolicyId: string;
       readonly synchronizationPolicy: Readonly<Record<string, unknown>>;
       readonly deletionBehavior: "tombstone" | "retain";
       readonly context: import("./modules/administration/routes.js").AdminRequestContext;
@@ -387,8 +464,12 @@ async function createAdministrationOperations(
     const settings = Object.freeze({
       connectorInstanceId: input.connectorInstanceId,
       collectionId: input.collectionId,
+      normalizationProfileId: input.normalizationProfileId,
       normalizationProfileVersion: input.normalizationProfileVersion,
+      chunkingProfileId: input.chunkingProfileId,
       chunkingProfileVersion: input.chunkingProfileVersion,
+      embeddingBatchSize: input.embeddingBatchSize,
+      embeddingBudgetPolicyId: input.embeddingBudgetPolicyId,
       synchronizationPolicy: input.synchronizationPolicy,
       deletionBehavior: input.deletionBehavior,
     });
@@ -411,8 +492,12 @@ async function createAdministrationOperations(
             sourceId: configurationId,
             connectorRegistrationId: input.connectorInstanceId,
             knowledgeCollectionId: input.collectionId,
+            normalizationProfileId: input.normalizationProfileId,
             normalizationProfileVersion: input.normalizationProfileVersion,
+            chunkingProfileId: input.chunkingProfileId,
             chunkingProfileVersion: input.chunkingProfileVersion,
+            embeddingBatchSize: input.embeddingBatchSize,
+            embeddingBudgetPolicyId: input.embeddingBudgetPolicyId,
             synchronizationPolicy: input.synchronizationPolicy,
             deletionBehavior: input.deletionBehavior,
           },
@@ -531,14 +616,7 @@ async function createAdministrationOperations(
               id: input.sourceId,
             },
           },
-          select: {
-            connectorRegistrationId: true,
-            knowledgeCollectionId: true,
-            normalizationProfileVersion: true,
-            chunkingProfileVersion: true,
-            synchronizationPolicy: true,
-            deletionBehavior: true,
-          },
+          select: { id: true },
         }),
       ]);
       if (
@@ -566,6 +644,10 @@ async function createAdministrationOperations(
         });
       if (version === null) throw new Error("resource.notFound");
       const settings = storedConfigurationSettings(version.settings);
+      const sourceProjection = knowledgeSourceProjectionFromSettings(
+        input.sourceId,
+        settings,
+      );
       const transitioned = await new ManageKnowledgeSourceConfiguration(
         { transaction: async (operation) => operation() },
         new PostgresSourceScheduleConfigurationStore(
@@ -581,15 +663,7 @@ async function createAdministrationOperations(
           : { displayName: version.displayName }),
         settings,
         source: {
-          sourceId: input.sourceId,
-          connectorRegistrationId: source.connectorRegistrationId,
-          knowledgeCollectionId: source.knowledgeCollectionId,
-          normalizationProfileVersion: source.normalizationProfileVersion,
-          chunkingProfileVersion: source.chunkingProfileVersion,
-          synchronizationPolicy: storedConfigurationSettings(
-            source.synchronizationPolicy,
-          ),
-          deletionBehavior: asDeletionBehavior(source.deletionBehavior),
+          ...sourceProjection,
         },
         expectedRevision: input.expectedRevision,
         lifecycle: input.lifecycle,
@@ -991,6 +1065,10 @@ async function createAdministrationOperations(
         projection: {
           ...projection,
         },
+        ...(input.lifecycle === "active" &&
+        projection.analysisTriggerId !== undefined
+          ? { automatedPrincipalId: input.context.principalId }
+          : {}),
         settings,
         secretReferenceLocators: locators,
         expectedRevision: input.expectedRevision,
@@ -1441,6 +1519,140 @@ async function createAdministrationOperations(
       active: result.summary.active,
     });
   };
+  const createPolicyProfileDraft = async (
+    input: Readonly<{
+      readonly workspaceId: string;
+      readonly resource: "retrieval-profiles" | "prompt-profiles";
+      readonly displayName: string;
+      readonly settings: Readonly<Record<string, unknown>>;
+      readonly context: import("./modules/administration/routes.js").AdminRequestContext;
+    }>,
+  ) => {
+    const profileId = serverConfigurationId(
+      input.resource === "retrieval-profiles" ? "retrieval" : "prompt",
+      input.context,
+    );
+    const requestDigest = sha256Base64Url(
+      canonicalizeConfiguration({
+        resource: input.resource,
+        displayName: input.displayName,
+        settings: input.settings,
+      }),
+    );
+    const result = await persistence.unitOfWork.transaction(
+      async (transaction) =>
+        new CreateConfigurationDraft(
+          { transaction: async (operation) => operation() },
+          new PostgresConfigurationLifecycleStore(
+            persistence.unitOfWork as typeof persistence.unitOfWork &
+              PostgresTransactionLookup,
+            transaction,
+          ),
+          configurationLifecycleAudit(persistence, transaction, input.context),
+        ).execute({
+          workspaceId: input.workspaceId,
+          configurationId: profileId,
+          resourceType: input.resource,
+          displayName: input.displayName,
+          settings: input.settings,
+          secretReferenceIds: [],
+          mutation: {
+            operation: `admin.${input.resource}.draft.create`,
+            keyDigest: digestIdempotencyKey(
+              input.context.idempotencyKey ?? input.context.requestId,
+            ),
+            requestDigest,
+          },
+        }),
+    );
+    return Object.freeze({
+      id: result.configuration.id,
+      revision: result.configuration.revision,
+    });
+  };
+  const transitionPolicyProfile = async (
+    input: Readonly<{
+      readonly workspaceId: string;
+      readonly resource: "retrieval-profiles" | "prompt-profiles";
+      readonly profileId: string;
+      readonly expectedRevision: number;
+      readonly lifecycle: "active" | "disabled";
+      readonly context: import("./modules/administration/routes.js").AdminRequestContext;
+    }>,
+  ) =>
+    persistence.unitOfWork.transaction(async (transaction) => {
+      const database = (
+        persistence.unitOfWork as typeof persistence.unitOfWork &
+          PostgresTransactionLookup
+      ).get(transaction);
+      const configuration =
+        await database.administrationConfiguration.findUnique({
+          where: {
+            workspaceId_id: {
+              workspaceId: input.workspaceId,
+              id: input.profileId,
+            },
+          },
+          select: {
+            resourceType: true,
+            revision: true,
+            currentVersionId: true,
+          },
+        });
+      if (
+        configuration === null ||
+        configuration.resourceType !== input.resource ||
+        configuration.currentVersionId === null
+      ) {
+        throw new Error("resource.notFound");
+      }
+      const currentVersion =
+        await database.administrationConfigurationVersion.findUnique({
+          where: { id: configuration.currentVersionId },
+          select: { settings: true, displayName: true },
+        });
+      if (currentVersion === null) throw new Error("resource.notFound");
+      const settings = storedConfigurationSettings(currentVersion.settings);
+      const transitioned = await new TransitionConfigurationVersion(
+        { transaction: async (operation) => operation() },
+        new PostgresConfigurationLifecycleStore(
+          persistence.unitOfWork as typeof persistence.unitOfWork &
+            PostgresTransactionLookup,
+          transaction,
+        ),
+        configurationLifecycleAudit(persistence, transaction, input.context),
+      ).execute({
+        workspaceId: input.workspaceId,
+        configurationId: input.profileId,
+        resourceType: input.resource,
+        expectedRevision: input.expectedRevision,
+        settings,
+        secretReferenceIds: [],
+        ...(currentVersion.displayName === null
+          ? {}
+          : { displayName: currentVersion.displayName }),
+        lifecycle: input.lifecycle,
+        beforeHash: configurationSettingsHash(settings),
+        mutation: {
+          operation: `admin.${input.resource}.${input.lifecycle}`,
+          keyDigest: digestIdempotencyKey(
+            input.context.idempotencyKey ?? input.context.requestId,
+          ),
+          requestDigest: sha256Base64Url(
+            canonicalizeConfiguration({
+              resource: input.resource,
+              profileId: input.profileId,
+              expectedRevision: input.expectedRevision,
+              lifecycle: input.lifecycle,
+            }),
+          ),
+        },
+      });
+      return Object.freeze({
+        revision: transitioned.configuration.revision,
+        lifecycle: transitioned.configuration.lifecycle,
+      });
+    });
   const dispatcher = new AdministrationOperationDispatcher({
     previews: persistence.administrationActionPreviewStore,
     preflight: new ExistingOperationsPreflight({
@@ -1477,6 +1689,8 @@ async function createAdministrationOperations(
     createKnowledgeScheduleDraft,
     transitionKnowledgeSource,
     transitionKnowledgeSchedule,
+    createPolicyProfileDraft,
+    transitionPolicyProfile,
     createPublicationProfile,
     transitionPublicationProfile,
     createWebhookEndpoint,
@@ -1846,7 +2060,13 @@ function persistedWebhookEventTypes(value: unknown): readonly string[] {
  * the same immutable draft.
  */
 function serverConfigurationId(
-  prefix: "source" | "schedule" | "publication" | "webhook",
+  prefix:
+    | "source"
+    | "schedule"
+    | "publication"
+    | "webhook"
+    | "retrieval"
+    | "prompt",
   context: import("./modules/administration/routes.js").AdminRequestContext,
 ): string {
   return `${prefix}-${digestIdempotencyKey(
@@ -1930,9 +2150,69 @@ function storedConfigurationSettings(
   return value as Readonly<Record<string, unknown>>;
 }
 
-function asDeletionBehavior(value: string): "tombstone" | "retain" {
-  if (value === "tombstone" || value === "retain") return value;
-  throw new Error("resource.notFound");
+/** Rehydrates only a configuration version inside its successor transaction.
+ * Legacy source drafts are intentionally unavailable: executing them would
+ * require inventing mutable runtime defaults that were never pinned. */
+function knowledgeSourceProjectionFromSettings(
+  sourceId: string,
+  settings: Readonly<Record<string, unknown>>,
+) {
+  const connectorRegistrationId = requiredIdentifier(
+    settings.connectorInstanceId,
+  );
+  const knowledgeCollectionId = requiredIdentifier(settings.collectionId);
+  const normalizationProfileId = requiredIdentifier(
+    settings.normalizationProfileId,
+  );
+  const normalizationProfileVersion = requiredIdentifier(
+    settings.normalizationProfileVersion,
+  );
+  const chunkingProfileId = requiredIdentifier(settings.chunkingProfileId);
+  const chunkingProfileVersion = requiredIdentifier(
+    settings.chunkingProfileVersion,
+  );
+  const embeddingBudgetPolicyId = requiredIdentifier(
+    settings.embeddingBudgetPolicyId,
+  );
+  const embeddingBatchSize = settings.embeddingBatchSize;
+  const deletionBehavior = settings.deletionBehavior;
+  if (
+    typeof embeddingBatchSize !== "number" ||
+    !Number.isSafeInteger(embeddingBatchSize) ||
+    embeddingBatchSize < 1 ||
+    embeddingBatchSize > 1_000 ||
+    settings.synchronizationPolicy === null ||
+    typeof settings.synchronizationPolicy !== "object" ||
+    Array.isArray(settings.synchronizationPolicy) ||
+    (deletionBehavior !== "tombstone" && deletionBehavior !== "retain")
+  ) {
+    throw new Error("resource.notFound");
+  }
+  return Object.freeze({
+    sourceId,
+    connectorRegistrationId,
+    knowledgeCollectionId,
+    normalizationProfileId,
+    normalizationProfileVersion,
+    chunkingProfileId,
+    chunkingProfileVersion,
+    embeddingBatchSize,
+    embeddingBudgetPolicyId,
+    synchronizationPolicy: settings.synchronizationPolicy as Readonly<
+      Record<string, unknown>
+    >,
+    deletionBehavior,
+  });
+}
+
+function requiredIdentifier(value: unknown): string {
+  if (
+    typeof value !== "string" ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u.test(value)
+  ) {
+    throw new Error("resource.notFound");
+  }
+  return value;
 }
 
 function asKnowledgeScheduleKind(value: string): "synchronize" | "fullRescan" {
@@ -2018,8 +2298,12 @@ if (
   invokedPath !== undefined &&
   import.meta.url === pathToFileURL(invokedPath).href
 ) {
-  void startApi().catch(() => {
-    process.stderr.write("API startup failed.\n");
-    process.exitCode = 1;
-  });
+  void startApi()
+    .then((runtime) => {
+      attachApiShutdownSignals(runtime, process);
+    })
+    .catch(() => {
+      process.stderr.write("API startup failed.\n");
+      process.exitCode = 1;
+    });
 }

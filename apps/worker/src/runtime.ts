@@ -2,9 +2,9 @@ import type { Envelope, EnvelopeFor } from "@caseweaver/domain";
 import { withOpenTelemetrySpan } from "@caseweaver/observability";
 
 export type KnowledgeSynchronizeCommand =
-  EnvelopeFor<"knowledge.synchronize.v1">;
+  EnvelopeFor<"knowledge.synchronize.v2">;
 export type KnowledgeFullRescanCommand =
-  EnvelopeFor<"knowledge.full-rescan.v1">;
+  EnvelopeFor<"knowledge.full-rescan.v2">;
 
 export interface WorkerCommandHandler<Command extends Envelope> {
   handle(command: Command, signal: AbortSignal): Promise<void>;
@@ -16,7 +16,7 @@ export interface KnowledgeCommandHandlers {
 }
 
 export type AnalysisExecuteCommand = EnvelopeFor<"analysis.execute.v1">;
-export type AnalysisTriggerCommand = EnvelopeFor<"analysis.trigger.v1">;
+export type AnalysisTriggerCommand = EnvelopeFor<"analysis.trigger.v2">;
 export type PublicationExecuteCommand = EnvelopeFor<"publication.execute.v1">;
 export type PublicationReconcileCommand =
   EnvelopeFor<"publication.reconcile.v1">;
@@ -77,20 +77,65 @@ export class UnsupportedWorkerEnvelopeError extends Error {
   }
 }
 
+/**
+ * Historical v1 knowledge envelopes deliberately have no connector-version
+ * proof.  Treating their source version as a connector version would execute
+ * against mutable configuration, so they must reach the durable queue's
+ * visible failure path without invoking connector I/O.
+ */
+export class LegacyKnowledgeConfigurationUnavailableError extends Error {
+  public readonly code = "worker.legacyKnowledgeConfigurationUnavailable";
+  public readonly retryable = false;
+
+  public constructor(
+    type: "knowledge.synchronize.v1" | "knowledge.full-rescan.v1",
+  ) {
+    super(
+      `Legacy knowledge envelope "${type}" has no immutable connector configuration pin.`,
+    );
+    this.name = "LegacyKnowledgeConfigurationUnavailableError";
+  }
+}
+
+/**
+ * Trigger v1 did not retain the immutable trigger and connector configuration
+ * required to capture a case safely.  It remains deserializable only so the
+ * durable queue can record a visible, non-retryable failure without connector
+ * I/O or a mutable configuration fallback.
+ */
+export class LegacyAnalysisTriggerConfigurationUnavailableError extends Error {
+  public readonly code = "worker.legacyAnalysisTriggerConfigurationUnavailable";
+  public readonly retryable = false;
+
+  public constructor() {
+    super(
+      "Legacy analysis trigger envelope has no immutable trigger or connector configuration pin.",
+    );
+    this.name = "LegacyAnalysisTriggerConfigurationUnavailableError";
+  }
+}
+
+function unsupportedEnvelope(envelope: Envelope): never {
+  throw new UnsupportedWorkerEnvelopeError(envelope.type);
+}
+
 export function createKnowledgeCommandDispatcher(
   handlers: KnowledgeCommandHandlers,
 ): WorkerCommandDispatcher {
   return Object.freeze({
     async dispatch(envelope: Envelope, signal: AbortSignal): Promise<void> {
       switch (envelope.type) {
-        case "knowledge.synchronize.v1":
+        case "knowledge.synchronize.v2":
           await handlers.synchronize.handle(envelope, signal);
           return;
-        case "knowledge.full-rescan.v1":
+        case "knowledge.full-rescan.v2":
           await handlers.fullRescan.handle(envelope, signal);
           return;
+        case "knowledge.synchronize.v1":
+        case "knowledge.full-rescan.v1":
+          throw new LegacyKnowledgeConfigurationUnavailableError(envelope.type);
         default:
-          throw new UnsupportedWorkerEnvelopeError(envelope.type);
+          return unsupportedEnvelope(envelope);
       }
     },
   });
@@ -105,12 +150,14 @@ export function createWorkerCommandDispatcher(
         case "analysis.execute.v1":
           await handlers.analysis.execute.handle(envelope, signal);
           return;
-        case "analysis.trigger.v1":
+        case "analysis.trigger.v2":
           if (handlers.publication === undefined) {
             throw new UnsupportedWorkerEnvelopeError(envelope.type);
           }
           await handlers.publication.trigger.handle(envelope, signal);
           return;
+        case "analysis.trigger.v1":
+          throw new LegacyAnalysisTriggerConfigurationUnavailableError();
         case "publication.execute.v1":
           if (handlers.publication === undefined) {
             throw new UnsupportedWorkerEnvelopeError(envelope.type);
@@ -150,12 +197,17 @@ export function createWorkerCommandDispatcher(
           }
           await handlers.diagnostics.generate.handle(envelope, signal);
           return;
-        case "knowledge.synchronize.v1":
+        case "knowledge.synchronize.v2":
           await handlers.synchronize.handle(envelope, signal);
           return;
-        case "knowledge.full-rescan.v1":
+        case "knowledge.full-rescan.v2":
           await handlers.fullRescan.handle(envelope, signal);
           return;
+        case "knowledge.synchronize.v1":
+        case "knowledge.full-rescan.v1":
+          throw new LegacyKnowledgeConfigurationUnavailableError(envelope.type);
+        default:
+          return unsupportedEnvelope(envelope);
       }
     },
   });

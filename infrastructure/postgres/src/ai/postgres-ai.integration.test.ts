@@ -310,6 +310,12 @@ describe("PostgreSQL AI ledger and budget repository", () => {
           kind: "repositoryAgent",
           role: "repositoryAgent",
           request: {
+            runtimePin: {
+              workspaceId: "ai-workspace-a",
+              runtimeVersionId: "repository-runtime-version-1",
+              repositoryId: "repository-1",
+              pinnedCommit: "a".repeat(40),
+            },
             instruction: "Inspect the configured pinned repository.",
             maximumTurns: 2,
             maximumInputTokensPerTurn: 10,

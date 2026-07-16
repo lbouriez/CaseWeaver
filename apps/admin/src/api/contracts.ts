@@ -777,6 +777,10 @@ export interface AuthenticatedSession {
 
 export interface UnauthenticatedSession {
   readonly authenticated: false;
+  readonly authentication: Readonly<{
+    readonly password: boolean;
+    readonly oauth: boolean;
+  }>;
 }
 
 export type Session = AuthenticatedSession | UnauthenticatedSession;
@@ -797,7 +801,14 @@ export const sessionSchema: z.ZodType<Session> = z.discriminatedUnion(
         expiresAt: z.string().datetime({ offset: true }),
       })
       .strict(),
-    z.object({ authenticated: z.literal(false) }).strict(),
+    z
+      .object({
+        authenticated: z.literal(false),
+        authentication: z
+          .object({ password: z.boolean(), oauth: z.boolean() })
+          .strict(),
+      })
+      .strict(),
   ],
 );
 

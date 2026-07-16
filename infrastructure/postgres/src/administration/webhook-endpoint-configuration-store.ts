@@ -54,6 +54,7 @@ export class PostgresWebhookEndpointConfigurationStore
       readonly configurationVersionId: string;
       readonly lifecycle: "active" | "disabled";
       readonly endpoint: WebhookEndpointConfigurationProjection;
+      readonly automatedPrincipalId?: string;
     }>,
   ): Promise<void> {
     const database = this.transactions.get(this.transaction);
@@ -94,11 +95,13 @@ export class PostgresWebhookEndpointConfigurationStore
     }
 
     if (input.lifecycle === "active") {
-      await this.requireActiveWebhookConnector({
-        workspaceId: input.workspaceId,
-        connectorRegistrationId: input.endpoint.connectorRegistrationId,
-        verifiedEventTypes: input.endpoint.verifiedEventTypes,
-      });
+      await this.requireAutomatedPrincipal(input);
+      const connectorConfigurationVersionId =
+        await this.requireActiveWebhookConnector({
+          workspaceId: input.workspaceId,
+          connectorRegistrationId: input.endpoint.connectorRegistrationId,
+          verifiedEventTypes: input.endpoint.verifiedEventTypes,
+        });
       await database.webhookEndpoint.upsert({
         where: {
           workspaceId_id: {
@@ -106,20 +109,29 @@ export class PostgresWebhookEndpointConfigurationStore
             id: input.endpoint.endpointId,
           },
         },
-        create: endpointData(input),
-        update: endpointData(input),
+        create: endpointData(input, connectorConfigurationVersionId),
+        update: endpointData(input, connectorConfigurationVersionId),
       });
       return;
     }
 
     // A disabled draft has no routable endpoint row. Once active, a disablement
     // advances the projection to its successor immutable configuration version.
+    const existing = await database.webhookEndpoint.findUnique({
+      where: {
+        workspaceId_id: {
+          workspaceId: input.workspaceId,
+          id: input.endpoint.endpointId,
+        },
+      },
+      select: { connectorConfigurationVersionId: true },
+    });
     await database.webhookEndpoint.updateMany({
       where: {
         workspaceId: input.workspaceId,
         id: input.endpoint.endpointId,
       },
-      data: endpointData(input),
+      data: endpointData(input, existing?.connectorConfigurationVersionId),
     });
   }
 
@@ -129,7 +141,7 @@ export class PostgresWebhookEndpointConfigurationStore
       readonly connectorRegistrationId: string;
       readonly verifiedEventTypes: readonly string[];
     }>,
-  ): Promise<void> {
+  ): Promise<string> {
     const database = this.transactions.get(this.transaction);
     // Serialize this activation against a concurrent connector lifecycle change.
     // The matching inverse database guard is also required at migration level.
@@ -230,6 +242,31 @@ export class PostgresWebhookEndpointConfigurationStore
     ) {
       throw new AdministrationValidationError();
     }
+    return connectorConfiguration.currentVersionId;
+  }
+
+  private async requireAutomatedPrincipal(
+    input: Readonly<{
+      readonly workspaceId: string;
+      readonly endpoint: WebhookEndpointConfigurationProjection;
+      readonly automatedPrincipalId?: string;
+    }>,
+  ): Promise<void> {
+    if (input.endpoint.analysisTriggerId === undefined) return;
+    if (input.automatedPrincipalId === undefined) {
+      throw new AdministrationValidationError();
+    }
+    const database = this.transactions.get(this.transaction);
+    const principal = await database.principal.findUnique({
+      where: {
+        workspaceId_id: {
+          workspaceId: input.workspaceId,
+          id: input.automatedPrincipalId,
+        },
+      },
+      select: { id: true },
+    });
+    if (principal === null) throw new AdministrationValidationError();
   }
 }
 
@@ -239,29 +276,39 @@ function endpointData(
     readonly configurationVersionId: string;
     readonly lifecycle: "active" | "disabled";
     readonly endpoint: WebhookEndpointConfigurationProjection;
+    readonly automatedPrincipalId?: string;
   }>,
+  connectorConfigurationVersionId: string | null | undefined,
 ): Readonly<{
   readonly id: string;
   readonly workspaceId: string;
   readonly lifecycle: "active" | "disabled";
   readonly connectorInstanceId: string;
-  readonly configurationVersionId: string;
+  readonly endpointConfigurationVersionId: string;
+  readonly connectorConfigurationVersionId?: string | null;
   readonly verifiedEventTypes: Prisma.InputJsonArray;
   readonly maximumBodyBytes: number;
   readonly maximumRequestsPerMinute: number;
   readonly analysisTriggerId?: string;
+  readonly automatedPrincipalId?: string;
 }> {
   return Object.freeze({
     id: input.endpoint.endpointId,
     workspaceId: input.workspaceId,
     lifecycle: input.lifecycle,
     connectorInstanceId: input.endpoint.connectorRegistrationId,
-    configurationVersionId: input.configurationVersionId,
+    endpointConfigurationVersionId: input.configurationVersionId,
+    ...(connectorConfigurationVersionId === undefined
+      ? {}
+      : { connectorConfigurationVersionId }),
     verifiedEventTypes: [...input.endpoint.verifiedEventTypes],
     maximumBodyBytes: input.endpoint.maximumBodyBytes,
     maximumRequestsPerMinute: input.endpoint.maximumRequestsPerMinute,
     ...(input.endpoint.analysisTriggerId === undefined
       ? {}
       : { analysisTriggerId: input.endpoint.analysisTriggerId }),
+    ...(input.lifecycle !== "active" || input.automatedPrincipalId === undefined
+      ? {}
+      : { automatedPrincipalId: input.automatedPrincipalId }),
   });
 }

@@ -67,6 +67,7 @@ export function identityInputFor(
       : {
           repositoryCommit: parsed.repository.pinnedCommit,
           repositoryBindingVersionId: parsed.repository.bindingVersionId,
+          repositoryRuntimeVersionId: parsed.repository.runtimeVersionId,
         }),
   });
 }

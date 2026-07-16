@@ -34,12 +34,19 @@ export interface WebhookEndpointConfigurationState {
   readonly workspaceId: string;
   readonly lifecycle: "active" | "disabled";
   readonly connectorRegistrationId: string;
-  /** Immutable version that selected this routing state. */
-  readonly configurationVersionId: string;
+  /** Immutable endpoint version that selected this public routing state. */
+  readonly endpointConfigurationVersionId: string;
+  /** Immutable connector version that selects the private webhook adapter. */
+  readonly connectorConfigurationVersionId: string;
   readonly verifiedEventTypes: readonly string[];
   readonly maximumBodyBytes: number;
   readonly maximumRequestsPerMinute: number;
   readonly analysisTriggerId?: string;
+  /**
+   * Server-owned principal captured when analysis-trigger routing was activated.
+   * It is intentionally absent from administration projections and HTTP DTOs.
+   */
+  readonly automatedPrincipalId?: string;
 }
 
 /**
@@ -88,6 +95,11 @@ export interface TransitionWebhookEndpointConfigurationCommand {
   readonly secretReferenceLocators: readonly string[];
   readonly expectedRevision: number;
   readonly lifecycle: "active" | "disabled";
+  /**
+   * Authorization context supplied by the API, never a projected endpoint
+   * property or untrusted webhook input. An active trigger route requires it.
+   */
+  readonly automatedPrincipalId?: string;
   readonly beforeHash?: string;
   readonly mutation: MutationIdentity;
 }
@@ -105,6 +117,7 @@ export interface WebhookEndpointConfigurationProjectionStore
       readonly configurationVersionId: string;
       readonly lifecycle: "active" | "disabled";
       readonly endpoint: WebhookEndpointConfigurationProjection;
+      readonly automatedPrincipalId?: string;
     }>,
   ): Promise<void>;
 }
@@ -151,6 +164,7 @@ export class ManageWebhookEndpointConfiguration {
     assertProjection(command.projection);
     assertSettings(command.settings);
     assertOpaqueLocators(command.secretReferenceLocators);
+    assertAutomatedPrincipal(command);
     if (
       !Number.isSafeInteger(command.expectedRevision) ||
       command.expectedRevision < 1
@@ -184,10 +198,34 @@ export class ManageWebhookEndpointConfiguration {
           configurationVersionId: transitioned.version.id,
           lifecycle: command.lifecycle,
           endpoint: command.projection,
+          ...(command.automatedPrincipalId === undefined
+            ? {}
+            : { automatedPrincipalId: command.automatedPrincipalId }),
         });
       }
       return transitioned;
     });
+  }
+}
+
+function assertAutomatedPrincipal(
+  command: TransitionWebhookEndpointConfigurationCommand,
+): void {
+  if (
+    command.lifecycle === "active" &&
+    command.projection.analysisTriggerId !== undefined
+  ) {
+    assertIdentifier(
+      command.automatedPrincipalId,
+      "Webhook automated principal identifier",
+    );
+    return;
+  }
+  if (command.automatedPrincipalId !== undefined) {
+    assertIdentifier(
+      command.automatedPrincipalId,
+      "Webhook automated principal identifier",
+    );
   }
 }
 

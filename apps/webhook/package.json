@@ -9,6 +9,9 @@
       "default": "./dist/index.js"
     }
   },
+  "bin": {
+    "caseweaver-webhook": "./dist/main.js"
+  },
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "typecheck": "tsc --noEmit --project tsconfig.json",
@@ -17,6 +20,7 @@
   "dependencies": {
     "@caseweaver/administration": "workspace:*",
     "@caseweaver/connector-sdk": "workspace:*",
+    "@caseweaver/postgres": "workspace:*",
     "@caseweaver/webhooks": "workspace:*",
     "fastify": "^5.0.0",
     "zod": "^4.0.0"

@@ -4,6 +4,17 @@
 
 Operate analyses manually or automatically and safely publish through destinations.
 
+## Delivery status
+
+**Completed.** Publication profiles, intents, and attempts pin the exact destination
+connector configuration version. Legacy work without that proof fails closed. The
+provider-neutral authorized `analysis.trigger.v1` consumer creates or reuses the correct
+immutable analysis request, and descriptor-driven destination contributions execute
+through the production worker.
+
+PostgreSQL integration and worker composition coverage exercise trigger/publication
+recovery without replacing the feature-owned policy with host logic.
+
 ## Scope
 
 - Authorized manual API and CLI triggers.

@@ -4,6 +4,16 @@
 
 Build the source-neutral ingestion pipeline.
 
+## Delivery status
+
+**Completed.** The production normalizer, chunker, attachment-preparation boundary,
+immutable connector/version resolver, and descriptor-driven worker contribution are
+implemented. The worker resolves only the configuration version pinned to the command;
+test fakes are not a production fallback.
+
+The full repository CI and PostgreSQL integration suite validate command execution,
+configuration pinning, durable runtime behavior, and ingestion policy invariants.
+
 ## Scope
 
 - Consume the `KnowledgeSource` and discovery contracts owned by PBI 006.

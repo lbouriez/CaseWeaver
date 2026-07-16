@@ -6,12 +6,13 @@ import type {
 import type { GitMarkdownSettings } from "./config.js";
 import type { GitMarkdownKnowledgeSource } from "./git-markdown-source.js";
 
-export * from "./config.js";
 export * from "./administration-descriptor.js";
+export * from "./config.js";
 export * from "./fakes.js";
 export * from "./git-markdown-source.js";
 export * from "./git-repository.js";
 export * from "./markdown.js";
+export * from "./runtime-contribution.js";
 
 /**
  * Registers only the knowledge-source capability provided by this connector.

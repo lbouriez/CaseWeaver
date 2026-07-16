@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 import { AttestedAttachmentRuntime } from "../../../infrastructure/attachment-runtime/dist/index.js";
 import { InMemoryBlobStore } from "../../../infrastructure/object-storage/dist/index.js";
@@ -10,6 +12,8 @@ import {
 } from "../../../packages/attachments/dist/index.js";
 
 const workspaceId = "workspace-a";
+const inputBytes = new TextEncoder().encode("input");
+const inputSha256 = createHash("sha256").update(inputBytes).digest("hex");
 const quotas = {
   timeoutMs: 100,
   maximumMemoryBytes: 1_024,
@@ -28,10 +32,10 @@ async function createInput(store: InMemoryBlobStore): Promise<BlobHandle> {
     maximumBytes: 100,
     signal,
   });
-  await store.append(staging, new TextEncoder().encode("input"), signal);
+  await store.append(staging, inputBytes, signal);
   return store.commit(
     staging,
-    { sha256: "a".repeat(64), byteLength: 5 },
+    { sha256: inputSha256, byteLength: inputBytes.byteLength },
     signal,
   );
 }
@@ -43,7 +47,7 @@ describe("attachment storage and runtime contract", () => {
     const identity = derivativeCacheIdentity({
       workspaceId,
       accessPolicyHash: "access-policy-a",
-      contentSha256: "a".repeat(64),
+      contentSha256: inputSha256,
       processor: "text",
       processorVersion: "text.v1",
       securityPolicyVersion: "policy.v1",
@@ -86,8 +90,14 @@ describe("attachment storage and runtime contract", () => {
                 id: "cached",
                 identity,
                 status: "completed",
-                output: { workspaceId, key: "cached" },
+                output: {
+                  workspaceId,
+                  storageBackendId: "test-memory",
+                  key: "cached",
+                },
                 mimeType: "text/plain",
+                outputContentHash: "a".repeat(64),
+                outputByteLength: 1,
               } satisfies AttachmentDerivative,
             };
           }
@@ -109,8 +119,8 @@ describe("attachment storage and runtime contract", () => {
           externalId: "attachment-1",
         },
         blob: input,
-        byteLength: 5,
-        sha256: "a".repeat(64),
+        byteLength: inputBytes.byteLength,
+        sha256: inputSha256,
         detectedMimeType: "text/plain",
       },
       accessPolicyHash: "access-policy-a",

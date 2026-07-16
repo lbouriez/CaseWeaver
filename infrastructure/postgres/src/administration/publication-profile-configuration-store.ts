@@ -5,6 +5,7 @@ import {
   canonicalizeConfiguration,
   type PublicationProfileConfigurationProjection,
   type PublicationProfileConfigurationProjectionStore,
+  parseConfigurationDescriptor,
 } from "@caseweaver/administration";
 import type { ApplicationTransaction } from "@caseweaver/application";
 import { publicationProfileSchema } from "@caseweaver/publication";
@@ -114,10 +115,11 @@ export class PostgresPublicationProfileConfigurationStore
       return;
     }
 
-    await this.requireActiveDestination({
-      workspaceId: input.workspaceId,
-      connectorRegistrationId: parsed.data.destination.connectorInstanceId,
-    });
+    const destinationConnectorConfigurationVersionId =
+      await this.requireActiveDestination({
+        workspaceId: input.workspaceId,
+        connectorRegistrationId: parsed.data.destination.connectorInstanceId,
+      });
     await database.publicationProfile.upsert({
       where: {
         workspaceId_id: {
@@ -140,6 +142,7 @@ export class PostgresPublicationProfileConfigurationStore
         version: parsed.data.version,
         definitionHash: configurationHash(parsed.data),
         definition: json(parsed.data),
+        destinationConnectorConfigurationVersionId,
       },
     });
   }
@@ -149,10 +152,22 @@ export class PostgresPublicationProfileConfigurationStore
       readonly workspaceId: string;
       readonly connectorRegistrationId: string;
     }>,
-  ): Promise<void> {
-    const connector = await this.transactions
-      .get(this.transaction)
-      .connectorRegistration.findUnique({
+  ): Promise<string> {
+    const database = this.transactions.get(this.transaction);
+    // The matching lifecycle guard locks this same registration before a
+    // connector can be disabled. This makes profile activation and disabling
+    // the destination serializable under READ COMMITTED.
+    const locked = await database.$queryRaw<readonly { readonly id: string }[]>`
+      SELECT id
+      FROM connector_registrations
+      WHERE workspace_id = ${input.workspaceId}
+        AND id = ${input.connectorRegistrationId}
+      FOR UPDATE
+    `;
+    if (locked[0] === undefined) throw new AdministrationValidationError();
+
+    const [connector, connectorConfiguration] = await Promise.all([
+      database.connectorRegistration.findUnique({
         where: {
           workspaceId_id: {
             workspaceId: input.workspaceId,
@@ -163,16 +178,80 @@ export class PostgresPublicationProfileConfigurationStore
           lifecycle: true,
           capabilities: { select: { capability: true } },
         },
-      });
+      }),
+      database.administrationConfiguration.findUnique({
+        where: {
+          workspaceId_id: {
+            workspaceId: input.workspaceId,
+            id: input.connectorRegistrationId,
+          },
+        },
+        select: {
+          resourceType: true,
+          lifecycle: true,
+          currentVersionId: true,
+        },
+      }),
+    ]);
     if (
       connector === null ||
       connector.lifecycle !== "active" ||
       !connector.capabilities.some(
         (capability) => capability.capability === "analysisDestination",
-      )
+      ) ||
+      connectorConfiguration === null ||
+      connectorConfiguration.resourceType !== "connector-instances" ||
+      connectorConfiguration.lifecycle !== "active" ||
+      connectorConfiguration.currentVersionId === null
     ) {
       throw new AdministrationValidationError();
     }
+    const connectorVersion =
+      await database.administrationConfigurationVersion.findFirst({
+        where: {
+          workspaceId: input.workspaceId,
+          configurationId: input.connectorRegistrationId,
+          id: connectorConfiguration.currentVersionId,
+        },
+        select: {
+          descriptorKind: true,
+          descriptorType: true,
+          descriptorVersion: true,
+        },
+      });
+    if (
+      connectorVersion === null ||
+      connectorVersion.descriptorKind !== "connector" ||
+      connectorVersion.descriptorType === null ||
+      connectorVersion.descriptorVersion === null
+    ) {
+      throw new AdministrationValidationError();
+    }
+    const storedDescriptor =
+      await database.administrationDescriptorRevision.findUnique({
+        where: {
+          kind_type_version: {
+            kind: connectorVersion.descriptorKind,
+            type: connectorVersion.descriptorType,
+            version: connectorVersion.descriptorVersion,
+          },
+        },
+        select: { descriptor: true },
+      });
+    if (storedDescriptor === null) throw new AdministrationValidationError();
+    let descriptor: ReturnType<typeof parseConfigurationDescriptor>;
+    try {
+      descriptor = parseConfigurationDescriptor(storedDescriptor.descriptor);
+    } catch {
+      throw new AdministrationValidationError();
+    }
+    if (
+      descriptor.kind !== "connector" ||
+      !descriptor.connectorCapabilities.includes("analysisDestination")
+    ) {
+      throw new AdministrationValidationError();
+    }
+    return connectorConfiguration.currentVersionId;
   }
 }
 

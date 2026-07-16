@@ -5,9 +5,11 @@ import type {
   EmbeddingCacheIdentity,
   FailedRevisionDiagnostic,
   KnowledgeIngestionStore,
+  KnowledgeSourceExecutionFence,
   KnowledgeMutation,
   NewCachedEmbedding,
 } from "@caseweaver/knowledge";
+import { KnowledgeExecutionFenceError } from "@caseweaver/knowledge";
 import type { Pool, PoolClient, QueryResultRow } from "pg";
 
 type KnowledgeReference = Extract<
@@ -271,6 +273,12 @@ export class PostgresKnowledgeIngestionStore
     input: Parameters<KnowledgeIngestionStore["commit"]>[0],
   ): Promise<void> {
     await this.withTransaction(async (database) => {
+      await this.requireCurrentFence(
+        database,
+        input.workspaceId,
+        input.sourceId,
+        input.fence,
+      );
       await this.insertCacheEntries(
         database,
         input.workspaceId,
@@ -432,6 +440,32 @@ export class PostgresKnowledgeIngestionStore
       throw error;
     } finally {
       client.release();
+    }
+  }
+
+  private async requireCurrentFence(
+    database: Queryable,
+    workspaceId: string,
+    sourceId: string,
+    fence: KnowledgeSourceExecutionFence,
+  ): Promise<void> {
+    if (!/^[1-9][0-9]*$/u.test(fence.value)) {
+      throw new KnowledgeExecutionFenceError();
+    }
+    const result = await database.query<
+      Readonly<{ readonly execution_fence: string }>
+    >(
+      `SELECT execution_fence::text AS execution_fence
+         FROM knowledge_source_states
+        WHERE workspace_id = $1
+          AND knowledge_source_id = $2
+          AND execution_fence = $3::bigint
+          AND execution_lease_expires_at > NOW()
+        FOR UPDATE`,
+      [workspaceId, sourceId, fence.value],
+    );
+    if (result.rows[0] === undefined) {
+      throw new KnowledgeExecutionFenceError();
     }
   }
 

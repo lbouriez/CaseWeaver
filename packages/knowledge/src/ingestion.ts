@@ -17,16 +17,19 @@ import {
   sameOpaqueValue,
   sameReference,
 } from "./hashing.js";
+import { requireKnowledgeTextProfiles } from "./profiles.js";
 import type {
   ActivatedRevision,
   ActiveEmbeddingSpace,
   EmbeddingCacheIdentity,
   FailedRevisionDiagnostic,
   KnowledgeChunkDraft,
+  KnowledgeDiscoveryControl,
   KnowledgeIngestionDependencies,
   KnowledgeMutation,
   KnowledgeSynchronizationRequest,
   KnowledgeSynchronizationResult,
+  KnowledgeTextProfileRegistry,
   NewCachedEmbedding,
   NormalizedKnowledgeDocument,
 } from "./types.js";
@@ -68,9 +71,14 @@ function validateConfiguration(request: KnowledgeSynchronizationRequest): void {
   requireNonEmpty(configuration.workspaceId, "workspace ID");
   requireNonEmpty(configuration.connectorInstanceId, "connector instance ID");
   requireNonEmpty(
+    configuration.normalizationProfileId,
+    "normalization profile ID",
+  );
+  requireNonEmpty(
     configuration.normalizationProfileVersion,
     "normalization profile version",
   );
+  requireNonEmpty(configuration.chunkingProfileId, "chunking profile ID");
   requireNonEmpty(
     configuration.chunkingProfileVersion,
     "chunking profile version",
@@ -110,6 +118,16 @@ function validateConfiguration(request: KnowledgeSynchronizationRequest): void {
   ) {
     throw new KnowledgeIngestionError(
       "Knowledge embedding batch size must be a positive integer.",
+      "knowledge.invalidConfiguration",
+      false,
+    );
+  }
+  if (
+    configuration.collection.budget.hard &&
+    configuration.collection.budget.allowUnknownPricing === true
+  ) {
+    throw new KnowledgeIngestionError(
+      "Hard knowledge embedding budgets cannot allow unknown pricing.",
       "knowledge.invalidConfiguration",
       false,
     );
@@ -298,6 +316,13 @@ export class KnowledgeIngestionService {
     request: KnowledgeSynchronizationRequest,
   ): Promise<KnowledgeSynchronizationResult> {
     validateConfiguration(request);
+    const profiles = requireKnowledgeTextProfiles(this.dependencies.profiles, {
+      normalizationProfileId: request.configuration.normalizationProfileId,
+      normalizationProfileVersion:
+        request.configuration.normalizationProfileVersion,
+      chunkingProfileId: request.configuration.chunkingProfileId,
+      chunkingProfileVersion: request.configuration.chunkingProfileVersion,
+    });
     const state: ScanState = {
       complete: false,
       mutations: [],
@@ -313,10 +338,19 @@ export class KnowledgeIngestionService {
       },
     };
 
-    for await (const page of request.source.discover({
-      cursor: request.cursor,
+    const discovery: KnowledgeDiscoveryControl = Object.freeze({
+      mode: request.discovery.mode,
+      reset: request.discovery.reset,
+      ...(request.discovery.cursor === undefined
+        ? {}
+        : { cursor: request.discovery.cursor }),
       signal: request.signal,
-    })) {
+    });
+    // Do not invoke a connector's async generator after a coordinator has lost
+    // its fence (or the caller has cancelled) between profile resolution and
+    // discovery startup.
+    assertActive(request.signal);
+    for await (const page of request.source.discover(discovery)) {
       assertActive(request.signal);
       this.validatePage(state, page);
       if (state.complete) {
@@ -328,9 +362,16 @@ export class KnowledgeIngestionService {
       }
 
       if (page.mode === "snapshot") {
-        await this.processSnapshotPage(request, state, page);
+        await this.processSnapshotPage(request, profiles, state, page);
       } else {
-        await this.processDeltaPage(request, state, page);
+        if (request.discovery.mode === "fullRescan") {
+          throw new KnowledgeIngestionError(
+            "A full rescan must use snapshot discovery semantics.",
+            "knowledge.invalidDiscovery",
+            false,
+          );
+        }
+        await this.processDeltaPage(request, profiles, state, page);
       }
       state.cursor = page.nextCursor;
       state.complete = page.complete;
@@ -347,6 +388,7 @@ export class KnowledgeIngestionService {
     await this.dependencies.store.commit({
       workspaceId: request.configuration.workspaceId,
       sourceId: request.configuration.id,
+      fence: request.fence,
       scan: {
         mode: state.mode,
         cursor: state.cursor,
@@ -390,16 +432,18 @@ export class KnowledgeIngestionService {
 
   private async processSnapshotPage(
     request: KnowledgeSynchronizationRequest,
+    profiles: NonNullable<ReturnType<KnowledgeTextProfileRegistry["resolve"]>>,
     state: ScanState,
     page: SnapshotDiscoveryPage<DiscoveredKnowledgeItem>,
   ): Promise<void> {
     for (const item of page.items) {
-      await this.processUpsert(request, state, item);
+      await this.processUpsert(request, profiles, state, item);
     }
   }
 
   private async processDeltaPage(
     request: KnowledgeSynchronizationRequest,
+    profiles: NonNullable<ReturnType<KnowledgeTextProfileRegistry["resolve"]>>,
     state: ScanState,
     page: DeltaDiscoveryPage<DiscoveredKnowledgeItem>,
   ): Promise<void> {
@@ -414,12 +458,13 @@ export class KnowledgeIngestionService {
         state.result.tombstones += 1;
         continue;
       }
-      await this.processUpsert(request, state, event.item);
+      await this.processUpsert(request, profiles, state, event.item);
     }
   }
 
   private async processUpsert(
     request: KnowledgeSynchronizationRequest,
+    profiles: NonNullable<ReturnType<KnowledgeTextProfileRegistry["resolve"]>>,
     state: ScanState,
     item: DiscoveredKnowledgeItem,
   ): Promise<void> {
@@ -478,7 +523,7 @@ export class KnowledgeIngestionService {
       stage = "normalize";
       const normalized = preserveSourceMetadata(
         loaded,
-        await this.dependencies.normalizer.normalize({
+        await profiles.normalizer.normalize({
           document: loaded,
           normalizationProfileVersion:
             request.configuration.normalizationProfileVersion,
@@ -518,7 +563,7 @@ export class KnowledgeIngestionService {
               signal: request.signal,
             });
       stage = "chunk";
-      const candidates = await this.dependencies.chunker.chunk({
+      const candidates = await profiles.chunker.chunk({
         document: normalized,
         attachments,
         chunkingProfileVersion: request.configuration.chunkingProfileVersion,
@@ -660,6 +705,16 @@ export class KnowledgeIngestionService {
           signal: request.signal,
         },
       );
+      if (
+        request.configuration.collection.budget.hard &&
+        result.calculatedCost.status !== "known"
+      ) {
+        throw new KnowledgeIngestionError(
+          "Knowledge embedding pricing is unavailable for a hard budget.",
+          "knowledge.unknownPricing",
+          false,
+        );
+      }
       if (result.value.vectors.length !== batch.length) {
         throw new KnowledgeIngestionError(
           "Embedding provider returned a vector count that does not match its input.",

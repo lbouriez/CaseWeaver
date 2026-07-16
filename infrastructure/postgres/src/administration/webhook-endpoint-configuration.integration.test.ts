@@ -66,7 +66,8 @@ describe("PostgreSQL webhook endpoint administration projection", () => {
     const persistence = createPostgresPersistence({ databaseUrl });
     try {
       await persistence.descriptorRegistry.register(connectorDescriptor());
-      await activateConnectorConfiguration(persistence);
+      const connectorConfigurationVersionId =
+        await activateConnectorConfiguration(persistence);
       const draft = await persistence.unitOfWork.transaction((transaction) =>
         manager(persistence, transaction).create({
           workspaceId: "workspace-a",
@@ -85,6 +86,7 @@ describe("PostgreSQL webhook endpoint administration projection", () => {
           secretReferenceLocators: ["vault:opaque/webhook-signing"],
           expectedRevision: draft.configuration.revision,
           lifecycle: "active",
+          automatedPrincipalId: "principal-a",
           mutation: mutation("webhookEndpoint.activate", "b"),
         }),
       );
@@ -92,15 +94,18 @@ describe("PostgreSQL webhook endpoint administration projection", () => {
         pool.query<{
           readonly lifecycle: string;
           readonly connector_instance_id: string;
-          readonly configuration_version_id: string;
+          readonly endpoint_configuration_version_id: string;
+          readonly connector_configuration_version_id: string;
           readonly verified_event_types: readonly string[];
           readonly maximum_body_bytes: number;
           readonly maximum_requests_per_minute: number;
           readonly analysis_trigger_id: string | null;
         }>(
-          `SELECT lifecycle, connector_instance_id, configuration_version_id,
+          `SELECT lifecycle, connector_instance_id,
+                  endpoint_configuration_version_id,
+                  connector_configuration_version_id,
                   verified_event_types, maximum_body_bytes,
-                  maximum_requests_per_minute, analysis_trigger_id
+          maximum_requests_per_minute, analysis_trigger_id, automated_principal_id
            FROM webhook_endpoints
            WHERE workspace_id = 'workspace-a' AND id = 'opaque_endpoint-1'`,
         ),
@@ -109,11 +114,13 @@ describe("PostgreSQL webhook endpoint administration projection", () => {
           {
             lifecycle: "active",
             connector_instance_id: "connector-a",
-            configuration_version_id: active.version.id,
+            endpoint_configuration_version_id: active.version.id,
+            connector_configuration_version_id: connectorConfigurationVersionId,
             verified_event_types: ["caseChanged"],
             maximum_body_bytes: 131_072,
             maximum_requests_per_minute: 120,
             analysis_trigger_id: "trigger-a",
+            automated_principal_id: "principal-a",
           },
         ],
       });
@@ -175,6 +182,7 @@ describe("PostgreSQL webhook endpoint administration projection", () => {
             secretReferenceLocators: ["vault:opaque/webhook-signing"],
             expectedRevision: draft.configuration.revision,
             lifecycle: "active",
+            automatedPrincipalId: "principal-a",
             mutation: mutation("webhookEndpoint.activate", "d"),
           }),
         ),
@@ -219,7 +227,8 @@ describe("PostgreSQL webhook endpoint administration projection", () => {
     const persistence = createPostgresPersistence({ databaseUrl });
     try {
       await persistence.descriptorRegistry.register(connectorDescriptor());
-      await activateConnectorConfiguration(persistence);
+      const connectorConfigurationVersionId =
+        await activateConnectorConfiguration(persistence);
       const draft = await persistence.unitOfWork.transaction((transaction) =>
         manager(persistence, transaction).create({
           workspaceId: "workspace-a",
@@ -238,20 +247,22 @@ describe("PostgreSQL webhook endpoint administration projection", () => {
           secretReferenceLocators: ["vault:opaque/webhook-signing"],
           expectedRevision: draft.configuration.revision,
           lifecycle: "active",
+          automatedPrincipalId: "principal-a",
           mutation: mutation("webhookEndpoint.activate", "f"),
         }),
       );
       await pool.query(
         `INSERT INTO webhook_inbox (
-           id, workspace_id, endpoint_id, configuration_version_id,
+           id, workspace_id, endpoint_id, endpoint_configuration_version_id,
+           connector_configuration_version_id,
            connector_instance_id, delivery_key, raw_body_digest,
            verification, signals, received_at
          ) VALUES (
-           'inbox-a', 'workspace-a', 'opaque_endpoint-1', $1,
+           'inbox-a', 'workspace-a', 'opaque_endpoint-1', $1, $2,
            'connector-a', 'delivery-a', repeat('a', 64),
            '{"eventType":"caseChanged"}'::jsonb, '[]'::jsonb, now()
          )`,
-        [active.version.id],
+        [active.version.id, connectorConfigurationVersionId],
       );
       await expect(
         persistence.unitOfWork.transaction((transaction) =>
@@ -284,8 +295,8 @@ describe("PostgreSQL webhook endpoint administration projection", () => {
           readonly inbox_version: string;
         }>(
           `SELECT endpoint.lifecycle,
-                  endpoint.configuration_version_id AS endpoint_version,
-                  inbox.configuration_version_id AS inbox_version
+                  endpoint.endpoint_configuration_version_id AS endpoint_version,
+                  inbox.endpoint_configuration_version_id AS inbox_version
            FROM webhook_endpoints AS endpoint
            JOIN webhook_inbox AS inbox
              ON inbox.workspace_id = endpoint.workspace_id
@@ -304,7 +315,7 @@ describe("PostgreSQL webhook endpoint administration projection", () => {
       });
       await expect(
         pool.query(
-          "UPDATE webhook_inbox SET configuration_version_id = $1 WHERE id = 'inbox-a'",
+          "UPDATE webhook_inbox SET endpoint_configuration_version_id = $1 WHERE id = 'inbox-a'",
           [disabled.version.id],
         ),
       ).rejects.toThrow(/immutable/i);
@@ -320,7 +331,8 @@ describe("PostgreSQL webhook endpoint administration projection", () => {
     });
     try {
       await persistence.descriptorRegistry.register(connectorDescriptor());
-      await activateConnectorConfiguration(persistence);
+      const connectorConfigurationVersionId =
+        await activateConnectorConfiguration(persistence);
       const draft = await persistence.unitOfWork.transaction((transaction) =>
         manager(persistence, transaction).create({
           workspaceId: "workspace-a",
@@ -339,6 +351,7 @@ describe("PostgreSQL webhook endpoint administration projection", () => {
           secretReferenceLocators: ["vault:opaque/webhook-signing"],
           expectedRevision: draft.configuration.revision,
           lifecycle: "active",
+          automatedPrincipalId: "principal-a",
           mutation: mutation("webhookEndpoint.activate", "j"),
         }),
       );
@@ -351,11 +364,13 @@ describe("PostgreSQL webhook endpoint administration projection", () => {
         workspaceId: "workspace-a",
         lifecycle: "active",
         connectorRegistrationId: "connector-a",
-        configurationVersionId: active.version.id,
+        endpointConfigurationVersionId: active.version.id,
+        connectorConfigurationVersionId,
         verifiedEventTypes: ["caseChanged"],
         maximumBodyBytes: 131_072,
         maximumRequestsPerMinute: 1,
         analysisTriggerId: "trigger-a",
+        automatedPrincipalId: "principal-a",
       });
       await expect(
         runtime.findActive({ endpointId: "absent" }),
@@ -416,8 +431,8 @@ function manager(
 
 async function activateConnectorConfiguration(
   persistence: ReturnType<typeof createPostgresPersistence>,
-): Promise<void> {
-  await persistence.unitOfWork.transaction(async (transaction) => {
+): Promise<string> {
+  return persistence.unitOfWork.transaction(async (transaction) => {
     const store = new PostgresConfigurationLifecycleStore(
       persistence.unitOfWork as PostgresTransactionLookup,
       transaction,
@@ -435,7 +450,7 @@ async function activateConnectorConfiguration(
         version: "1",
       },
     });
-    await store.transition({
+    const active = await store.transition({
       workspaceId: "workspace-a",
       resourceType: "connector-instances",
       configurationId: "connector-a",
@@ -444,6 +459,7 @@ async function activateConnectorConfiguration(
       secretReferenceIds: [],
       lifecycle: "active",
     });
+    return active.version.id;
   });
 }
 

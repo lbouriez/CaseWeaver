@@ -12,14 +12,15 @@ import type {
 /**
  * Composition-owned adapter lookup.  It receives server-selected immutable
  * identities only, so a webhook body or header can never select an adapter,
- * workspace, configuration version, or credential.
+ * workspace, endpoint configuration version, connector configuration version,
+ * or credential.
  */
 export interface WebhookAdapterResolver {
   resolve(
     input: Readonly<{
       readonly workspaceId: string;
       readonly connectorRegistrationId: string;
-      readonly configurationVersionId: string;
+      readonly connectorConfigurationVersionId: string;
       readonly verifiedEventTypes: readonly string[];
     }>,
   ): Promise<WebhookAdapter | undefined>;
@@ -53,10 +54,15 @@ export class PersistedWebhookEndpointResolver
         id: state.endpointId,
         workspaceId: state.workspaceId,
         connectorInstanceId: state.connectorRegistrationId,
+        endpointConfigurationVersionId: state.endpointConfigurationVersionId,
+        connectorConfigurationVersionId: state.connectorConfigurationVersionId,
         adapter,
         ...(state.analysisTriggerId === undefined
           ? {}
           : { analysisTriggerId: state.analysisTriggerId }),
+        ...(state.automatedPrincipalId === undefined
+          ? {}
+          : { automatedPrincipalId: state.automatedPrincipalId }),
       }),
       maximumBodyBytes: state.maximumBodyBytes,
       admit: () =>
@@ -71,13 +77,13 @@ export class PersistedWebhookEndpointResolver
 function adapterRequest(state: WebhookEndpointConfigurationState): Readonly<{
   readonly workspaceId: string;
   readonly connectorRegistrationId: string;
-  readonly configurationVersionId: string;
+  readonly connectorConfigurationVersionId: string;
   readonly verifiedEventTypes: readonly string[];
 }> {
   return Object.freeze({
     workspaceId: state.workspaceId,
     connectorRegistrationId: state.connectorRegistrationId,
-    configurationVersionId: state.configurationVersionId,
+    connectorConfigurationVersionId: state.connectorConfigurationVersionId,
     verifiedEventTypes: state.verifiedEventTypes,
   });
 }

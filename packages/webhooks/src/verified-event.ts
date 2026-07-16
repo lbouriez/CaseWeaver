@@ -56,9 +56,14 @@ function createVerifiedEvent(
     endpointId: endpoint.id,
     workspaceId: endpoint.workspaceId,
     connectorInstanceId: endpoint.connectorInstanceId,
+    endpointConfigurationVersionId: endpoint.endpointConfigurationVersionId,
+    connectorConfigurationVersionId: endpoint.connectorConfigurationVersionId,
     ...(endpoint.analysisTriggerId === undefined
       ? {}
       : { analysisTriggerId: endpoint.analysisTriggerId }),
+    ...(endpoint.automatedPrincipalId === undefined
+      ? {}
+      : { automatedPrincipalId: endpoint.automatedPrincipalId }),
     deliveryKey: deliveryKey(
       endpoint.id,
       verified.eventType,

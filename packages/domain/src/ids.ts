@@ -20,6 +20,9 @@ export type AnalysisIdentityId = OpaqueId<"analysisIdentity">;
 export type AnalysisJobId = OpaqueId<"analysisJob">;
 export type AnalysisAttemptId = OpaqueId<"analysisAttempt">;
 export type AnalysisResultId = OpaqueId<"analysisResult">;
+export type AnalysisTriggerId = OpaqueId<"analysisTrigger">;
+export type AnalysisTriggerVersionId = OpaqueId<"analysisTriggerVersion">;
+export type AnalysisTriggerRequestId = OpaqueId<"analysisTriggerRequest">;
 export type EvidenceId = OpaqueId<"evidence">;
 export type PublicationIntentId = OpaqueId<"publicationIntent">;
 export type PublicationAttemptId = OpaqueId<"publicationAttempt">;
@@ -72,6 +75,13 @@ export const analysisIdentityId = identifierFactory("analysisIdentity");
 export const analysisJobId = identifierFactory("analysisJob");
 export const analysisAttemptId = identifierFactory("analysisAttempt");
 export const analysisResultId = identifierFactory("analysisResult");
+export const analysisTriggerId = identifierFactory("analysisTrigger");
+export const analysisTriggerVersionId = identifierFactory(
+  "analysisTriggerVersion",
+);
+export const analysisTriggerRequestId = identifierFactory(
+  "analysisTriggerRequest",
+);
 export const evidenceId = identifierFactory("evidence");
 export const publicationIntentId = identifierFactory("publicationIntent");
 export const publicationAttemptId = identifierFactory("publicationAttempt");

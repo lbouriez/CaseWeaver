@@ -50,6 +50,8 @@ function endpoint(adapter: WebhookAdapter): WebhookEndpoint {
     id: "opaque-endpoint",
     workspaceId: "workspace-1",
     connectorInstanceId: "support-1",
+    endpointConfigurationVersionId: "endpoint-version-1",
+    connectorConfigurationVersionId: "connector-version-1",
     adapter,
   };
 }
@@ -70,7 +72,7 @@ describe("WebhookIngress", () => {
     const rawBody = new Uint8Array([123, 32, 34, 97, 34, 58, 49, 125]);
 
     const result = await createIngress(store).accept(
-      endpoint(adapter),
+      { ...endpoint(adapter), automatedPrincipalId: "principal-1" },
       delivery(rawBody),
     );
 
@@ -86,6 +88,9 @@ describe("WebhookIngress", () => {
       event: {
         workspaceId: "workspace-1",
         connectorInstanceId: "support-1",
+        endpointConfigurationVersionId: "endpoint-version-1",
+        connectorConfigurationVersionId: "connector-version-1",
+        automatedPrincipalId: "principal-1",
         verification: { eventType: "case.updated", eventId: "delivery-44" },
         signals,
       },

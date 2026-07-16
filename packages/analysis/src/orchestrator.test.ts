@@ -19,11 +19,14 @@ import type {
   AnalysisExecution,
   AnalysisProfile,
 } from "./contracts.js";
+import { analysisProfileSchema } from "./contracts.js";
 import {
   DeterministicAnalysisAiGateway,
+  DeterministicRepositoryInvestigationPort,
   FixedAnalysisClock,
   InMemoryAnalysisExecutionStore,
   SequentialAnalysisIds,
+  StaticAnalysisPromptBuilderResolver,
   StaticAttachmentEvidencePort,
   StaticRetrievalEvidencePort,
 } from "./fakes.js";
@@ -179,10 +182,13 @@ function harness(input: {
         input.retrievalFailure,
         input.retrievalOperationIds,
       ),
-      prompts: new AnalysisPromptBuilder(new WhitespacePromptTokenCounter()),
+      prompts: new StaticAnalysisPromptBuilderResolver(
+        new AnalysisPromptBuilder(new WhitespacePromptTokenCounter()),
+      ),
       ai,
       ids: new SequentialAnalysisIds(),
       clock: new FixedAnalysisClock(),
+      repository: new DeterministicRepositoryInvestigationPort(),
     }),
   };
 }
@@ -257,6 +263,37 @@ describe("AnalysisOrchestrator", () => {
     expect(test.store.results).toHaveLength(0);
     expect(test.store.events).toHaveLength(0);
     expect(test.store.failures[0]).toMatchObject({ outcome: "failed" });
+  });
+
+  it("persists a terminal cancelled attempt through a fresh non-aborted signal", async () => {
+    const store = new InMemoryAnalysisExecutionStore();
+    store.seed(execution());
+    const controller = new AbortController();
+    const orchestrator = new AnalysisOrchestrator({
+      store,
+      attachments: {
+        async resolve() {
+          controller.abort();
+          throw new Error("attachment processing interrupted");
+        },
+      },
+      retrieval: new StaticRetrievalEvidencePort([knowledgeEvidence]),
+      prompts: new StaticAnalysisPromptBuilderResolver(
+        new AnalysisPromptBuilder(new WhitespacePromptTokenCounter()),
+      ),
+      ai: new DeterministicAnalysisAiGateway([{ text: output }]),
+      ids: new SequentialAnalysisIds(),
+      clock: new FixedAnalysisClock(),
+      repository: new DeterministicRepositoryInvestigationPort(),
+    });
+
+    await expect(
+      orchestrator.execute(command(), controller.signal),
+    ).rejects.toMatchObject({
+      code: "analysis.cancelled",
+    });
+    expect(store.failures[0]).toMatchObject({ outcome: "cancelled" });
+    expect(store.failureSignalsAborted).toEqual([false]);
   });
 
   it("performs only the configured bounded repair attempts", async () => {
@@ -368,5 +405,31 @@ describe("analysis request identity", () => {
 
     expect(captured.snapshot.id).toBe("snapshot-1");
     expect(captured.identity.caseRevision).toBe("revision-1");
+  });
+});
+
+describe("analysis immutable runtime pins", () => {
+  it("rejects an enabled repository stage without an immutable runtime version", () => {
+    const configured = profile({
+      repository: {
+        policy: "required",
+        bindingVersionId: "repository-binding-a",
+        repositoryId: "repository-a",
+        pinnedCommit: "a".repeat(40),
+        maximumContextCharacters: 100,
+        maximumEvidenceCharacters: 100,
+      },
+    });
+
+    expect(analysisProfileSchema.safeParse(configured).success).toBe(false);
+    expect(
+      analysisProfileSchema.safeParse({
+        ...configured,
+        repository: {
+          ...configured.repository,
+          runtimeVersionId: "repository-runtime-version-a",
+        },
+      }).success,
+    ).toBe(true);
   });
 });

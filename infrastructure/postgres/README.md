@@ -18,6 +18,31 @@ identity is unique per workspace, destination connector, and stable marker; exec
 uses a fenced resource lease. `PostgresVerifiedWebhookEventStore` persists accepted
 case-change commands in the same transaction as its inbox record.
 
+Publication profile activation also selects and stores the exact descriptor-backed
+`analysisDestination` connector configuration version. That pin is copied into every
+intent and attempt, participates in delivery identity, and is used for private runtime
+resolution rather than a connector's mutable current version. Database guards keep the
+pin immutable, reject mismatched attempts, and prevent disabling a connector or its
+configuration while an active publication profile depends on it. Existing unpinned
+history remains readable but fails closed before any destination I/O.
+
+The subsequent versioned-trigger migration creates immutable analysis-trigger revisions
+and workspace-scoped trigger requests. Each request pins the trigger revision, analysis
+profile version, connector registration, and connector configuration version selected at
+acceptance. Database-time capture leases and monotonic fencing tokens prevent stale
+captures from committing; normalized immutable snapshots deduplicate against the exact
+connector target. The adapter persists no connector settings, secret references, source
+URLs, or raw ingress bodies. Legacy trigger commands are unavailable rather than rebound
+to a current configuration.
+
+Webhook-triggered analysis follows the same v2 boundary. The verified inbox retains the
+server-owned activation principal, then the acceptance transaction locks and verifies the
+active trigger's exact current revision, case-source capability, retained connector
+configuration version, and workspace actor. It writes the immutable request,
+idempotency record, audit event, and `analysis.trigger.v2` outbox envelope together.
+Absent actors, legacy rows, and configuration mismatches roll back the inbox rather than
+creating unauditable or rebound work.
+
 ## PBI-009 retrieval
 
 `createPostgresRetrievalPersistence` implements the retrieval search and immutable
@@ -26,6 +51,81 @@ active-document/revision, and source-lifecycle predicates in both parameterized
 full-text and vector queries. The migration provisions finite indexed dimensions `3`
 (deterministic tests) and `1536`; callers may configure a subset but unsupported
 dimensions are rejected rather than falling back to a corpus scan.
+
+## PBI-011 production analysis evidence
+
+`PostgresSnapshotAttachmentReferenceStore` is the persistence half of frozen analysis
+attachment evidence. It reads only an append-only snapshot reference row, checks that
+the referenced attachment derivative remains completed and retention-active, and never
+selects an attachment from the mutable external-reference relation. It returns neither
+an object-storage key nor a storage backend; PBI-008's server-private derivative reader
+opens the bounded text separately.
+
+The integration-owned forward migration must add
+`case_snapshot_attachment_references` with:
+
+- `workspace_id`, `case_snapshot_id`, and a deterministic `ordinal` primary key;
+- immutable `attachment_id`, `attachment_derivative_id`, `processor_version`, and
+  `output_content_hash` columns;
+- workspace-composite foreign keys to the captured case snapshot, attachment, and
+  attachment derivative with `ON DELETE RESTRICT`;
+- database guards rejecting update/delete, and a write path that inserts references in
+  the same transaction as snapshot capture/analysis request creation.
+
+No storage location, secret reference, external URL, or mutable attachment lookup may
+be placed in this table. Retention deletion causes future evidence resolution to fail
+closed while the completed analysis retains its already-stored evidence/tombstone.
+
+`PostgresAnalysisRetrievalEvidencePort` bridges an immutable analysis profile to a
+`RetrievalService` configured with PostgreSQL search/snapshot adapters. Its runtime
+resolver must return the exact persisted retrieval-profile version, collection vector
+spaces, authorized-source scope, and policy; a current configuration mismatch fails
+closed. It stores an attempt-bound retrieval snapshot and maps results to analysis
+evidence while replacing external source URLs with opaque CaseWeaver provenance URLs.
+Its retrieval request forwards the server-owned analysis identity and job attribution to
+embedding/reranking gateway operations.
+
+`PostgresAnalysisRetrievalRuntimeResolver` now supplies that version projection from
+the generic administration configuration store without following its mutable
+`current_version_id`. It accepts only an active `retrieval-profiles` aggregate, its
+exact workspace/configuration/version pin, empty secret-reference metadata, and a
+strict retrieval runtime settings shape (collections/vector identity, bounded policy,
+authorized source scope, metadata filters, and the analysis-context tokenizer binding).
+Version rotation therefore cannot rebind queued analysis work. The integration host
+must still provide model-compatible bound token counters and construct the retrieval
+service from the PostgreSQL search/snapshot adapters and exclusive AI gateway.
+
+`createPostgresAnalysisEvidenceRuntime` owns a deliberately narrow Prisma client
+for immutable snapshot-attachment references and retained retrieval-profile
+versions. It exposes only those feature ports and closes with its worker host;
+it never exposes a Prisma client or follows a mutable configuration pointer.
+
+`PostgresRepositoryRuntimeConfigurationResolver` applies the same exact-pin
+rule to an active `repository-runtimes` administration configuration version.
+It validates the repository/commit and repository-agent binding retained in
+strict settings, an explicit read-only tool allowlist, bounded OCI limits,
+hard known-price budget policy, and exactly one active opaque checkout
+credential registration. It never follows `current_version_id`; its private
+checkout locator is returned only to trusted checkout-broker composition and
+is absent from API/audit read models. `createPostgresRepositoryRuntime` owns
+that narrow resolver client for the worker lifecycle.
+
+## PBI-004 pinned knowledge execution
+
+`20260715126000_pbi_004_knowledge_execution_runtime` adds immutable collection
+runtime versions, source-runtime links to those exact collection/profile/policy/batch
+values, and database-time source execution fencing. Older runtime rows remain readable
+but have null execution fields and are deliberately unavailable to the resolver; they
+are never backfilled from mutable source or collection rows. The collection runtime
+record retains an immutable embedding binding, profile, dimensions, token limit, and
+hard-budget metadata only.
+
+`PostgresPinnedKnowledgeSourceConfigurationResolver` returns the safe source-neutral
+runtime projection after verifying workspace scope, source/connector lifecycle,
+capability, exact source/connector pins, collection runtime, and policy shape. It does
+not select connector settings, secret locators, or clients. `PostgresKnowledgeSourceExecutionStore`
+claims the cursor and increments a database-time fence in one update; ingestion commit
+locks and verifies that fence before it activates revisions or advances a cursor.
 
 Implements `OutboxStore` with multi-replica-safe claiming, retry metadata, and envelopes
 for both commands and domain events. It does not publish them directly.
@@ -75,7 +175,13 @@ name includes `test`.
 fenced expired-attempt recovery, privacy tombstones, and durable retention work items.
 Privacy purge replaces governed snapshot/result/evidence content with tombstones and
 queues object deletion; retention workers complete the object deletion through a
-fencing token before metadata is marked deleted.
+fencing token before metadata is marked deleted. The subsequent canonical-retention
+migrations add immutable storage backend identity to new attachment blobs, derivative
+outputs, and retention work. Reaping first creates reference-only work, then creates
+object work only after all live references are gone. Object work carries the complete
+workspace/backend/key tuple; pre-existing key-only work remains readable but is
+deliberately rejected by the application before storage I/O, never mapped to the
+current deployment backend.
 
 ## PBI-016 administration foundation
 
@@ -132,8 +238,10 @@ results append-only.
 
 `PostgresAiBindingResolver` is the runtime-facing read adapter for those
 immutable AI records. It fails closed unless the workspace binding and provider
-are active, the binding's `active_version_id` selects the requested immutable
-version, and its opaque credential registration is active. It collects
+are active and its opaque credential registration is active. New work resolves
+only the aggregate's `active_version_id`; an explicitly supplied immutable
+binding-version pin resolves that retained version after rotation rather than
+substituting the current version. It collects
 catalog, installation, workspace, and binding price components without reading
 or logging a secret value.
 
@@ -150,8 +258,9 @@ the existing `webhook_inbox`, which remains delivery history only. Platform publ
 links use the immutable administration configuration tables under `platform-links`;
 public-link API projection is composed above this adapter.
 
-The webhook endpoint migration provides a separate opaque endpoint projection, pinned
-inbox configuration version, fixed rate windows, and replay-request state. Endpoint
+The webhook endpoint migration provides a separate opaque endpoint projection, distinct
+immutable endpoint-routing and connector-adapter configuration pins for the endpoint and
+each accepted inbox record, fixed rate windows, and replay-request state. Endpoint
 activation is transaction-bound with its immutable administration version, audit,
 idempotency result, and cache notice. PostgreSQL validates the active connector's
 `webhookAdapter` capability; composition still resolves the runtime adapter and any

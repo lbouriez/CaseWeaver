@@ -10,6 +10,8 @@ import {
   AttachmentError,
 } from "@caseweaver/attachments";
 
+export * from "./derivative-evidence-reader.js";
+
 export interface IsolatedAttachmentExecutor {
   readonly attestation: AttachmentRuntimeAttestation;
   execute(

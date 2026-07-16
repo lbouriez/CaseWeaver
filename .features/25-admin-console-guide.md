@@ -35,6 +35,18 @@ Use provider-neutral OAuth 2.0/OIDC Authorization Code with PKCE.
 OIDC bootstrap settings are deployment-owned. The console may inspect redacted status but
 cannot edit settings that could lock every administrator out.
 
+## Local password authentication
+
+For private self-hosted and testing deployments, the API may additionally expose one
+deployment-owned login/password identity. It creates the same bounded server-side
+HttpOnly cookie session, CSRF protection, permission resolution, and audit records as
+OIDC; the browser must never retain the password after the terminal response. The
+default credentials are `admin` / `admin`, overridable only through deployment
+configuration. Password login is enabled by default, remains available alongside OIDC
+when OIDC is configured, and may be disabled only when OIDC is enabled so an operator
+can force OAuth-only access. The anonymous session DTO advertises enabled methods but
+never configuration values, identity mappings, or credential details.
+
 ## Dynamic capability descriptors
 
 Registered connector and AI-provider packages expose safe descriptors independently from

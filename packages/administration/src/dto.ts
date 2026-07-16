@@ -96,7 +96,14 @@ export interface WorkspaceMembershipDto {
 }
 
 export type AdministrationSessionDto =
-  | Readonly<{ readonly authenticated: false }>
+  | Readonly<{
+      readonly authenticated: false;
+      /** Deployment-owned sign-in methods; credential values are never exposed. */
+      readonly authentication: Readonly<{
+        readonly password: boolean;
+        readonly oauth: boolean;
+      }>;
+    }>
   | Readonly<{
       readonly authenticated: true;
       readonly principal: Readonly<{

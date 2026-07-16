@@ -17,6 +17,7 @@
   "dependencies": {
     "@caseweaver/administration": "workspace:*",
     "@caseweaver/ai-sdk": "workspace:*",
+    "js-tiktoken": "1.0.21",
     "zod": "^4.0.0"
   },
   "devDependencies": {

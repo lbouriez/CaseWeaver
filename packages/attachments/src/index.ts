@@ -5,4 +5,5 @@ export * from "./intake.js";
 export * from "./mime.js";
 export * from "./processing.js";
 export * from "./text.js";
+export * from "./verified-output.js";
 export * from "./zip.js";

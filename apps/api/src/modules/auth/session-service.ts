@@ -42,7 +42,13 @@ export interface SessionWorkspace {
 
 export type SessionDto =
   | AuthenticatedSessionDto
-  | { readonly authenticated: false };
+  | Readonly<{
+      readonly authenticated: false;
+      readonly authentication: Readonly<{
+        readonly password: boolean;
+        readonly oauth: boolean;
+      }>;
+    }>;
 
 export interface AuthenticatedRequestContext {
   readonly principalId: string;
@@ -56,7 +62,7 @@ export interface SessionServiceIdGenerator {
 }
 
 export interface AuthSessionServiceDependencies {
-  readonly oidc: OidcAuthorizationCodeClient;
+  readonly oidc?: OidcAuthorizationCodeClient;
   readonly sessions: AuthSessionStore;
   readonly sessionAuditMutations: AuthSessionAuditMutationStore;
   readonly mappings: OidcIdentityMappingStore;
@@ -74,12 +80,22 @@ export interface AuthSessionServiceDependencies {
   readonly sessionLifetimeMs?: number;
   readonly secureCookies: boolean;
   readonly allowedOrigins: readonly string[];
+  /** Deployment-scoped local operator credential. It is never persisted or returned. */
+  readonly passwordAuthentication?: Readonly<{
+    readonly login: string;
+    readonly password: string;
+    readonly workspaceId: string;
+    readonly principalId: string;
+    readonly displayName: string;
+  }>;
 }
 
 export class AuthSessionServiceError extends Error {
   public constructor(
     public readonly code:
       | "auth.callback.invalid"
+      | "auth.login.invalid"
+      | "auth.login.disabled"
       | "auth.identity.unmapped"
       | "auth.session.required"
       | "auth.csrf.invalid"
@@ -95,6 +111,12 @@ interface ActiveSession {
   readonly sessionDigest: string;
   readonly session: ServerSession;
   readonly csrfToken: string;
+}
+
+interface SessionIdentity {
+  readonly workspaceId: string;
+  readonly principalId: string;
+  readonly displayName: string;
 }
 
 const defaultLoginLifetimeMs = 10 * 60 * 1_000;
@@ -124,6 +146,10 @@ export class AuthSessionService {
   public async login(returnTo: string | undefined): Promise<{
     readonly redirectTo: string;
   }> {
+    const oidc = this.dependencies.oidc;
+    if (oidc === undefined) {
+      throw new AuthSessionServiceError("auth.login.disabled");
+    }
     const material = createOidcLoginMaterial();
     const now = this.now();
     const [nonce, verifier] = await Promise.all([
@@ -141,7 +167,7 @@ export class AuthSessionService {
       ),
       expiresAt: at(now, this.loginLifetimeMs),
     });
-    const authorizationUrl = await this.dependencies.oidc.authorizationUrl({
+    const authorizationUrl = await oidc.authorizationUrl({
       state: material.state,
       nonce: material.nonce,
       codeChallenge: material.challenge,
@@ -160,6 +186,10 @@ export class AuthSessionService {
     readonly setCookie: string;
     readonly session: AuthenticatedSessionDto;
   }> {
+    const oidc = this.dependencies.oidc;
+    if (oidc === undefined) {
+      throw new AuthSessionServiceError("auth.login.disabled");
+    }
     if (!isBoundedCallbackValue(input.code, 4_000) || !isState(input.state)) {
       throw new AuthSessionServiceError("auth.callback.invalid");
     }
@@ -187,7 +217,7 @@ export class AuthSessionService {
     }
     let identity: OidcValidatedIdentity;
     try {
-      identity = await this.dependencies.oidc.exchangeAndValidate({
+      identity = await oidc.exchangeAndValidate({
         code: input.code,
         verifier,
         nonce,
@@ -220,8 +250,54 @@ export class AuthSessionService {
 
   public async session(cookieHeader: string | undefined): Promise<SessionDto> {
     const active = await this.activeSession(cookieHeader);
-    if (active === undefined) return Object.freeze({ authenticated: false });
+    if (active === undefined) {
+      return Object.freeze({
+        authenticated: false,
+        authentication: Object.freeze({
+          password: this.dependencies.passwordAuthentication !== undefined,
+          oauth: this.dependencies.oidc !== undefined,
+        }),
+      });
+    }
     return this.toSessionDto(active.session, active.csrfToken);
+  }
+
+  public async passwordLogin(
+    input: Readonly<{
+      readonly login: string;
+      readonly password: string;
+      readonly origin?: string;
+      readonly audit: AuthAuditRequestMetadata;
+    }>,
+  ): Promise<{
+    readonly setCookie: string;
+    readonly session: AuthenticatedSessionDto;
+  }> {
+    const configured = this.dependencies.passwordAuthentication;
+    if (configured === undefined) {
+      throw new AuthSessionServiceError("auth.login.disabled");
+    }
+    if (requiresTrustedOrigin(input.origin, this.dependencies.allowedOrigins)) {
+      throw new AuthSessionServiceError("auth.origin.invalid");
+    }
+    if (
+      !isBoundedCallbackValue(input.login, 160) ||
+      !isBoundedCallbackValue(input.password, 1_024)
+    ) {
+      throw new AuthSessionServiceError("auth.login.invalid");
+    }
+    const loginMatches = matchesDigest(
+      input.login,
+      sha256Base64Url(configured.login),
+    );
+    const passwordMatches = matchesDigest(
+      input.password,
+      sha256Base64Url(configured.password),
+    );
+    if (!loginMatches || !passwordMatches) {
+      throw new AuthSessionServiceError("auth.login.invalid");
+    }
+    return this.createSession(configured, undefined, this.now(), input.audit);
   }
 
   public async resolve(
@@ -388,17 +464,17 @@ export class AuthSessionService {
   }
 
   private async createSession(
-    mapping: OidcIdentityMapping,
-    identityExpiresAt: string,
+    identity: SessionIdentity,
+    identityExpiresAt: string | undefined,
     now: Date,
     audit: AuthAuditRequestMetadata,
   ) {
-    const created = await this.newSession(mapping, now, identityExpiresAt);
+    const created = await this.newSession(identity, now, identityExpiresAt);
     await this.dependencies.sessionAuditMutations.createSessionAndRecord({
       session: created.serverSession,
       audit: this.successAudit(audit, {
-        workspaceId: mapping.workspaceId,
-        actorPrincipalId: mapping.principalId,
+        workspaceId: identity.workspaceId,
+        actorPrincipalId: identity.principalId,
         action: "auth.login.succeeded",
         targetType: "auth-session",
         targetId: created.serverSession.id,
@@ -428,7 +504,7 @@ export class AuthSessionService {
   }
 
   private async newSession(
-    mapping: OidcIdentityMapping,
+    identity: SessionIdentity,
     now: Date,
     identityExpiresAt?: string,
   ): Promise<{
@@ -452,8 +528,8 @@ export class AuthSessionService {
       sessionDigest: sha256Base64Url(rawSession),
       csrfDigest: sha256Base64Url(csrfToken),
       csrf,
-      principalId: mapping.principalId,
-      workspaceId: mapping.workspaceId,
+      principalId: identity.principalId,
+      workspaceId: identity.workspaceId,
       expiresAt,
     });
     return Object.freeze({
@@ -471,6 +547,12 @@ export class AuthSessionService {
     session: ServerSession,
     csrfToken: string,
   ): Promise<AuthenticatedSessionDto> {
+    const localIdentity = this.localIdentityFor(session);
+    if (localIdentity !== undefined) {
+      return this.sessionDtoForIdentity(session, csrfToken, localIdentity, [
+        localIdentity.workspaceId,
+      ]);
+    }
     const currentMapping =
       await this.dependencies.mappings.findByWorkspacePrincipal({
         workspaceId: session.workspaceId,
@@ -485,9 +567,37 @@ export class AuthSessionService {
         subject: currentMapping.subject,
       }),
     );
+    return this.sessionDtoForIdentity(
+      session,
+      csrfToken,
+      currentMapping,
+      mappings.map((mapping) => mapping.workspaceId),
+    );
+  }
+
+  private localIdentityFor(
+    session: ServerSession,
+  ): SessionIdentity | undefined {
+    const configured = this.dependencies.passwordAuthentication;
+    if (
+      configured === undefined ||
+      configured.workspaceId !== session.workspaceId ||
+      configured.principalId !== session.principalId
+    ) {
+      return undefined;
+    }
+    return configured;
+  }
+
+  private async sessionDtoForIdentity(
+    session: ServerSession,
+    csrfToken: string,
+    identity: SessionIdentity,
+    workspaceIds: readonly string[],
+  ): Promise<AuthenticatedSessionDto> {
     const memberships = await Promise.all(
-      mappings.map(async (mapping) =>
-        this.workspaceMembership(mapping.workspaceId),
+      workspaceIds.map(async (workspaceId) =>
+        this.workspaceMembership(workspaceId),
       ),
     );
     const activeWorkspace = memberships.find(
@@ -504,7 +614,7 @@ export class AuthSessionService {
       authenticated: true,
       principal: Object.freeze({
         id: session.principalId,
-        displayName: currentMapping.displayName,
+        displayName: identity.displayName,
       }),
       activeWorkspace,
       workspaces: Object.freeze(memberships),

@@ -10,6 +10,7 @@ import type {
 export class PublicationExecutionError extends Error {
   public constructor(
     public readonly code:
+      | "publication.configurationUnavailable"
       | "publication.destinationUnavailable"
       | "publication.notReady"
       | "publication.cancelled",
@@ -93,9 +94,13 @@ export class PublicationExecutor {
 
     try {
       throwIfAborted(signal);
-      const destination = this.dependencies.destinations.resolve(
-        candidate.profile.destination.connectorInstanceId,
-      );
+      const destination = await this.dependencies.destinations.resolve({
+        workspaceId: command.workspaceId,
+        connectorRegistrationId: candidate.destination.connectorRegistrationId,
+        connectorConfigurationVersionId:
+          candidate.destination.connectorConfigurationVersionId,
+        signal,
+      });
       if (destination === undefined) {
         throw new PublicationExecutionError(
           "publication.destinationUnavailable",

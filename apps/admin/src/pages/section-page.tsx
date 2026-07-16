@@ -20,6 +20,7 @@ import type {
 } from "../api/contracts.js";
 import { ActionConfirmationDialog } from "../components/action-confirmation-dialog.js";
 import { ApiFailure } from "../components/api-failure.js";
+import { PolicyProfileDraftForm } from "../components/policy-profile-draft-form.js";
 import { PublicationWebhookLifecycleControl } from "../components/publication-webhook-lifecycle-control.js";
 import { SourceScheduleLifecycleControl } from "../components/source-schedule-lifecycle-control.js";
 import { AiConfigurationAuthoring } from "./ai-configuration-authoring.js";
@@ -155,6 +156,17 @@ function supportsPublicationWebhookLifecycle(
   if (configurationSurface?.mode !== "managed") return false;
   const workflow = item.status === "active" ? "disable" : "activate";
   return configurationSurface.workflows.includes(workflow);
+}
+
+/** Policy drafts have no browser fallback: the API must explicitly compose and
+ * advertise the managed immutable-draft workflow for the resource. */
+export function supportsPolicyProfileDraft(
+  configurationSurface: ConfigurationSurface | undefined,
+): boolean {
+  return (
+    configurationSurface?.mode === "managed" &&
+    configurationSurface.workflows.includes("create_draft")
+  );
 }
 
 export function ResourcePanel({
@@ -459,7 +471,14 @@ export function SectionPage({
   const aiRoleDefaultSurface = surfaceFor("ai-role-defaults");
   const aiPricingSurface = surfaceFor("ai-pricing-overrides");
   const aiBudgetSurface = surfaceFor("ai-budgets");
+  const retrievalProfileSurface = surfaceFor("retrieval-profiles");
+  const promptProfileSurface = surfaceFor("prompt-profiles");
   const platformSurface = surfaceFor("platform");
+  const retrievalProfileDraftEnabled = supportsPolicyProfileDraft(
+    retrievalProfileSurface,
+  );
+  const promptProfileDraftEnabled =
+    supportsPolicyProfileDraft(promptProfileSurface);
   return (
     <Stack spacing={3} sx={{ maxWidth: 1480 }}>
       <Box>
@@ -549,6 +568,25 @@ export function SectionPage({
             aiRoleDefaultSurface.workflows.includes("replace")
           }
         />
+      ) : null}
+      {section === "knowledge" &&
+      (retrievalProfileDraftEnabled || promptProfileDraftEnabled) ? (
+        <Stack spacing={3}>
+          {retrievalProfileDraftEnabled ? (
+            <PolicyProfileDraftForm
+              client={client}
+              onCompleted={() => refresh()}
+              resource="retrieval-profiles"
+            />
+          ) : null}
+          {promptProfileDraftEnabled ? (
+            <PolicyProfileDraftForm
+              client={client}
+              onCompleted={() => refresh()}
+              resource="prompt-profiles"
+            />
+          ) : null}
+        </Stack>
       ) : null}
       {section === "operations" ? <DiagnosticExportPanel /> : null}
       {section === "access" ? <RoleAssignmentEditor /> : null}

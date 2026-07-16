@@ -38,8 +38,15 @@ export interface KnowledgeSourceConfigurationProjection {
   readonly sourceId: string;
   readonly connectorRegistrationId: string;
   readonly knowledgeCollectionId: string;
+  /** Code-owned profile identities are retained with their exact revisions. */
+  readonly normalizationProfileId: string;
   readonly normalizationProfileVersion: string;
+  readonly chunkingProfileId: string;
   readonly chunkingProfileVersion: string;
+  /** Bounded ingestion batch selected by the operator and frozen in the version. */
+  readonly embeddingBatchSize: number;
+  /** An active hard policy is resolved to an immutable policy revision by storage. */
+  readonly embeddingBudgetPolicyId: string;
   readonly synchronizationPolicy: Readonly<Record<string, unknown>>;
   readonly deletionBehavior: "tombstone" | "retain";
 }
@@ -302,8 +309,11 @@ function assertSource(source: KnowledgeSourceConfigurationProjection): void {
     source.sourceId,
     source.connectorRegistrationId,
     source.knowledgeCollectionId,
+    source.normalizationProfileId,
     source.normalizationProfileVersion,
+    source.chunkingProfileId,
     source.chunkingProfileVersion,
+    source.embeddingBudgetPolicyId,
   ]) {
     assertIdentifier(value, "Knowledge source projection identifier");
   }
@@ -315,6 +325,13 @@ function assertSource(source: KnowledgeSourceConfigurationProjection): void {
   }
   if (!isObject(source.synchronizationPolicy)) {
     throw new TypeError("Knowledge source synchronization policy is invalid.");
+  }
+  if (
+    !Number.isSafeInteger(source.embeddingBatchSize) ||
+    source.embeddingBatchSize < 1 ||
+    source.embeddingBatchSize > 1_000
+  ) {
+    throw new RangeError("Knowledge source embedding batch size is invalid.");
   }
 }
 

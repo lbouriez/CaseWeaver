@@ -3,6 +3,12 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/production-bootstrap.d.ts",
+      "default": "./dist/production-bootstrap.js"
+    }
+  },
   "bin": {
     "caseweaver-worker": "./dist/main.js"
   },
@@ -13,12 +19,34 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@caseweaver/analysis": "workspace:*",
     "@caseweaver/administration": "workspace:*",
+    "@caseweaver/ai-execution": "workspace:*",
+    "@caseweaver/ai-provider-runtime": "workspace:*",
+    "@caseweaver/ai-sdk": "workspace:*",
+    "@caseweaver/application": "workspace:*",
+    "@caseweaver/attachment-runtime": "workspace:*",
+    "@caseweaver/attachments": "workspace:*",
+    "@caseweaver/connector-git-markdown": "workspace:*",
+    "@caseweaver/connector-jitbit": "workspace:*",
+    "@caseweaver/connector-sdk": "workspace:*",
+    "@caseweaver/connector-runtime": "workspace:*",
+    "@caseweaver/copilot-sdk-agent": "workspace:*",
     "@caseweaver/domain": "workspace:*",
+    "@caseweaver/git-repository-runtime": "workspace:*",
+    "@caseweaver/knowledge": "workspace:*",
+    "@caseweaver/object-storage": "workspace:*",
     "@caseweaver/observability": "workspace:*",
-    "@caseweaver/postgres": "workspace:*"
+    "@caseweaver/openai-compatible": "workspace:*",
+    "@caseweaver/postgres": "workspace:*",
+    "@caseweaver/publication": "workspace:*",
+    "@caseweaver/queue-postgres": "workspace:*",
+    "@caseweaver/repository-runtime": "workspace:*",
+    "@caseweaver/retrieval": "workspace:*",
+    "pg": "^8.16.3"
   },
   "devDependencies": {
+    "@types/pg": "^8.15.6",
     "@types/node": "22.19.7",
     "typescript": "5.9.3",
     "vitest": "4.0.18"

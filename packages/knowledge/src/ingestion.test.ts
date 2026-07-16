@@ -20,6 +20,7 @@ import {
   type EmbeddingCacheIdentity,
   embeddingCacheIdentityKey,
   type FailedRevisionDiagnostic,
+  ImmutableKnowledgeTextProfileRegistry,
   KnowledgeIngestionError,
   KnowledgeIngestionService,
   type KnowledgeIngestionStore,
@@ -146,6 +147,7 @@ class Store implements KnowledgeIngestionStore {
 class Gateway implements AiExecutionGateway {
   public readonly inputs: string[][] = [];
   public fail = false;
+  public pricingStatus: "known" | "unknown" = "known";
 
   public async execute<TResult = unknown>(
     request: MeteredAiRequest,
@@ -167,12 +169,15 @@ class Gateway implements AiExecutionGateway {
       operationId: `operation-${this.inputs.length}`,
       value: { vectors } as TResult,
       usage: { inputTokens: request.request.input.length * 10 },
-      calculatedCost: {
-        status: "known",
-        amount: "0.001",
-        currency: "USD",
-        components: [],
-      },
+      calculatedCost:
+        this.pricingStatus === "known"
+          ? {
+              status: "known",
+              amount: "0.001",
+              currency: "USD",
+              components: [],
+            }
+          : { status: "unknown", components: [] },
     };
   }
 }
@@ -188,7 +193,9 @@ function request(
       id: "source-1",
       workspaceId: "workspace-1",
       connectorInstanceId: reference.connectorInstanceId,
+      normalizationProfileId: "normalization",
       normalizationProfileVersion: "normalization.v1",
+      chunkingProfileId: "chunking",
       chunkingProfileVersion: "chunking.v1",
       embeddingBatchSize: 10,
       synchronization: { triggers: [{ mode: "manual" }] },
@@ -201,7 +208,13 @@ function request(
         budget: { currency: "USD", hard: false },
       },
     },
-    cursor: fingerprint,
+    discovery: {
+      mode: "incremental",
+      reset: false,
+      cursor: fingerprint,
+      signal: new AbortController().signal,
+    },
+    fence: { value: "1" },
   };
 }
 
@@ -231,20 +244,36 @@ function service(
     ai: gateway,
     ids: { next: () => `revision-${++revision}` },
     clock: { now: () => "2026-07-13T20:00:00.000Z" },
-    normalizer: {
-      normalize: async ({ document: loaded }) => ({
-        normalizedText: loaded.body.normalizedText,
-      }),
-    },
-    chunker: {
-      chunk: async ({ document: normalized }) => {
-        onChunkDocument?.(normalized);
-        return normalized.normalizedText.split("|").map((content, index) => ({
-          content,
-          sourceAnchor: normalized.sourceAnchors?.[index]?.anchor,
-        }));
-      },
-    },
+    profiles: new ImmutableKnowledgeTextProfileRegistry({
+      normalization: [
+        {
+          id: "normalization",
+          version: "normalization.v1",
+          normalizer: {
+            normalize: async ({ document: loaded }) => ({
+              normalizedText: loaded.body.normalizedText,
+            }),
+          },
+        },
+      ],
+      chunking: [
+        {
+          id: "chunking",
+          version: "chunking.v1",
+          chunker: {
+            chunk: async ({ document: normalized }) => {
+              onChunkDocument?.(normalized);
+              return normalized.normalizedText
+                .split("|")
+                .map((content, index) => ({
+                  content,
+                  sourceAnchor: normalized.sourceAnchors?.[index]?.anchor,
+                }));
+            },
+          },
+        },
+      ],
+    }),
   });
 }
 
@@ -522,6 +551,31 @@ describe("KnowledgeIngestionService", () => {
       ),
     ).rejects.toMatchObject({ code: "knowledge.invalidDiscovery" });
 
+    expect(store.commits).toEqual([]);
+  });
+
+  it("rejects unknown embedding pricing for a hard collection budget", async () => {
+    const store = new Store();
+    const gateway = new Gateway();
+    gateway.pricingStatus = "unknown";
+    const source = new Source(snapshot(), document("priced content"));
+    const input = request(source);
+
+    await expect(
+      service(store, gateway).synchronize({
+        ...input,
+        configuration: {
+          ...input.configuration,
+          collection: {
+            ...input.configuration.collection,
+            budget: { currency: "USD", hard: true },
+          },
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "knowledge.unknownPricing",
+      retryable: false,
+    });
     expect(store.commits).toEqual([]);
   });
 });

@@ -39,6 +39,10 @@ export interface BuildWebhookAppDependencies {
   readonly ingress: WebhookIngress;
   readonly endpointResolver: WebhookEndpointResolver;
   readonly maximumBodyBytes: number;
+  /** Optional, already-bounded server-side readiness probe. */
+  readonly readinessProbe?: {
+    check(): Promise<"ready" | "unavailable">;
+  };
 }
 
 function normalizeHeaders(
@@ -75,6 +79,7 @@ export function buildWebhookApp({
   ingress,
   endpointResolver,
   maximumBodyBytes,
+  readinessProbe,
 }: BuildWebhookAppDependencies): FastifyInstance {
   if (!Number.isInteger(maximumBodyBytes) || maximumBodyBytes < 1) {
     throw new RangeError(
@@ -83,6 +88,34 @@ export function buildWebhookApp({
   }
 
   const app = Fastify({ bodyLimit: maximumBodyBytes, logger: false });
+  app.get("/health/live", async (_request, reply) =>
+    reply.status(200).send({ status: "ok" }),
+  );
+  app.get("/health/ready", async (_request, reply) => {
+    try {
+      if (
+        readinessProbe === undefined ||
+        (await readinessProbe.check()) === "ready"
+      ) {
+        return reply.status(200).send({ status: "ok" });
+      }
+    } catch {
+      // Readiness failures are deliberately opaque on the public transport.
+    }
+    return reply.status(503).send({ status: "unavailable" });
+  });
+  app.setErrorHandler((error, _request, reply) => {
+    const status =
+      typeof error === "object" &&
+      error !== null &&
+      "statusCode" in error &&
+      error.statusCode === 413
+        ? 413
+        : 503;
+    return reply
+      .status(status)
+      .send({ status: status === 413 ? "payload_too_large" : "unavailable" });
+  });
   app.removeContentTypeParser("application/json");
   app.removeContentTypeParser("text/plain");
   const parseRawBody = (

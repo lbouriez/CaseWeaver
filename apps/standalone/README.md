@@ -13,7 +13,10 @@ lifecycles plus one `DurableQueueRuntime`. The runtime constructs the applicatio
 distributed mode share PostgreSQL queue records, envelope IDs, handler behavior,
 retries, and leases.
 
-The composition root does not choose connector, provider, persistence, or transport
-implementations. A release bootstrap supplies those existing production components and
-may enable OpenTelemetry by passing the optional configuration resolved from
-`@caseweaver/observability`.
+`caseweaver-standalone start` now creates the regular API, webhook, scheduler,
+and worker production hosts. The worker remains the only pg-boss consumer and
+outbox relay, so standalone does not add a second in-memory dispatch path. It
+starts one process-wide OpenTelemetry lifecycle, starts the runtime services in
+durable-worker/scheduler/API/webhook order, and stops ingress before scheduler
+and worker shutdown. The controlled installation job must apply Prisma and
+pg-boss migrations before the standalone service starts.

@@ -1,5 +1,18 @@
 import type { EnvelopeFor } from "@caseweaver/domain";
 
+export {
+  createProductionAnalysisExecutionService,
+  type AnalysisProductionDependencies,
+} from "./production-factory.js";
+export {
+  PinnedRepositoryInvestigationPort,
+  RepositoryInvestigationRuntimeError,
+} from "./repository-investigation.js";
+export {
+  ComposedPinnedRepositoryAgentRuntimeResolver,
+  createLocalGitOciPinnedRepositoryRuntimeResolver,
+} from "./pinned-repository-runtime.js";
+
 export type AnalysisExecuteCommand = EnvelopeFor<"analysis.execute.v1">;
 
 export interface AnalysisExecutionHandler {

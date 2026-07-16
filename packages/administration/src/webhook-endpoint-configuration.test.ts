@@ -112,6 +112,7 @@ describe("webhook endpoint administration configuration", () => {
       secretReferenceLocators: ["vault://opaque-secret"],
       expectedRevision: 1,
       lifecycle: "active",
+      automatedPrincipalId: "principal-a",
       mutation: {
         operation: "webhookEndpoint.activate",
         keyDigest: "key-b",
@@ -123,6 +124,7 @@ describe("webhook endpoint administration configuration", () => {
       configurationVersionId: "webhook-version-2",
       lifecycle: "active",
       endpoint,
+      automatedPrincipalId: "principal-a",
     });
 
     vi.mocked(persistence.findMutation).mockResolvedValue({
@@ -144,6 +146,7 @@ describe("webhook endpoint administration configuration", () => {
       secretReferenceLocators: ["vault://opaque-secret"],
       expectedRevision: 1,
       lifecycle: "active",
+      automatedPrincipalId: "principal-a",
       mutation: {
         operation: "webhookEndpoint.activate",
         keyDigest: "key-c",
@@ -172,5 +175,27 @@ describe("webhook endpoint administration configuration", () => {
       }),
     ).rejects.toThrow(/identifier/u);
     expect(persistence.createDraft).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when activating an analysis-trigger endpoint without its server-owned actor", async () => {
+    const persistence = store();
+    await expect(
+      new ManageWebhookEndpointConfiguration(transactions, persistence, {
+        append: async () => undefined,
+      }).transition({
+        workspaceId: "workspace-a",
+        projection: endpoint,
+        settings: { eventFilter: "case-updated" },
+        secretReferenceLocators: ["vault://opaque-secret"],
+        expectedRevision: 1,
+        lifecycle: "active",
+        mutation: {
+          operation: "webhookEndpoint.activate",
+          keyDigest: "key-missing-actor",
+          requestDigest: "request-missing-actor",
+        },
+      }),
+    ).rejects.toThrow(/automated principal/u);
+    expect(persistence.transition).not.toHaveBeenCalled();
   });
 });

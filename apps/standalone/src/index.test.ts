@@ -25,7 +25,7 @@ import {
 const envelope = createEnvelope({
   id: outboxEnvelopeId("1b279899-f02d-47c5-8bdc-6b447ed3ae0c"),
   kind: "command",
-  type: "knowledge.synchronize.v1",
+  type: "knowledge.synchronize.v2",
   schemaVersion: 1,
   workspaceId: workspaceId("workspace-1"),
   occurredAt: utcInstant("2026-07-14T18:00:00.000Z"),
@@ -33,7 +33,8 @@ const envelope = createEnvelope({
   causationId: causationId("causation-1"),
   payload: {
     sourceId: "source-1",
-    configurationVersion: "source-version-1",
+    sourceConfigurationVersionId: "source-version-1",
+    connectorConfigurationVersionId: "connector-version-1",
     trigger: "manual",
   },
 });
@@ -131,12 +132,12 @@ describe("standalone composition", () => {
       "queue.stop",
     ]);
     expect(events).toEqual([
+      "scheduler.start",
       "api.start",
       "webhook.start",
-      "scheduler.start",
-      "scheduler.stop",
       "webhook.stop",
       "api.stop",
+      "scheduler.stop",
     ]);
   });
 

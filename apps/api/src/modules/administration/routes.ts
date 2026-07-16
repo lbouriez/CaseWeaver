@@ -1,3 +1,4 @@
+import { policyForResource } from "@caseweaver/administration";
 import type { Permission } from "@caseweaver/security";
 import { z } from "zod";
 
@@ -82,8 +83,12 @@ const sourceDraft = z
     displayName: z.string().trim().min(1).max(160),
     connectorInstanceId: identifier,
     collectionId: identifier,
+    normalizationProfileId: identifier,
     normalizationProfileVersion: identifier,
+    chunkingProfileId: identifier,
     chunkingProfileVersion: identifier,
+    embeddingBatchSize: z.number().int().min(1).max(1_000),
+    embeddingBudgetPolicyId: identifier,
     synchronizationPolicy: z
       .record(z.string().min(1).max(200), z.unknown())
       .refine((value) => Object.keys(value).length <= 100),
@@ -152,6 +157,14 @@ const privacyPurge = z
     reason: z.string().trim().min(1).max(4_000),
   })
   .strict();
+const passwordLogin = z
+  .object({
+    login: z.string().trim().min(1).max(160),
+    password: z.string().min(1).max(1_024),
+  })
+  .strict();
+/** Commands with no browser-supplied fields must reject, rather than ignore, a body. */
+const noRequestBody = z.undefined();
 const safeConfigurationObject = z
   .record(z.string().min(1).max(120), z.unknown())
   .refine((value) => Object.keys(value).length <= 100)
@@ -162,6 +175,15 @@ const publicationProfileDraft = z
   .object({
     displayName: z.string().trim().min(1).max(160),
     definition: safeConfigurationObject,
+  })
+  .strict();
+const policyProfileDraft = z
+  .object({
+    displayName: z.string().trim().min(1).max(160),
+    // These profiles are immutable configuration documents. Credential-shaped
+    // keys are rejected recursively at the HTTP boundary; profiles have no
+    // secret slots and must never become a side channel for secret values.
+    settings: safeConfigurationObject,
   })
   .strict();
 const webhookEndpointDraft = z
@@ -280,13 +302,40 @@ export interface AdminRequestContext {
   readonly userAgent?: string;
 }
 
+/**
+ * A route-owned, payload-free audit description for a request rejected before
+ * its feature use case can run.  Every field is a server constant selected by
+ * the route; invalid parameters, bodies, and idempotency keys never become
+ * audit targets or metadata.
+ */
+export interface InvalidAdministrationRequest {
+  readonly action: string;
+  readonly targetType: string;
+  readonly targetId: string;
+  readonly permission?: Permission;
+  readonly mutation: boolean;
+  readonly reasonCode: "request.invalid" | "idempotency.required";
+}
+
 export interface AdministrationRouteOperations {
   resolve(
     request: unknown,
     options: { readonly mutation: boolean },
   ): Promise<AdminRequestContext>;
+  rejectInvalidRequest(
+    request: unknown,
+    audit: InvalidAdministrationRequest,
+  ): Promise<void>;
+  rejectInvalidPasswordLogin(request: unknown): Promise<void>;
   session(request: unknown): Promise<unknown>;
   login(request: unknown): Promise<{ readonly redirectTo: string }>;
+  passwordLogin(
+    request: unknown,
+    credentials: z.infer<typeof passwordLogin>,
+  ): Promise<{
+    readonly setCookie: string;
+    readonly session: unknown;
+  }>;
   callback(request: unknown): Promise<{ readonly redirectTo: string }>;
   logout(request: unknown): Promise<{ readonly setCookie: string }>;
   switchWorkspace(
@@ -378,6 +427,20 @@ export interface AdministrationRouteOperations {
   ): Promise<unknown>;
   createPublicationProfile?(
     input: z.infer<typeof publicationProfileDraft>,
+    context: AdminRequestContext,
+  ): Promise<unknown>;
+  createPolicyProfileDraft?(
+    resource: "retrieval-profiles" | "prompt-profiles",
+    input: z.infer<typeof policyProfileDraft>,
+    context: AdminRequestContext,
+  ): Promise<unknown>;
+  transitionPolicyProfile?(
+    resource: "retrieval-profiles" | "prompt-profiles",
+    input: Readonly<{
+      readonly profileId: string;
+      readonly expectedRevision: number;
+      readonly lifecycle: "active" | "disabled";
+    }>,
     context: AdminRequestContext,
   ): Promise<unknown>;
   transitionPublicationProfile?(
@@ -508,14 +571,85 @@ function failure(
   return reply.status(code).send({ code: reason });
 }
 
-function requireIdempotency(
+type FailureReply = {
+  status(code: number): { send(value: unknown): unknown };
+};
+
+function invalidRequestAudit(
+  input: Omit<InvalidAdministrationRequest, "reasonCode">,
+  reasonCode: InvalidAdministrationRequest["reasonCode"],
+): InvalidAdministrationRequest {
+  return Object.freeze({ ...input, reasonCode });
+}
+
+function invalidMutationAudit(
+  action: string,
+  permission: Permission | undefined,
+  targetType: string,
+  targetId: string,
+): Omit<InvalidAdministrationRequest, "reasonCode"> {
+  return Object.freeze({
+    action,
+    permission,
+    targetType,
+    targetId,
+    mutation: true,
+  });
+}
+
+function invalidReadAudit(
+  action: string,
+  permission: Permission | undefined,
+  targetType: string,
+  targetId: string,
+): Omit<InvalidAdministrationRequest, "reasonCode"> {
+  return Object.freeze({
+    action,
+    permission,
+    targetType,
+    targetId,
+    mutation: false,
+  });
+}
+
+async function rejectInvalidRequest(
+  operations: AdministrationRouteOperations,
+  request: unknown,
+  reply: FailureReply,
+  audit: InvalidAdministrationRequest,
+  responseReason = "request.invalid",
+): Promise<unknown> {
+  await operations.rejectInvalidRequest(request, audit);
+  return failure(reply, 400, responseReason);
+}
+
+async function rejectInvalidPasswordLogin(
+  operations: AdministrationRouteOperations,
+  request: unknown,
+  reply: FailureReply,
+): Promise<unknown> {
+  await operations.rejectInvalidPasswordLogin(request);
+  return failure(reply, 400, "request.invalid");
+}
+
+async function requireIdempotency(
+  operations: AdministrationRouteOperations,
   request: { headers: Record<string, unknown> },
-  reply: { status(code: number): { send(value: unknown): unknown } },
-): unknown | undefined {
+  reply: FailureReply,
+  audit: Omit<InvalidAdministrationRequest, "reasonCode">,
+): Promise<boolean> {
   const value = request.headers["idempotency-key"];
-  return typeof value === "string" && value.length >= 16 && value.length <= 200
-    ? undefined
-    : failure(reply, 400, "idempotency.required");
+  if (typeof value === "string" && value.length >= 16 && value.length <= 200) {
+    return true;
+  }
+  await rejectInvalidRequest(
+    operations,
+    request,
+    reply,
+    invalidRequestAudit(audit, "idempotency.required"),
+    "idempotency.required",
+  );
+  return false;
 }
 
 export function registerAdministrationRoutes(
@@ -525,6 +659,22 @@ export function registerAdministrationRoutes(
   app.get("/v1/auth/login", async (request, reply) => {
     const response = await operations.login(request);
     return reply.redirect(response.redirectTo);
+  });
+  app.post("/v1/auth/login/password", async (request, reply) => {
+    const idempotencyKey = request.headers["idempotency-key"];
+    if (
+      typeof idempotencyKey !== "string" ||
+      idempotencyKey.length < 16 ||
+      idempotencyKey.length > 200
+    ) {
+      return rejectInvalidPasswordLogin(operations, request, reply);
+    }
+    const body = passwordLogin.safeParse(request.body);
+    if (!body.success)
+      return rejectInvalidPasswordLogin(operations, request, reply);
+    const response = await operations.passwordLogin(request, body.data);
+    reply.header("set-cookie", response.setCookie);
+    return response.session;
   });
   app.get("/v1/auth/callback", async (request, reply) => {
     const response = await operations.callback(request);
@@ -536,18 +686,43 @@ export function registerAdministrationRoutes(
   app.get("/v1/auth/session", async (request) => operations.session(request));
 
   app.post("/v1/auth/logout", async (request, reply) => {
-    if (requireIdempotency(request, reply) !== undefined) return;
+    const audit = invalidMutationAudit(
+      "auth.logout.invalid",
+      undefined,
+      "auth-session",
+      "current",
+    );
+    if (!(await requireIdempotency(operations, request, reply, audit))) return;
+    if (!noRequestBody.safeParse(request.body).success)
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(audit, "request.invalid"),
+      );
     const response = await operations.logout(request);
     reply.header("set-cookie", response.setCookie);
     return reply.status(204).send();
   });
   app.post("/v1/auth/session/workspace", async (request, reply) => {
-    if (requireIdempotency(request, reply) !== undefined) return;
+    const audit = invalidMutationAudit(
+      "auth.workspace.switch.invalid",
+      undefined,
+      "workspace",
+      "invalid",
+    );
+    if (!(await requireIdempotency(operations, request, reply, audit))) return;
     const body = z
       .object({ workspaceId: identifier })
       .strict()
       .safeParse(request.body);
-    if (!body.success) return failure(reply, 400, "request.invalid");
+    if (!body.success)
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(audit, "request.invalid"),
+      );
     const response = await operations.switchWorkspace(
       request,
       body.data.workspaceId,
@@ -569,7 +744,21 @@ export function registerAdministrationRoutes(
     reply: { status(code: number): { send(value: unknown): unknown } },
   ) => {
     const params = z.object({ type: identifier }).safeParse(request.params);
-    if (!params.success) return failure(reply, 404, "resource.notFound");
+    if (!params.success)
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(
+          invalidReadAudit(
+            `admin.descriptor.${kind}.read`,
+            "configuration.read",
+            "configuration_descriptor",
+            "invalid",
+          ),
+          "request.invalid",
+        ),
+      );
     const context = await operations.resolve(request, { mutation: false });
     return operations.descriptors(kind, params.data.type, context);
   };
@@ -591,9 +780,23 @@ export function registerAdministrationRoutes(
     request: { headers: Record<string, unknown>; body: unknown },
     reply: { status(code: number): { send(value: unknown): unknown } },
   ) => {
-    if (requireIdempotency(request, reply) !== undefined) return;
+    const resourceType =
+      kind === "connector" ? "connector-instances" : "ai-provider-instances";
+    const audit = invalidMutationAudit(
+      "admin.configuration.draft.create.invalid",
+      "configuration.manage",
+      resourceType,
+      "new",
+    );
+    if (!(await requireIdempotency(operations, request, reply, audit))) return;
     const body = draft.safeParse(request.body);
-    if (!body.success) return failure(reply, 400, "request.invalid");
+    if (!body.success)
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(audit, "request.invalid"),
+      );
     return operations.createDraft(
       kind,
       body.data,
@@ -607,27 +810,63 @@ export function registerAdministrationRoutes(
     createDraft("ai-provider", request, reply),
   );
   app.post("/v1/admin/knowledge-sources/drafts", async (request, reply) => {
-    if (requireIdempotency(request, reply) !== undefined) return;
+    const audit = invalidMutationAudit(
+      "admin.knowledgeSource.draft.create.invalid",
+      "configuration.manage",
+      "knowledge_source",
+      "new",
+    );
+    if (!(await requireIdempotency(operations, request, reply, audit))) return;
     const body = sourceDraft.safeParse(request.body);
-    if (!body.success) return failure(reply, 400, "request.invalid");
+    if (!body.success)
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(audit, "request.invalid"),
+      );
     return operations.createKnowledgeSourceDraft(
       body.data,
       await operations.resolve(request, { mutation: true }),
     );
   });
   app.post("/v1/admin/schedules/drafts", async (request, reply) => {
-    if (requireIdempotency(request, reply) !== undefined) return;
+    const audit = invalidMutationAudit(
+      "admin.knowledgeSchedule.draft.create.invalid",
+      "configuration.manage",
+      "knowledge_schedule",
+      "new",
+    );
+    if (!(await requireIdempotency(operations, request, reply, audit))) return;
     const body = scheduleDraft.safeParse(request.body);
-    if (!body.success) return failure(reply, 400, "request.invalid");
+    if (!body.success)
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(audit, "request.invalid"),
+      );
     return operations.createKnowledgeScheduleDraft(
       body.data,
       await operations.resolve(request, { mutation: true }),
     );
   });
   app.post("/v1/admin/publication-profiles/drafts", async (request, reply) => {
-    if (requireIdempotency(request, reply) !== undefined) return;
+    const audit = invalidMutationAudit(
+      "admin.publicationProfile.draft.create.invalid",
+      "configuration.manage",
+      "publication_profile",
+      "new",
+    );
+    if (!(await requireIdempotency(operations, request, reply, audit))) return;
     const body = publicationProfileDraft.safeParse(request.body);
-    if (!body.success) return failure(reply, 400, "request.invalid");
+    if (!body.success)
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(audit, "request.invalid"),
+      );
     if (operations.createPublicationProfile === undefined) {
       return failure(reply, 503, "service.unavailable");
     }
@@ -636,10 +875,57 @@ export function registerAdministrationRoutes(
       await operations.resolve(request, { mutation: true }),
     );
   });
+  const createPolicyProfileDraft = async (
+    policyResource: "retrieval-profiles" | "prompt-profiles",
+    request: { headers: Record<string, unknown>; body: unknown },
+    reply: { status(code: number): { send(value: unknown): unknown } },
+  ) => {
+    const audit = invalidMutationAudit(
+      "admin.policyProfile.draft.create.invalid",
+      "configuration.manage",
+      policyResource,
+      "new",
+    );
+    if (!(await requireIdempotency(operations, request, reply, audit))) return;
+    const body = policyProfileDraft.safeParse(request.body);
+    if (!body.success)
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(audit, "request.invalid"),
+      );
+    if (operations.createPolicyProfileDraft === undefined) {
+      return failure(reply, 503, "service.unavailable");
+    }
+    return operations.createPolicyProfileDraft(
+      policyResource,
+      body.data,
+      await operations.resolve(request, { mutation: true }),
+    );
+  };
+  app.post("/v1/admin/retrieval-profiles/drafts", async (request, reply) =>
+    createPolicyProfileDraft("retrieval-profiles", request, reply),
+  );
+  app.post("/v1/admin/prompt-profiles/drafts", async (request, reply) =>
+    createPolicyProfileDraft("prompt-profiles", request, reply),
+  );
   app.post("/v1/admin/webhook-endpoints/drafts", async (request, reply) => {
-    if (requireIdempotency(request, reply) !== undefined) return;
+    const audit = invalidMutationAudit(
+      "admin.webhookEndpoint.draft.create.invalid",
+      "configuration.manage",
+      "webhook_endpoint",
+      "new",
+    );
+    if (!(await requireIdempotency(operations, request, reply, audit))) return;
     const body = webhookEndpointDraft.safeParse(request.body);
-    if (!body.success) return failure(reply, 400, "request.invalid");
+    if (!body.success)
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(audit, "request.invalid"),
+      );
     if (operations.createWebhookEndpoint === undefined) {
       return failure(reply, 503, "service.unavailable");
     }
@@ -657,14 +943,27 @@ export function registerAdministrationRoutes(
     },
     reply: { status(code: number): { send(value: unknown): unknown } },
   ) => {
-    if (requireIdempotency(request, reply) !== undefined) return;
+    const audit = invalidMutationAudit(
+      kind === "source"
+        ? "admin.knowledgeSource.lifecycle.invalid"
+        : "admin.knowledgeSchedule.lifecycle.invalid",
+      "configuration.manage",
+      kind === "source" ? "knowledge_source" : "knowledge_schedule",
+      "invalid",
+    );
+    if (!(await requireIdempotency(operations, request, reply, audit))) return;
     const params = z
       .object({ id: identifier })
       .strict()
       .safeParse(request.params);
     const body = configurationLifecycleTransition.safeParse(request.body);
     if (!params.success || !body.success)
-      return failure(reply, 400, "request.invalid");
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(audit, "request.invalid"),
+      );
     const context = await operations.resolve(request, { mutation: true });
     return kind === "source"
       ? operations.transitionKnowledgeSource(
@@ -689,6 +988,51 @@ export function registerAdministrationRoutes(
     async (request, reply) =>
       transitionSourceSchedule("source", request, reply),
   );
+  const transitionPolicyProfile = async (
+    policyResource: "retrieval-profiles" | "prompt-profiles",
+    request: {
+      readonly headers: Record<string, unknown>;
+      readonly body: unknown;
+      readonly params: unknown;
+    },
+    reply: { status(code: number): { send(value: unknown): unknown } },
+  ) => {
+    const audit = invalidMutationAudit(
+      "admin.policyProfile.lifecycle.invalid",
+      "configuration.manage",
+      policyResource,
+      "invalid",
+    );
+    if (!(await requireIdempotency(operations, request, reply, audit))) return;
+    const params = z
+      .object({ id: identifier })
+      .strict()
+      .safeParse(request.params);
+    const body = configurationLifecycleTransition.safeParse(request.body);
+    if (!params.success || !body.success)
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(audit, "request.invalid"),
+      );
+    if (operations.transitionPolicyProfile === undefined) {
+      return failure(reply, 503, "service.unavailable");
+    }
+    return operations.transitionPolicyProfile(
+      policyResource,
+      { profileId: params.data.id, ...body.data },
+      await operations.resolve(request, { mutation: true }),
+    );
+  };
+  app.post(
+    "/v1/admin/retrieval-profiles/:id/lifecycle",
+    async (request, reply) =>
+      transitionPolicyProfile("retrieval-profiles", request, reply),
+  );
+  app.post("/v1/admin/prompt-profiles/:id/lifecycle", async (request, reply) =>
+    transitionPolicyProfile("prompt-profiles", request, reply),
+  );
   app.post("/v1/admin/schedules/:id/lifecycle", async (request, reply) =>
     transitionSourceSchedule("schedule", request, reply),
   );
@@ -701,14 +1045,27 @@ export function registerAdministrationRoutes(
     },
     reply: { status(code: number): { send(value: unknown): unknown } },
   ) => {
-    if (requireIdempotency(request, reply) !== undefined) return;
+    const audit = invalidMutationAudit(
+      kind === "publication"
+        ? "admin.publicationProfile.lifecycle.invalid"
+        : "admin.webhookEndpoint.lifecycle.invalid",
+      "configuration.manage",
+      kind === "publication" ? "publication_profile" : "webhook_endpoint",
+      "invalid",
+    );
+    if (!(await requireIdempotency(operations, request, reply, audit))) return;
     const params = z
       .object({ id: identifier })
       .strict()
       .safeParse(request.params);
     const body = configurationLifecycleTransition.safeParse(request.body);
     if (!params.success || !body.success)
-      return failure(reply, 400, "request.invalid");
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(audit, "request.invalid"),
+      );
     const context = await operations.resolve(request, { mutation: true });
     if (kind === "publication") {
       if (operations.transitionPublicationProfile === undefined) {
@@ -745,9 +1102,21 @@ export function registerAdministrationRoutes(
     );
   });
   app.put("/v1/admin/platform/links", async (request, reply) => {
-    if (requireIdempotency(request, reply) !== undefined) return;
+    const audit = invalidMutationAudit(
+      "admin.platformLink.write.invalid",
+      "configuration.manage",
+      "platform_links",
+      "current",
+    );
+    if (!(await requireIdempotency(operations, request, reply, audit))) return;
     const body = platformLinks.safeParse(request.body);
-    if (!body.success) return failure(reply, 400, "request.invalid");
+    if (!body.success)
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(audit, "request.invalid"),
+      );
     if (operations.savePlatformLinks === undefined)
       return failure(reply, 503, "service.unavailable");
     return operations.savePlatformLinks(
@@ -756,14 +1125,23 @@ export function registerAdministrationRoutes(
     );
   });
   app.post("/v1/admin/ai/bindings/drafts", async (request, reply) => {
-    if (requireIdempotency(request, reply) !== undefined) return;
+    const audit = invalidMutationAudit(
+      "admin.aiBinding.draft.create.invalid",
+      "configuration.manage",
+      "ai_binding",
+      "new",
+    );
+    if (!(await requireIdempotency(operations, request, reply, audit))) return;
     const body = aiBindingDraft.safeParse(request.body);
-    if (!body.success || operations.createAiBindingDraft === undefined)
-      return failure(
+    if (!body.success)
+      return rejectInvalidRequest(
+        operations,
+        request,
         reply,
-        body.success ? 503 : 400,
-        body.success ? "service.unavailable" : "request.invalid",
+        invalidRequestAudit(audit, "request.invalid"),
       );
+    if (operations.createAiBindingDraft === undefined)
+      return failure(reply, 503, "service.unavailable");
     return operations.createAiBindingDraft(
       body.data,
       await operations.resolve(request, { mutation: true }),
@@ -772,24 +1150,28 @@ export function registerAdministrationRoutes(
   app.post(
     "/v1/admin/ai/bindings/:id/versions/drafts",
     async (request, reply) => {
-      if (requireIdempotency(request, reply) !== undefined) return;
+      const audit = invalidMutationAudit(
+        "admin.aiBinding.version.draft.create.invalid",
+        "configuration.manage",
+        "ai_binding",
+        "invalid",
+      );
+      if (!(await requireIdempotency(operations, request, reply, audit)))
+        return;
       const params = z
         .object({ id: identifier })
         .strict()
         .safeParse(request.params);
       const body = aiBindingVersionDraft.safeParse(request.body);
-      if (
-        !params.success ||
-        !body.success ||
-        operations.createAiBindingVersionDraft === undefined
-      )
-        return failure(
+      if (!params.success || !body.success)
+        return rejectInvalidRequest(
+          operations,
+          request,
           reply,
-          params.success && body.success ? 503 : 400,
-          params.success && body.success
-            ? "service.unavailable"
-            : "request.invalid",
+          invalidRequestAudit(audit, "request.invalid"),
         );
+      if (operations.createAiBindingVersionDraft === undefined)
+        return failure(reply, 503, "service.unavailable");
       return operations.createAiBindingVersionDraft(
         { bindingId: params.data.id, ...body.data },
         await operations.resolve(request, { mutation: true }),
@@ -797,76 +1179,100 @@ export function registerAdministrationRoutes(
     },
   );
   app.post("/v1/admin/ai/bindings/:id/lifecycle", async (request, reply) => {
-    if (requireIdempotency(request, reply) !== undefined) return;
+    const audit = invalidMutationAudit(
+      "admin.aiBinding.lifecycle.invalid",
+      "configuration.manage",
+      "ai_binding",
+      "invalid",
+    );
+    if (!(await requireIdempotency(operations, request, reply, audit))) return;
     const params = z
       .object({ id: identifier })
       .strict()
       .safeParse(request.params);
     const body = configurationLifecycleTransition.safeParse(request.body);
-    if (
-      !params.success ||
-      !body.success ||
-      operations.transitionAiBinding === undefined
-    )
-      return failure(
+    if (!params.success || !body.success)
+      return rejectInvalidRequest(
+        operations,
+        request,
         reply,
-        params.success && body.success ? 503 : 400,
-        params.success && body.success
-          ? "service.unavailable"
-          : "request.invalid",
+        invalidRequestAudit(audit, "request.invalid"),
       );
+    if (operations.transitionAiBinding === undefined)
+      return failure(reply, 503, "service.unavailable");
     return operations.transitionAiBinding(
       { bindingId: params.data.id, ...body.data },
       await operations.resolve(request, { mutation: true }),
     );
   });
   app.put("/v1/admin/ai/role-defaults/:role", async (request, reply) => {
-    if (requireIdempotency(request, reply) !== undefined) return;
+    const audit = invalidMutationAudit(
+      "admin.aiRoleDefault.set.invalid",
+      "configuration.manage",
+      "ai_role_default",
+      "invalid",
+    );
+    if (!(await requireIdempotency(operations, request, reply, audit))) return;
     const params = z
       .object({ role: aiRole })
       .strict()
       .safeParse(request.params);
     const body = aiRoleDefault.safeParse(request.body);
-    if (
-      !params.success ||
-      !body.success ||
-      operations.setAiRoleDefault === undefined
-    )
-      return failure(
+    if (!params.success || !body.success)
+      return rejectInvalidRequest(
+        operations,
+        request,
         reply,
-        params.success && body.success ? 503 : 400,
-        params.success && body.success
-          ? "service.unavailable"
-          : "request.invalid",
+        invalidRequestAudit(audit, "request.invalid"),
       );
+    if (operations.setAiRoleDefault === undefined)
+      return failure(reply, 503, "service.unavailable");
     return operations.setAiRoleDefault(
       { role: params.data.role, ...body.data },
       await operations.resolve(request, { mutation: true }),
     );
   });
   app.post("/v1/admin/ai/pricing-overrides", async (request, reply) => {
-    if (requireIdempotency(request, reply) !== undefined) return;
+    const audit = invalidMutationAudit(
+      "admin.aiPriceOverride.create.invalid",
+      "configuration.manage",
+      "ai_price_override",
+      "new",
+    );
+    if (!(await requireIdempotency(operations, request, reply, audit))) return;
     const body = aiPriceOverride.safeParse(request.body);
-    if (!body.success || operations.createAiPriceOverride === undefined)
-      return failure(
+    if (!body.success)
+      return rejectInvalidRequest(
+        operations,
+        request,
         reply,
-        body.success ? 503 : 400,
-        body.success ? "service.unavailable" : "request.invalid",
+        invalidRequestAudit(audit, "request.invalid"),
       );
+    if (operations.createAiPriceOverride === undefined)
+      return failure(reply, 503, "service.unavailable");
     return operations.createAiPriceOverride(
       body.data,
       await operations.resolve(request, { mutation: true }),
     );
   });
   app.put("/v1/admin/ai/budgets", async (request, reply) => {
-    if (requireIdempotency(request, reply) !== undefined) return;
+    const audit = invalidMutationAudit(
+      "admin.aiBudgetPolicy.replace.invalid",
+      "configuration.manage",
+      "ai_budget_policy",
+      "new",
+    );
+    if (!(await requireIdempotency(operations, request, reply, audit))) return;
     const body = aiBudget.safeParse(request.body);
-    if (!body.success || operations.replaceAiBudget === undefined)
-      return failure(
+    if (!body.success)
+      return rejectInvalidRequest(
+        operations,
+        request,
         reply,
-        body.success ? 503 : 400,
-        body.success ? "service.unavailable" : "request.invalid",
+        invalidRequestAudit(audit, "request.invalid"),
       );
+    if (operations.replaceAiBudget === undefined)
+      return failure(reply, 503, "service.unavailable");
     return operations.replaceAiBudget(
       body.data,
       await operations.resolve(request, { mutation: true }),
@@ -879,7 +1285,21 @@ export function registerAdministrationRoutes(
         .object({ id: identifier })
         .strict()
         .safeParse(request.params);
-      if (!params.success) return failure(reply, 404, "resource.notFound");
+      if (!params.success)
+        return rejectInvalidRequest(
+          operations,
+          request,
+          reply,
+          invalidRequestAudit(
+            invalidReadAudit(
+              "admin.provider.capabilityTest.operations.read",
+              "configuration.read",
+              "ai_provider_instance",
+              "invalid",
+            ),
+            "request.invalid",
+          ),
+        );
       if (operations.providerCapabilityTestOperations === undefined)
         return failure(reply, 503, "service.unavailable");
       return operations.providerCapabilityTestOperations(
@@ -891,20 +1311,34 @@ export function registerAdministrationRoutes(
   app.post(
     "/v1/admin/ai/provider-instances/:id/capability-tests/:operation/previews",
     async (request, reply) => {
-      if (requireIdempotency(request, reply) !== undefined) return;
+      const audit = invalidMutationAudit(
+        "admin.provider.capabilityTest.preview.invalid",
+        "configuration.manage",
+        "ai_provider_instance",
+        "invalid",
+      );
+      if (!(await requireIdempotency(operations, request, reply, audit)))
+        return;
+      if (!noRequestBody.safeParse(request.body).success)
+        return rejectInvalidRequest(
+          operations,
+          request,
+          reply,
+          invalidRequestAudit(audit, "request.invalid"),
+        );
       const params = z
         .object({ id: identifier, operation: identifier })
         .strict()
         .safeParse(request.params);
-      if (
-        !params.success ||
-        operations.previewProviderCapabilityTest === undefined
-      )
-        return failure(
+      if (!params.success)
+        return rejectInvalidRequest(
+          operations,
+          request,
           reply,
-          params.success ? 503 : 400,
-          params.success ? "service.unavailable" : "request.invalid",
+          invalidRequestAudit(audit, "request.invalid"),
         );
+      if (operations.previewProviderCapabilityTest === undefined)
+        return failure(reply, 503, "service.unavailable");
       return operations.previewProviderCapabilityTest(
         {
           providerInstanceId: params.data.id,
@@ -917,7 +1351,14 @@ export function registerAdministrationRoutes(
   app.post(
     "/v1/admin/ai/provider-instances/:id/capability-tests/:operation/executions",
     async (request, reply) => {
-      if (requireIdempotency(request, reply) !== undefined) return;
+      const audit = invalidMutationAudit(
+        "admin.provider.capabilityTest.execute.invalid",
+        "configuration.manage",
+        "ai_provider_instance",
+        "invalid",
+      );
+      if (!(await requireIdempotency(operations, request, reply, audit)))
+        return;
       const params = z
         .object({ id: identifier, operation: identifier })
         .strict()
@@ -926,18 +1367,15 @@ export function registerAdministrationRoutes(
         .object({ confirmationId: identifier })
         .strict()
         .safeParse(request.body);
-      if (
-        !params.success ||
-        !body.success ||
-        operations.runProviderCapabilityTest === undefined
-      )
-        return failure(
+      if (!params.success || !body.success)
+        return rejectInvalidRequest(
+          operations,
+          request,
           reply,
-          params.success && body.success ? 503 : 400,
-          params.success && body.success
-            ? "service.unavailable"
-            : "request.invalid",
+          invalidRequestAudit(audit, "request.invalid"),
         );
+      if (operations.runProviderCapabilityTest === undefined)
+        return failure(reply, 503, "service.unavailable");
       return operations.runProviderCapabilityTest(
         {
           providerInstanceId: params.data.id,
@@ -949,14 +1387,25 @@ export function registerAdministrationRoutes(
     },
   );
   app.put("/v1/admin/role-assignments/:principalId", async (request, reply) => {
-    if (requireIdempotency(request, reply) !== undefined) return;
+    const audit = invalidMutationAudit(
+      "admin.roleAssignment.replace.invalid",
+      "identity.manage",
+      "workspace_role_assignment",
+      "invalid",
+    );
+    if (!(await requireIdempotency(operations, request, reply, audit))) return;
     const params = z
       .object({ principalId: identifier })
       .strict()
       .safeParse(request.params);
     const body = roleAssignment.safeParse(request.body);
     if (!params.success || !body.success)
-      return failure(reply, 400, "request.invalid");
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(audit, "request.invalid"),
+      );
     return operations.replaceWorkspacePrincipalRoles(
       { targetPrincipalId: params.data.principalId, ...body.data },
       await operations.resolve(request, { mutation: true }),
@@ -969,7 +1418,21 @@ export function registerAdministrationRoutes(
         .object({ principalId: identifier })
         .strict()
         .safeParse(request.params);
-      if (!params.success) return failure(reply, 404, "resource.notFound");
+      if (!params.success)
+        return rejectInvalidRequest(
+          operations,
+          request,
+          reply,
+          invalidRequestAudit(
+            invalidReadAudit(
+              "admin.roleAssignment.inspect",
+              "identity.manage",
+              "workspace_role_assignment",
+              "invalid",
+            ),
+            "request.invalid",
+          ),
+        );
       return operations.workspacePrincipalRoles(
         params.data.principalId,
         await operations.resolve(request, { mutation: false }),
@@ -977,16 +1440,41 @@ export function registerAdministrationRoutes(
     },
   );
   app.post("/v1/admin/secret-references", async (request, reply) => {
-    if (requireIdempotency(request, reply) !== undefined) return;
+    const audit = invalidMutationAudit(
+      "admin.secretReference.create.invalid",
+      "credential.manage",
+      "secret_reference",
+      "new",
+    );
+    if (!(await requireIdempotency(operations, request, reply, audit))) return;
     const body = secretReferenceRegistration.safeParse(request.body);
-    if (!body.success) return failure(reply, 400, "request.invalid");
+    if (!body.success)
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(audit, "request.invalid"),
+      );
     return operations.createSecretReference(
       body.data,
       await operations.resolve(request, { mutation: true }),
     );
   });
   app.post("/v1/admin/diagnostics/exports", async (request, reply) => {
-    if (requireIdempotency(request, reply) !== undefined) return;
+    const audit = invalidMutationAudit(
+      "admin.diagnostics.export.request.invalid",
+      "diagnostics.export",
+      "diagnostic_export",
+      "new",
+    );
+    if (!(await requireIdempotency(operations, request, reply, audit))) return;
+    if (!noRequestBody.safeParse(request.body).success)
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(audit, "request.invalid"),
+      );
     if (operations.requestDiagnosticExport === undefined) {
       return failure(reply, 503, "service.unavailable");
     }
@@ -1003,7 +1491,21 @@ export function registerAdministrationRoutes(
       .object({ exportId: identifier })
       .strict()
       .safeParse(request.params);
-    if (!params.success) return failure(reply, 404, "resource.notFound");
+    if (!params.success)
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(
+          invalidReadAudit(
+            "admin.diagnostics.export.status.read",
+            "diagnostics.export",
+            "diagnostic_export",
+            "invalid",
+          ),
+          "request.invalid",
+        ),
+      );
     if (operations.diagnosticExportStatus === undefined) {
       return failure(reply, 503, "service.unavailable");
     }
@@ -1019,7 +1521,21 @@ export function registerAdministrationRoutes(
         .object({ exportId: identifier })
         .strict()
         .safeParse(request.params);
-      if (!params.success) return failure(reply, 404, "resource.notFound");
+      if (!params.success)
+        return rejectInvalidRequest(
+          operations,
+          request,
+          reply,
+          invalidRequestAudit(
+            invalidReadAudit(
+              "admin.diagnostics.export.download",
+              "diagnostics.export",
+              "diagnostic_export",
+              "invalid",
+            ),
+            "request.invalid",
+          ),
+        );
       if (operations.downloadDiagnosticExport === undefined) {
         return failure(reply, 503, "service.unavailable");
       }
@@ -1040,14 +1556,26 @@ export function registerAdministrationRoutes(
   app.post(
     "/v1/admin/privacy/case-snapshots/:caseSnapshotId/purge",
     async (request, reply) => {
-      if (requireIdempotency(request, reply) !== undefined) return;
+      const audit = invalidMutationAudit(
+        "admin.privacy.purge.preview.invalid",
+        "privacy.delete",
+        "case_snapshot",
+        "invalid",
+      );
+      if (!(await requireIdempotency(operations, request, reply, audit)))
+        return;
       const params = z
         .object({ caseSnapshotId: identifier })
         .strict()
         .safeParse(request.params);
       const body = privacyPurge.safeParse(request.body);
       if (!params.success || !body.success)
-        return failure(reply, 400, "request.invalid");
+        return rejectInvalidRequest(
+          operations,
+          request,
+          reply,
+          invalidRequestAudit(audit, "request.invalid"),
+        );
       return operations.previewPrivacyPurge(
         {
           caseSnapshotId: params.data.caseSnapshotId,
@@ -1058,7 +1586,13 @@ export function registerAdministrationRoutes(
     },
   );
   app.post("/v1/admin/action-previews", async (request, reply) => {
-    if (requireIdempotency(request, reply) !== undefined) return;
+    const audit = invalidMutationAudit(
+      "admin.action.preview.invalid",
+      undefined,
+      "administration_action",
+      "invalid",
+    );
+    if (!(await requireIdempotency(operations, request, reply, audit))) return;
     const body = z
       .object({
         action,
@@ -1066,7 +1600,13 @@ export function registerAdministrationRoutes(
       })
       .strict()
       .safeParse(request.body);
-    if (!body.success) return failure(reply, 400, "request.invalid");
+    if (!body.success)
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(audit, "request.invalid"),
+      );
     return operations.previewAction(
       {
         action: body.data.action,
@@ -1079,12 +1619,24 @@ export function registerAdministrationRoutes(
     );
   });
   app.post("/v1/admin/actions/execute", async (request, reply) => {
-    if (requireIdempotency(request, reply) !== undefined) return;
+    const audit = invalidMutationAudit(
+      "admin.action.execute.invalid",
+      undefined,
+      "administration_action_preview",
+      "invalid",
+    );
+    if (!(await requireIdempotency(operations, request, reply, audit))) return;
     const body = z
       .object({ previewId: identifier })
       .strict()
       .safeParse(request.body);
-    if (!body.success) return failure(reply, 400, "request.invalid");
+    if (!body.success)
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(audit, "request.invalid"),
+      );
     return operations.executeAction(
       body.data.previewId,
       await operations.resolve(request, { mutation: true }),
@@ -1103,7 +1655,21 @@ export function registerAdministrationRoutes(
         .object({ configurationId: identifier })
         .strict()
         .safeParse(request.params);
-      if (!params.success) return failure(reply, 404, "resource.notFound");
+      if (!params.success)
+        return rejectInvalidRequest(
+          operations,
+          request,
+          reply,
+          invalidRequestAudit(
+            invalidReadAudit(
+              "admin.configuration.inspect",
+              "configuration.read",
+              "configuration",
+              "invalid",
+            ),
+            "request.invalid",
+          ),
+        );
       return operations.configurationInspection(
         params.data.configurationId,
         await operations.resolve(request, { mutation: false }),
@@ -1125,7 +1691,20 @@ export function registerAdministrationRoutes(
         .strict()
         .safeParse(request.query);
       if (!params.success || !query.success)
-        return failure(reply, 400, "request.invalid");
+        return rejectInvalidRequest(
+          operations,
+          request,
+          reply,
+          invalidRequestAudit(
+            invalidReadAudit(
+              "admin.configuration.history.read",
+              "configuration.read",
+              "configuration",
+              "invalid",
+            ),
+            "request.invalid",
+          ),
+        );
       return operations.configurationHistory(
         params.data.configurationId,
         query.data,
@@ -1140,7 +1719,21 @@ export function registerAdministrationRoutes(
         .object({ configurationId: identifier, versionId: identifier })
         .strict()
         .safeParse(request.params);
-      if (!params.success) return failure(reply, 404, "resource.notFound");
+      if (!params.success)
+        return rejectInvalidRequest(
+          operations,
+          request,
+          reply,
+          invalidRequestAudit(
+            invalidReadAudit(
+              "admin.configuration.version.read",
+              "configuration.read",
+              "configuration_version",
+              "invalid",
+            ),
+            "request.invalid",
+          ),
+        );
       return operations.configurationVersion(
         params.data.configurationId,
         params.data.versionId,
@@ -1165,7 +1758,21 @@ export function registerAdministrationRoutes(
   for (const [path, resourceName] of nestedResources) {
     app.get(`${path}/:id`, async (request, reply) => {
       const params = z.object({ id: identifier }).safeParse(request.params);
-      if (!params.success) return failure(reply, 404, "resource.notFound");
+      if (!params.success)
+        return rejectInvalidRequest(
+          operations,
+          request,
+          reply,
+          invalidRequestAudit(
+            invalidReadAudit(
+              `admin.${resourceName}.detail.invalid`,
+              policyForResource(resourceName).permission,
+              "administration_resource",
+              "invalid",
+            ),
+            "request.invalid",
+          ),
+        );
       return operations.detail(
         resourceName,
         params.data.id,
@@ -1174,7 +1781,21 @@ export function registerAdministrationRoutes(
     });
     app.get(path, async (request, reply) => {
       const query = listQuery.safeParse(request.query);
-      if (!query.success) return failure(reply, 400, "request.invalid");
+      if (!query.success)
+        return rejectInvalidRequest(
+          operations,
+          request,
+          reply,
+          invalidRequestAudit(
+            invalidReadAudit(
+              `admin.${resourceName}.list.invalid`,
+              policyForResource(resourceName).permission,
+              "administration_resource",
+              resourceName,
+            ),
+            "request.invalid",
+          ),
+        );
       return operations.list(
         resourceName,
         query.data,
@@ -1184,21 +1805,77 @@ export function registerAdministrationRoutes(
   }
 
   app.get("/v1/admin/:resource/:id", async (request, reply) => {
-    const params = z
-      .object({ resource, id: identifier })
-      .safeParse(request.params);
-    if (!params.success) return failure(reply, 404, "resource.notFound");
+    const resourceParams = z.object({ resource }).safeParse(request.params);
+    if (!resourceParams.success)
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(
+          invalidReadAudit(
+            "admin.resource.detail.invalid",
+            undefined,
+            "administration_resource",
+            "invalid",
+          ),
+          "request.invalid",
+        ),
+      );
+    const idParams = z.object({ id: identifier }).safeParse(request.params);
+    if (!idParams.success)
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(
+          invalidReadAudit(
+            `admin.${resourceParams.data.resource}.detail.invalid`,
+            policyForResource(resourceParams.data.resource).permission,
+            "administration_resource",
+            "invalid",
+          ),
+          "request.invalid",
+        ),
+      );
     return operations.detail(
-      params.data.resource,
-      params.data.id,
+      resourceParams.data.resource,
+      idParams.data.id,
       await operations.resolve(request, { mutation: false }),
     );
   });
   app.get("/v1/admin/:resource", async (request, reply) => {
     const params = z.object({ resource }).safeParse(request.params);
+    if (!params.success)
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(
+          invalidReadAudit(
+            "admin.resource.list.invalid",
+            undefined,
+            "administration_resource",
+            "invalid",
+          ),
+          "request.invalid",
+        ),
+      );
     const query = listQuery.safeParse(request.query);
-    if (!params.success || !query.success)
-      return failure(reply, 400, "request.invalid");
+    if (!query.success)
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(
+          invalidReadAudit(
+            `admin.${params.data.resource}.list.invalid`,
+            policyForResource(params.data.resource).permission,
+            "administration_resource",
+            params.data.resource,
+          ),
+          "request.invalid",
+        ),
+      );
     return operations.list(
       params.data.resource,
       query.data,

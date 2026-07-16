@@ -12,6 +12,21 @@ neither enables a production fake-auth mode nor calls a real identity provider. 
 verifies browser cookie handling, callback return to the trusted console origin,
 CSRF-protected workspace rotation, logout, and server-owned audit actions.
 
+`admin-compose.spec.ts` is the complementary real-deployment journey. After
+`compose.local.yml` is healthy, set `CASEWEAVER_E2E_COMPOSE_ORIGIN` to its loopback
+edge (normally `http://localhost:8080`) and run:
+
+```powershell
+$env:CASEWEAVER_E2E_COMPOSE_ORIGIN = "http://localhost:8080"
+pnpm exec playwright test tests/e2e/admin-compose.spec.ts
+```
+
+It signs in with the disposable development account, creates an immutable retrieval
+profile through the real cookie/CSRF API, observes its server-side audit record, and
+signs out while asserting that session credentials/tokens never enter browser storage.
+The container workflow runs this path after its real Compose smoke. It never runs
+against a production environment or sends a secret value.
+
 Set `CASEWEAVER_E2E_ADMIN_ORIGIN` to a running static host to run the same journey
 through it. PBI-016 validates `http://127.0.0.1:8082` after building the admin artifact
 and starting `deploy/docker/compose.admin.yml`; the test fixture remains the API/OIDC

@@ -10,7 +10,6 @@ import {
   utcInstant,
 } from "@caseweaver/domain";
 import {
-  type AnalysisPromptBuilder,
   assertRepairInputBound,
   CASE_ANALYSIS_SCHEMA_VERSION,
   type PromptContextItem,
@@ -27,6 +26,7 @@ import {
   type AnalysisExecutionStore,
   type AnalysisIdGenerator,
   type AnalysisProfile,
+  type AnalysisPromptBuilderResolver,
   type AnalysisResultRecord,
   type AnalysisStageName,
   type AnalysisStageStatus,
@@ -38,7 +38,6 @@ import {
   type RepositoryInvestigationPort,
   type RetrievalEvidencePort,
 } from "./contracts.js";
-import { DeterministicRepositoryInvestigationPort } from "./fakes.js";
 
 export class AnalysisOrchestrationError extends Error {
   public constructor(
@@ -60,15 +59,15 @@ export interface AnalysisOrchestratorDependencies {
   readonly store: AnalysisExecutionStore;
   readonly attachments: AttachmentEvidencePort;
   readonly retrieval: RetrievalEvidencePort;
-  readonly prompts: AnalysisPromptBuilder;
+  readonly prompts: AnalysisPromptBuilderResolver;
   readonly ai: AiExecutionGateway;
   readonly ids: AnalysisIdGenerator;
   readonly clock: AnalysisClock;
   /**
-   * The deterministic no-op is deliberate: repository investigation remains
-   * optional until a sandbox-backed adapter is supplied.
+   * Production composition must supply a server-private, commit-pinned
+   * sandbox adapter. Deterministic implementations are test fixtures only.
    */
-  readonly repository?: RepositoryInvestigationPort;
+  readonly repository: RepositoryInvestigationPort;
 }
 
 export type AnalysisExecutionOutcome =
@@ -273,14 +272,9 @@ function parsedStageResult(
 }
 
 export class AnalysisOrchestrator {
-  private readonly repository: RepositoryInvestigationPort;
-
   public constructor(
     private readonly dependencies: AnalysisOrchestratorDependencies,
-  ) {
-    this.repository =
-      dependencies.repository ?? new DeterministicRepositoryInvestigationPort();
-  }
+  ) {}
 
   public async execute(
     command: import("@caseweaver/domain").EnvelopeFor<"analysis.execute.v1">,
@@ -352,7 +346,12 @@ export class AnalysisOrchestrator {
         ...repository.evidence,
       ]);
       operations.push(...repository.operationIds);
-      const prompt = this.dependencies.prompts.build({
+      throwIfAborted(signal);
+      const promptBuilder = await this.dependencies.prompts.resolve({
+        execution,
+        signal,
+      });
+      const prompt = promptBuilder.build({
         template: profile.prompt.template,
         budgets: profile.prompt.budgets,
         context: promptContext(evidence),
@@ -436,6 +435,8 @@ export class AnalysisOrchestrator {
         signal.aborted || details.code === "analysis.cancelled"
           ? "cancelled"
           : "failed";
+      // A cancelled queue lease must not prevent recording the terminal durable
+      // attempt. Completion has the same cancellation-proof boundary above.
       await this.dependencies.store.fail(
         {
           execution,
@@ -443,7 +444,7 @@ export class AnalysisOrchestrator {
           stages: Object.freeze([...stages]),
           error: details,
         },
-        signal,
+        new AbortController().signal,
       );
       throw error;
     }
@@ -494,8 +495,9 @@ export class AnalysisOrchestrator {
     const repository = profile.repository;
     try {
       throwIfAborted(signal);
-      const result = await this.repository.investigate({
+      const result = await this.dependencies.repository.investigate({
         execution,
+        runtimeVersionId: repository.runtimeVersionId ?? "",
         bindingVersionId: repository.bindingVersionId ?? "",
         repositoryId: repository.repositoryId ?? "",
         pinnedCommit: repository.pinnedCommit ?? "",

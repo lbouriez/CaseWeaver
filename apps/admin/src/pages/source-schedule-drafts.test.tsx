@@ -21,15 +21,23 @@ describe("source and schedule drafts", () => {
               ]
             : resource === "collections"
               ? [{ id: "collection-1", label: "Support knowledge" }]
-              : resource === "knowledge-sources"
+              : resource === "ai-budgets"
                 ? [
                     {
-                      id: "source-1",
-                      label: "Existing source",
-                      status: "enabled",
+                      id: "budget-1",
+                      label: "Workspace · workspace-1",
+                      status: "hard",
                     },
                   ]
-                : [],
+                : resource === "knowledge-sources"
+                  ? [
+                      {
+                        id: "source-1",
+                        label: "Existing source",
+                        status: "enabled",
+                      },
+                    ]
+                  : [],
         page: { hasNextPage: false },
       })),
       configurationInspection: vi.fn(async () => ({
@@ -93,7 +101,14 @@ describe("source and schedule drafts", () => {
           displayName: "New source",
           connectorInstanceId: "connector-1",
           collectionId: "collection-1",
-          synchronizationPolicy: {},
+          normalizationProfileId: "text-normalization",
+          normalizationProfileVersion: "v1",
+          chunkingProfileId: "text-chunking",
+          chunkingProfileVersion: "v1",
+          embeddingBatchSize: 16,
+          embeddingBudgetPolicyId: "budget-1",
+          synchronizationPolicy: { triggers: [{ mode: "manual" }] },
+          deletionBehavior: "tombstone",
         }),
       ),
     );

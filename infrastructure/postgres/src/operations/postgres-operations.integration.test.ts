@@ -34,6 +34,11 @@ async function resetDatabase(): Promise<void> {
   await pool.query(`
     TRUNCATE TABLE
       retention_work_items,
+      attachment_derivative_failures,
+      attachment_derivative_sources,
+      attachment_derivatives,
+      attachments,
+      attachment_blobs,
       privacy_tombstones,
       ai_operation_costs,
       ai_operations,
@@ -369,6 +374,168 @@ describe("PostgreSQL operations", () => {
         "SELECT snapshot_hash FROM privacy_tombstones WHERE case_snapshot_id = 'snapshot-operations'",
       );
       expect(tombstones.rows[0]?.snapshot_hash).toBe("a".repeat(64));
+    } finally {
+      await persistence.close();
+    }
+  });
+
+  it("uses durable work items for reference expiry before backend-pinned object deletion", async () => {
+    const hash = "c".repeat(64);
+    await pool.query(`
+      INSERT INTO attachment_blobs (
+        id, workspace_id, storage_key, storage_backend_id, content_hash,
+        byte_length, detected_mime_type, retention_expires_at
+      ) VALUES (
+        'blob-retention', 'workspace-operations', 'opaque/blob', 'storage-test',
+        '${hash}', 12, 'text/plain', '2020-01-01T00:00:00.000Z'
+      );
+      INSERT INTO attachments (
+        id, workspace_id, external_reference_id, lifecycle, content_hash, blob_id,
+        byte_length, detected_mime_type, observed_at, retention_expires_at
+      ) VALUES (
+        'attachment-retention', 'workspace-operations', 'reference-operations',
+        'accepted', '${hash}', 'blob-retention', 12, 'text/plain',
+        '2026-07-14T00:00:00.000Z', '2020-01-01T00:00:00.000Z'
+      );
+      INSERT INTO attachment_derivatives (
+        id, workspace_id, identity_key, access_policy_hash, content_hash,
+        processor, processor_version, security_policy_version, normalization_version,
+        status, claim_attempts, output_storage_key, output_storage_backend_id,
+        output_mime_type, output_content_hash, output_byte_length, completed_at,
+        retention_expires_at
+      ) VALUES (
+        'derivative-retention', 'workspace-operations', '${"d".repeat(64)}',
+        'policy', '${hash}', 'text', 'v1', 'v1', 'v1', 'completed', 1,
+        'opaque/derivative', 'storage-test', 'text/plain',
+        '${hash}', 12, '2026-07-14T00:00:00.000Z',
+        '2020-01-01T00:00:00.000Z'
+      );
+    `);
+    const persistence = createPostgresPersistence({ databaseUrl });
+    try {
+      const first = await persistence.unitOfWork.transaction((transaction) =>
+        persistence.operationsStore.queueExpiredRetention(transaction, {
+          workspaceId: workspaceId("workspace-operations"),
+          limit: 10,
+          occurredAt: utcInstant("2026-07-14T18:00:00.000Z"),
+        }),
+      );
+      expect(first).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            id: "retention:attachmentReference:attachment-retention",
+          }),
+          expect.objectContaining({
+            id: "retention:attachmentDerivative:derivative-retention",
+            objectReference: {
+              workspaceId: "workspace-operations",
+              storageBackendId: "storage-test",
+              key: "opaque/derivative",
+            },
+          }),
+        ]),
+      );
+      const referenceId = "retention:attachmentReference:attachment-retention";
+      const claimedReference = await persistence.unitOfWork.transaction(
+        (transaction) =>
+          persistence.operationsStore.claimRetentionWork(transaction, {
+            workspaceId: workspaceId("workspace-operations"),
+            workItemId: referenceId,
+          }),
+      );
+      expect(claimedReference?.objectReference).toBeUndefined();
+      expect(claimedReference?.fencingToken).toBe(1n);
+      await persistence.unitOfWork.transaction((transaction) =>
+        persistence.operationsStore.completeRetentionWork(transaction, {
+          workspaceId: workspaceId("workspace-operations"),
+          workItemId: referenceId,
+          fencingToken: 1n,
+          occurredAt: utcInstant("2026-07-14T18:01:00.000Z"),
+        }),
+      );
+
+      const second = await persistence.unitOfWork.transaction((transaction) =>
+        persistence.operationsStore.queueExpiredRetention(transaction, {
+          workspaceId: workspaceId("workspace-operations"),
+          limit: 10,
+          occurredAt: utcInstant("2026-07-14T18:02:00.000Z"),
+        }),
+      );
+      expect(second).toEqual([
+        expect.objectContaining({
+          id: "retention:attachmentBlob:blob-retention",
+          objectReference: {
+            workspaceId: "workspace-operations",
+            storageBackendId: "storage-test",
+            key: "opaque/blob",
+          },
+        }),
+      ]);
+      const retained = await pool.query<{
+        attachment_state: string;
+        attachment_blob_id: string | null;
+        blob_state: string;
+      }>(
+        `SELECT attachment.retention_state AS attachment_state,
+                attachment.blob_id AS attachment_blob_id,
+                blob.retention_state AS blob_state
+         FROM attachments AS attachment
+         JOIN attachment_blobs AS blob
+           ON blob.workspace_id = attachment.workspace_id
+          AND blob.id = 'blob-retention'
+         WHERE attachment.id = 'attachment-retention'`,
+      );
+      expect(retained.rows).toEqual([
+        {
+          attachment_state: "deleted",
+          attachment_blob_id: null,
+          blob_state: "active",
+        },
+      ]);
+    } finally {
+      await persistence.close();
+    }
+  });
+
+  it("returns legacy key-only retention work without selecting a backend", async () => {
+    const hash = "e".repeat(64);
+    // The integrity trigger protects newly-completed derivatives. This row
+    // represents an immutable historical record from before that invariant
+    // existed, so insert it with user triggers disabled only for this test
+    // transaction. The retention path must expose it without inventing a
+    // storage backend, then the runtime fails closed before I/O.
+    await pool.query(`
+      BEGIN;
+      SET LOCAL session_replication_role = replica;
+      INSERT INTO attachment_derivatives (
+        id, workspace_id, identity_key, access_policy_hash, content_hash,
+        processor, processor_version, security_policy_version, normalization_version,
+        status, claim_attempts, output_storage_key, output_mime_type, completed_at,
+        retention_expires_at
+      ) VALUES (
+        'derivative-legacy-retention', 'workspace-operations', '${"f".repeat(64)}',
+        'policy', '${hash}', 'text', 'v1', 'v1', 'v1', 'completed', 1,
+        'legacy/opaque/key', 'text/plain', '2026-07-14T00:00:00.000Z',
+        '2020-01-01T00:00:00.000Z'
+      );
+      COMMIT;
+    `);
+    const persistence = createPostgresPersistence({ databaseUrl });
+    try {
+      const queued = await persistence.unitOfWork.transaction((transaction) =>
+        persistence.operationsStore.queueExpiredRetention(transaction, {
+          workspaceId: workspaceId("workspace-operations"),
+          limit: 1,
+          occurredAt: utcInstant("2026-07-14T18:00:00.000Z"),
+        }),
+      );
+      expect(queued).toEqual([
+        {
+          id: "retention:attachmentDerivative:derivative-legacy-retention",
+          workspaceId: "workspace-operations",
+          storageKey: "legacy/opaque/key",
+        },
+      ]);
     } finally {
       await persistence.close();
     }

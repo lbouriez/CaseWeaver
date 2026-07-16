@@ -9,15 +9,22 @@
       "default": "./dist/index.js"
     }
   },
+  "bin": {
+    "caseweaver-standalone": "./dist/main.js"
+  },
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "test": "vitest run"
   },
   "dependencies": {
+    "@caseweaver/api": "workspace:*",
     "@caseweaver/application": "workspace:*",
     "@caseweaver/domain": "workspace:*",
-    "@caseweaver/observability": "workspace:*"
+    "@caseweaver/observability": "workspace:*",
+    "@caseweaver/scheduler": "workspace:*",
+    "@caseweaver/webhook": "workspace:*",
+    "@caseweaver/worker": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "22.19.7",

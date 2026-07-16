@@ -1,15 +1,15 @@
 import type { RuntimeConfig } from "../runtime-config.js";
 import {
-  type AiBindingDraftRequest,
-  type AiBudgetRequest,
-  type AiPriceOverrideRequest,
-  type AiRoleDefaultRequest,
   type ActionOutcome,
   type ActionPreview,
   type AdminActionName,
   type AdminDetail,
   type AdminListResponse,
   type AdminResourceName,
+  type AiBindingDraftRequest,
+  type AiBudgetRequest,
+  type AiPriceOverrideRequest,
+  type AiRoleDefaultRequest,
   actionOutcomeSchema,
   actionPreviewSchema,
   adminDetailSchema,
@@ -26,12 +26,12 @@ import {
   diagnosticExportStatusSchema,
   type PlatformLinkConfiguration,
   type ProviderCapabilityTestPreview,
-  providerCapabilityTestOperationsSchema,
-  providerCapabilityTestPreviewSchema,
   type ProviderCapabilityTestResult,
-  providerCapabilityTestResultSchema,
   type PublicApiErrorBody,
   platformLinkConfigurationSchema,
+  providerCapabilityTestOperationsSchema,
+  providerCapabilityTestPreviewSchema,
+  providerCapabilityTestResultSchema,
   publicApiErrorBodySchema,
   resourceEndpoints,
   type Session,
@@ -61,6 +61,12 @@ export interface DescriptorDraftInput {
   readonly settings: Readonly<Record<string, unknown>>;
 }
 
+/** Submitted only to the dedicated HTTPS sign-in endpoint and never retained by this client. */
+export interface PasswordLoginInput {
+  readonly login: string;
+  readonly password: string;
+}
+
 export interface SecretReferenceRegistrationInput {
   /** Opaque locator in the configured external secret backend, never a value. */
   readonly reference: string;
@@ -72,8 +78,12 @@ export interface KnowledgeSourceDraftInput {
   readonly displayName: string;
   readonly connectorInstanceId: string;
   readonly collectionId: string;
+  readonly normalizationProfileId: string;
   readonly normalizationProfileVersion: string;
+  readonly chunkingProfileId: string;
   readonly chunkingProfileVersion: string;
+  readonly embeddingBatchSize: number;
+  readonly embeddingBudgetPolicyId: string;
   readonly synchronizationPolicy: Readonly<Record<string, unknown>>;
   readonly deletionBehavior: "tombstone" | "retain";
 }
@@ -101,6 +111,23 @@ export interface KnowledgeScheduleDraftInput {
       }>;
   readonly nextRunAt: string;
 }
+
+/** Provider-neutral immutable policy-profile draft. The browser supplies only
+ * safe bounded settings; profile IDs, versions, validation, authorization, and
+ * audit metadata remain API-owned. */
+export type PolicyProfileResource = "retrieval-profiles" | "prompt-profiles";
+
+export interface PolicyProfileDraftInput {
+  readonly displayName: string;
+  readonly settings: Readonly<Record<string, unknown>>;
+}
+
+const policyProfileDraftEndpoints: Readonly<
+  Record<string, string | undefined>
+> = Object.freeze({
+  "retrieval-profiles": "/v1/admin/retrieval-profiles/drafts",
+  "prompt-profiles": "/v1/admin/prompt-profiles/drafts",
+});
 
 /** Publication policy is a server-validated opaque configuration object. The
  * browser has no profile/version identity and may not include secret fields. */
@@ -285,6 +312,24 @@ export class CaseWeaverApiClient {
     return url;
   }
 
+  public async passwordLogin(
+    input: PasswordLoginInput,
+    signal?: AbortSignal,
+  ): Promise<Session> {
+    const session = await this.requestJson(
+      "/v1/auth/login/password",
+      {
+        method: "POST",
+        signal,
+        body: JSON.stringify(input),
+      },
+      sessionSchema,
+      "user",
+    );
+    this.csrfToken = session.authenticated ? session.csrfToken : undefined;
+    return session;
+  }
+
   public async logout(signal?: AbortSignal): Promise<void> {
     await this.requestJson(
       "/v1/auth/logout",
@@ -465,6 +510,27 @@ export class CaseWeaverApiClient {
   ): Promise<AdminDetail> {
     return this.requestJson(
       "/v1/admin/schedules/drafts",
+      { method: "POST", signal, body: JSON.stringify(input) },
+      adminDetailSchema,
+      "user",
+    );
+  }
+
+  public async createPolicyProfileDraft(
+    resource: PolicyProfileResource,
+    input: PolicyProfileDraftInput,
+    signal?: AbortSignal,
+  ): Promise<AdminDetail> {
+    const endpoint = policyProfileDraftEndpoints[resource];
+    if (endpoint === undefined) {
+      throw new PublicApiError(
+        "invalid",
+        "client.invalidPolicyProfileResource",
+        "The selected policy profile type is invalid.",
+      );
+    }
+    return this.requestJson(
+      endpoint,
       { method: "POST", signal, body: JSON.stringify(input) },
       adminDetailSchema,
       "user",

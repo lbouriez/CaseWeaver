@@ -175,7 +175,15 @@ export class PostgresAiBindingResolver implements AiBindingResolver {
           )
         )
         AND binding.lifecycle = 'active'
-        AND binding.active_version_id = binding_version.id
+        -- A caller that supplied an immutable version pin is deliberately
+        -- replaying work created under that version.  Rotation changes the
+        -- default for new work only; it must never silently rebind retained
+        -- work to the aggregate's current version.  Aggregate/provider/
+        -- credential lifecycle still gates all execution.
+        AND (
+          ${request.bindingVersionId ?? null}::text IS NOT NULL
+          OR binding.active_version_id = binding_version.id
+        )
         AND provider.lifecycle = 'active'
         AND credential.lifecycle = 'active'
         AND binding_version.secret_reference = provider_version.secret_reference

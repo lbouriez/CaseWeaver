@@ -111,6 +111,53 @@ describe("PostgresAiBindingResolver", () => {
     ).rejects.toBeInstanceOf(AiCapabilityError);
   });
 
+  it("resolves a retained explicitly pinned version after the default rotates", async () => {
+    await pool.query(
+      `INSERT INTO ai_model_binding_versions (
+        id, workspace_id, model_binding_id, version, provider_instance_version_id,
+        catalog_snapshot_id, catalog_model_id, canonical_model, wire_api,
+        parameters, capabilities, maximum_input_tokens, maximum_output_tokens,
+        secret_reference
+      ) VALUES (
+        'binding-resolver-binding:2', $1, 'binding-resolver-binding', 2,
+        'binding-resolver-provider-version', 'binding-resolver-snapshot',
+        'binding-resolver-model', 'test-model', 'chatCompletions', '{}'::jsonb,
+        '["structuredOutput"]'::jsonb, 100, 50, 'opaque:credential-reference'
+      )`,
+      [workspaceId],
+    );
+    await pool.query(
+      `UPDATE ai_model_bindings
+       SET active_version_id = 'binding-resolver-binding:2'
+       WHERE workspace_id = $1 AND id = 'binding-resolver-binding'`,
+      [workspaceId],
+    );
+    await pool.query(
+      `UPDATE ai_workspace_binding_defaults
+       SET model_binding_version_id = 'binding-resolver-binding:2'
+       WHERE workspace_id = $1 AND role = 'analysis'`,
+      [workspaceId],
+    );
+
+    await expect(
+      resolver.resolve({
+        workspaceId,
+        role: "analysis",
+        bindingVersionId,
+        requiredCapabilities: ["structuredOutput"],
+      }),
+    ).resolves.toMatchObject({ bindingVersionId });
+    await expect(
+      resolver.resolve({
+        workspaceId,
+        role: "analysis",
+        requiredCapabilities: ["structuredOutput"],
+      }),
+    ).resolves.toMatchObject({
+      bindingVersionId: "binding-resolver-binding:2",
+    });
+  });
+
   it("fails closed for another workspace, inactive providers or bindings, and revoked credentials", async () => {
     await pool.query("INSERT INTO workspaces (id) VALUES ($1)", [
       "binding-resolver-workspace-b",

@@ -129,4 +129,38 @@ describe("OpenAiCompatibleProvider", () => {
       }),
     ).rejects.toThrow("aborted");
   });
+
+  it("fails closed for repository agents before contacting an endpoint", async () => {
+    let calls = 0;
+    const provider = new OpenAiCompatibleProvider({
+      fetch: async () => {
+        calls += 1;
+        throw new Error("must not contact endpoint");
+      },
+    });
+
+    await expect(
+      provider.runRepositoryAgent({
+        binding: {
+          ...binding("responses"),
+          capabilities: new Set(["repositoryAgent", "tools"]),
+        },
+        secret: { value: "never-send-this" },
+        request: {
+          runtimePin: {
+            workspaceId: "workspace-1",
+            runtimeVersionId: "runtime-version-1",
+            repositoryId: "support-service",
+            pinnedCommit: "a".repeat(40),
+          },
+          instruction: "Inspect the repository.",
+          maximumTurns: 1,
+          maximumInputTokensPerTurn: 10,
+          maximumOutputTokensPerTurn: 10,
+        },
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow("unavailable");
+    expect(calls).toBe(0);
+  });
 });

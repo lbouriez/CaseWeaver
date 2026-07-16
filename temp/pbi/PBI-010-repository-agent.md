@@ -4,6 +4,15 @@
 
 Provide an optional isolated implementation of the repository-agent port.
 
+## Delivery state
+
+**In progress (reopened).** The existing contract checks are not a usable repository
+runtime: there is no concrete immutable runtime resolver, exact pinned-checkout broker,
+credential-free isolated sandbox, or registered provider implementation. The worker
+therefore correctly fails enabled repository investigation closed. This PBI cannot be
+accepted until the remaining scope and acceptance criteria below are implemented and
+validated.
+
 ## Existing implementation reference
 
 Before implementing, inspect

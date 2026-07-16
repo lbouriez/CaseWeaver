@@ -16,13 +16,52 @@ const authenticatedSession = {
 };
 
 describe("operator session gate", () => {
+  it("renders only password authentication when OAuth is not configured and clears the browser-side credential state after sign-in", async () => {
+    const passwordLogin = vi.fn(async () => authenticatedSession);
+    render(
+      <OperatorSessionGate
+        authProvider={{
+          login: vi.fn(async () => undefined),
+          logout: vi.fn(async () => undefined),
+          passwordLogin,
+        }}
+        client={{
+          session: vi.fn(async () => ({
+            authenticated: false as const,
+            authentication: { password: true, oauth: false },
+          })),
+        }}
+        renderAuthenticated={() => <p>Authenticated console</p>}
+      />,
+    );
+
+    await userEvent.type(await screen.findByLabelText(/^Login/u), "admin");
+    await userEvent.type(screen.getByLabelText(/^Password/u), "admin");
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await screen.findByText("Authenticated console");
+    expect(passwordLogin).toHaveBeenCalledWith("admin", "admin");
+    expect(
+      screen.queryByRole("button", {
+        name: "Continue with configured identity provider",
+      }),
+    ).toBeNull();
+  });
+
   it("renders the sign-in control before React-Admin for an anonymous session", async () => {
     const login = vi.fn(async () => undefined);
     render(
       <OperatorSessionGate
-        authProvider={{ login, logout: vi.fn(async () => undefined) }}
+        authProvider={{
+          login,
+          logout: vi.fn(async () => undefined),
+          passwordLogin: vi.fn(async () => authenticatedSession),
+        }}
         client={{
-          session: vi.fn(async () => ({ authenticated: false as const })),
+          session: vi.fn(async () => ({
+            authenticated: false as const,
+            authentication: { password: true, oauth: true },
+          })),
         }}
         renderAuthenticated={() => <p>Authenticated console</p>}
       />,
@@ -41,8 +80,20 @@ describe("operator session gate", () => {
     const logout = vi.fn(async () => undefined);
     render(
       <OperatorSessionGate
-        authProvider={{ login: vi.fn(async () => undefined), logout }}
-        client={{ session: vi.fn(async () => authenticatedSession) }}
+        authProvider={{
+          login: vi.fn(async () => undefined),
+          logout,
+          passwordLogin: vi.fn(async () => authenticatedSession),
+        }}
+        client={{
+          session: vi
+            .fn()
+            .mockResolvedValueOnce(authenticatedSession)
+            .mockResolvedValueOnce({
+              authenticated: false as const,
+              authentication: { password: true, oauth: true },
+            }),
+        }}
         renderAuthenticated={(signOut) => (
           <button onClick={() => void signOut()} type="button">
             Test sign out
@@ -64,12 +115,16 @@ describe("operator session gate", () => {
     const session = vi
       .fn<(signal?: AbortSignal) => Promise<Session>>()
       .mockRejectedValueOnce(new Error("network unavailable"))
-      .mockResolvedValueOnce({ authenticated: false as const });
+      .mockResolvedValueOnce({
+        authenticated: false as const,
+        authentication: { password: true, oauth: true },
+      });
     render(
       <OperatorSessionGate
         authProvider={{
           login: vi.fn(async () => undefined),
           logout: vi.fn(async () => undefined),
+          passwordLogin: vi.fn(async () => authenticatedSession),
         }}
         client={{ session }}
         renderAuthenticated={() => <p>Authenticated console</p>}

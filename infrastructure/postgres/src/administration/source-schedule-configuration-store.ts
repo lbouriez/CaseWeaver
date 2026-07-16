@@ -1,11 +1,12 @@
-import type { ApplicationTransaction } from "@caseweaver/application";
 import {
-  canonicalizeConfiguration,
   type ConfigurationLifecycleStore,
+  canonicalizeConfiguration,
   type KnowledgeScheduleConfigurationProjection,
   type KnowledgeSourceConfigurationProjection,
   type SourceScheduleConfigurationProjectionStore,
 } from "@caseweaver/administration";
+import { createHash } from "node:crypto";
+import type { ApplicationTransaction } from "@caseweaver/application";
 import type { Prisma } from "@prisma/client";
 
 import type { PostgresTransactionLookup } from "../index.js";
@@ -62,10 +63,11 @@ export class PostgresSourceScheduleConfigurationStore
       configurationId: input.source.sourceId,
       versionId: input.configurationVersionId,
     });
-    await this.requireActiveKnowledgeConnector({
-      workspaceId: input.workspaceId,
-      connectorRegistrationId: input.source.connectorRegistrationId,
-    });
+    const connectorConfigurationVersionId =
+      await this.resolveActiveKnowledgeConnectorVersion({
+        workspaceId: input.workspaceId,
+        connectorRegistrationId: input.source.connectorRegistrationId,
+      });
     const collection = await database.knowledgeCollection.findUnique({
       where: {
         workspaceId_id: {
@@ -73,7 +75,12 @@ export class PostgresSourceScheduleConfigurationStore
           id: input.source.knowledgeCollectionId,
         },
       },
-      select: { id: true },
+      select: {
+        id: true,
+        embeddingBindingVersionId: true,
+        embeddingProfileVersion: true,
+        dimensions: true,
+      },
     });
     if (collection === null) {
       throw new Error("Knowledge collection is unavailable in this workspace.");
@@ -93,6 +100,7 @@ export class PostgresSourceScheduleConfigurationStore
         knowledgeCollectionId: input.source.knowledgeCollectionId,
         lifecycle: input.lifecycle,
         configurationVersion: input.configurationVersionId,
+        connectorConfigurationVersionId,
         normalizationProfileVersion: input.source.normalizationProfileVersion,
         chunkingProfileVersion: input.source.chunkingProfileVersion,
         synchronizationPolicy: jsonObject(input.source.synchronizationPolicy),
@@ -103,11 +111,21 @@ export class PostgresSourceScheduleConfigurationStore
         knowledgeCollectionId: input.source.knowledgeCollectionId,
         lifecycle: input.lifecycle,
         configurationVersion: input.configurationVersionId,
+        connectorConfigurationVersionId,
         normalizationProfileVersion: input.source.normalizationProfileVersion,
         chunkingProfileVersion: input.source.chunkingProfileVersion,
         synchronizationPolicy: jsonObject(input.source.synchronizationPolicy),
         deletionBehavior: input.source.deletionBehavior,
       },
+    });
+    await this.writeRuntimeVersion({
+      workspaceId: input.workspaceId,
+      sourceId: input.source.sourceId,
+      sourceConfigurationVersionId: input.configurationVersionId,
+      connectorRegistrationId: input.source.connectorRegistrationId,
+      connectorConfigurationVersionId,
+      source: input.source,
+      collection,
     });
   }
 
@@ -149,6 +167,23 @@ export class PostgresSourceScheduleConfigurationStore
         "An enabled schedule requires an enabled knowledge source.",
       );
     }
+    const runtimeVersion =
+      await database.knowledgeSourceRuntimeVersion.findUnique({
+        where: {
+          workspaceId_knowledgeSourceId_sourceConfigurationVersionId: {
+            workspaceId: input.workspaceId,
+            knowledgeSourceId: input.schedule.sourceId,
+            sourceConfigurationVersionId:
+              input.schedule.sourceConfigurationVersionId,
+          },
+        },
+        select: {
+          connectorConfigurationVersionId: true,
+        },
+      });
+    if (runtimeVersion === null) {
+      throw new Error("Knowledge source runtime configuration is unavailable.");
+    }
 
     const cadence = scheduleCadence(input.schedule);
     await database.knowledgeSchedule.upsert({
@@ -163,6 +198,8 @@ export class PostgresSourceScheduleConfigurationStore
         workspaceId: input.workspaceId,
         knowledgeSourceId: input.schedule.sourceId,
         configurationVersion: input.schedule.sourceConfigurationVersionId,
+        connectorConfigurationVersionId:
+          runtimeVersion.connectorConfigurationVersionId,
         administrationConfigurationVersionId: input.configurationVersionId,
         scheduleKind: input.schedule.kind,
         triggerKind: cadence.triggerKind,
@@ -185,6 +222,8 @@ export class PostgresSourceScheduleConfigurationStore
       update: {
         knowledgeSourceId: input.schedule.sourceId,
         configurationVersion: input.schedule.sourceConfigurationVersionId,
+        connectorConfigurationVersionId:
+          runtimeVersion.connectorConfigurationVersionId,
         administrationConfigurationVersionId: input.configurationVersionId,
         scheduleKind: input.schedule.kind,
         triggerKind: cadence.triggerKind,
@@ -240,38 +279,201 @@ export class PostgresSourceScheduleConfigurationStore
     }
   }
 
-  private async requireActiveKnowledgeConnector(
+  private async resolveActiveKnowledgeConnectorVersion(
     input: Readonly<{
       readonly workspaceId: string;
       readonly connectorRegistrationId: string;
     }>,
-  ): Promise<void> {
-    const connector = await this.transactions
-      .get(this.transaction)
-      .connectorRegistration.findUnique({
-        where: {
-          workspaceId_id: {
-            workspaceId: input.workspaceId,
-            id: input.connectorRegistrationId,
-          },
-        },
-        select: {
-          lifecycle: true,
-          capabilities: { select: { capability: true } },
-        },
-      });
+  ): Promise<string> {
+    const rows = await this.transactions.get(this.transaction).$queryRaw<
+      readonly Readonly<{
+        readonly connector_configuration_version_id: string;
+      }>[]
+    >`
+      SELECT connector_configuration.current_version_id
+        AS connector_configuration_version_id
+      FROM connector_registrations AS connector
+      INNER JOIN connector_capabilities AS capability
+        ON capability.workspace_id = connector.workspace_id
+       AND capability.connector_registration_id = connector.id
+       AND capability.capability = 'knowledgeSource'
+      INNER JOIN administration_configurations AS connector_configuration
+        ON connector_configuration.workspace_id = connector.workspace_id
+       AND connector_configuration.id = connector.id
+       AND connector_configuration.resource_type = 'connector-instances'
+       AND connector_configuration.lifecycle = 'active'
+      INNER JOIN administration_configuration_versions AS connector_version
+        ON connector_version.workspace_id = connector_configuration.workspace_id
+       AND connector_version.id = connector_configuration.current_version_id
+       AND connector_version.configuration_id = connector_configuration.id
+       AND connector_version.descriptor_kind = 'connector'
+      WHERE connector.workspace_id = ${input.workspaceId}
+        AND connector.id = ${input.connectorRegistrationId}
+        AND connector.lifecycle = 'active'
+      FOR UPDATE OF connector
+    `;
+    const connector = rows[0];
     if (
-      connector === null ||
-      connector.lifecycle !== "active" ||
-      !connector.capabilities.some(
-        (capability) => capability.capability === "knowledgeSource",
-      )
+      connector === undefined ||
+      connector.connector_configuration_version_id.length === 0
     ) {
       throw new Error(
         "Knowledge source connector is not active with the required capability.",
       );
     }
+    return connector.connector_configuration_version_id;
   }
+
+  private async writeRuntimeVersion(
+    input: Readonly<{
+      readonly workspaceId: string;
+      readonly sourceId: string;
+      readonly sourceConfigurationVersionId: string;
+      readonly connectorRegistrationId: string;
+      readonly connectorConfigurationVersionId: string;
+      readonly source: KnowledgeSourceConfigurationProjection;
+      readonly collection: Readonly<{
+        readonly id: string;
+        readonly embeddingBindingVersionId: string;
+        readonly embeddingProfileVersion: string;
+        readonly dimensions: number;
+      }>;
+    }>,
+  ): Promise<void> {
+    const database = this.transactions.get(this.transaction);
+    const existing = await database.knowledgeSourceRuntimeVersion.findUnique({
+      where: {
+        workspaceId_knowledgeSourceId_sourceConfigurationVersionId: {
+          workspaceId: input.workspaceId,
+          knowledgeSourceId: input.sourceId,
+          sourceConfigurationVersionId: input.sourceConfigurationVersionId,
+        },
+      },
+      select: {
+        connectorRegistrationId: true,
+        connectorConfigurationVersionId: true,
+        knowledgeCollectionId: true,
+        collectionRuntimeVersionId: true,
+        normalizationProfileId: true,
+        normalizationProfileVersion: true,
+        chunkingProfileId: true,
+        chunkingProfileVersion: true,
+        synchronizationPolicy: true,
+        embeddingBatchSize: true,
+      },
+    });
+    if (existing !== null) {
+      if (
+        existing.connectorRegistrationId !== input.connectorRegistrationId ||
+        existing.connectorConfigurationVersionId !==
+          input.connectorConfigurationVersionId ||
+        existing.knowledgeCollectionId !== input.source.knowledgeCollectionId ||
+        existing.normalizationProfileId !==
+          input.source.normalizationProfileId ||
+        existing.normalizationProfileVersion !==
+          input.source.normalizationProfileVersion ||
+        existing.chunkingProfileId !== input.source.chunkingProfileId ||
+        existing.chunkingProfileVersion !==
+          input.source.chunkingProfileVersion ||
+        existing.embeddingBatchSize !== input.source.embeddingBatchSize ||
+        existing.synchronizationPolicy === null ||
+        canonicalizeConfiguration(existing.synchronizationPolicy) !==
+          canonicalizeConfiguration(input.source.synchronizationPolicy)
+      ) {
+        throw new Error("Knowledge source runtime version is immutable.");
+      }
+      return;
+    }
+    const [binding, budget] = await Promise.all([
+      database.aiModelBindingVersion.findUnique({
+        where: {
+          workspaceId_id: {
+            workspaceId: input.workspaceId,
+            id: input.collection.embeddingBindingVersionId,
+          },
+        },
+        select: { maximumInputTokens: true, capabilities: true },
+      }),
+      database.aiBudgetPolicy.findUnique({
+        where: {
+          workspaceId_id: {
+            workspaceId: input.workspaceId,
+            id: input.source.embeddingBudgetPolicyId,
+          },
+        },
+        select: {
+          id: true,
+          revision: true,
+          active: true,
+          hard: true,
+          currency: true,
+        },
+      }),
+    ]);
+    if (
+      binding === null ||
+      binding.maximumInputTokens === null ||
+      binding.maximumInputTokens < 1 ||
+      !hasEmbeddingCapability(binding.capabilities) ||
+      budget === null ||
+      !budget.active ||
+      !budget.hard ||
+      !/^[A-Z]{3}$/u.test(budget.currency)
+    ) {
+      throw new Error(
+        "Knowledge source immutable execution settings are unavailable.",
+      );
+    }
+    const collectionRuntimeVersionId = collectionRuntimeId(
+      input.workspaceId,
+      input.sourceConfigurationVersionId,
+    );
+    await database.knowledgeCollectionRuntimeVersion.create({
+      data: {
+        id: collectionRuntimeVersionId,
+        workspaceId: input.workspaceId,
+        knowledgeCollectionId: input.collection.id,
+        embeddingBindingVersionId: input.collection.embeddingBindingVersionId,
+        embeddingProfileVersion: input.collection.embeddingProfileVersion,
+        dimensions: input.collection.dimensions,
+        maximumInputTokens: binding.maximumInputTokens,
+        budgetCurrency: budget.currency,
+        budgetHard: true,
+        budgetPolicyReference: `${budget.id}:r${budget.revision}`,
+      },
+    });
+    await database.knowledgeSourceRuntimeVersion.create({
+      data: {
+        workspaceId: input.workspaceId,
+        knowledgeSourceId: input.sourceId,
+        sourceConfigurationVersionId: input.sourceConfigurationVersionId,
+        connectorRegistrationId: input.connectorRegistrationId,
+        connectorConfigurationVersionId: input.connectorConfigurationVersionId,
+        knowledgeCollectionId: input.source.knowledgeCollectionId,
+        collectionRuntimeVersionId,
+        normalizationProfileId: input.source.normalizationProfileId,
+        normalizationProfileVersion: input.source.normalizationProfileVersion,
+        chunkingProfileId: input.source.chunkingProfileId,
+        chunkingProfileVersion: input.source.chunkingProfileVersion,
+        synchronizationPolicy: jsonObject(input.source.synchronizationPolicy),
+        embeddingBatchSize: input.source.embeddingBatchSize,
+      },
+    });
+  }
+}
+
+function collectionRuntimeId(
+  workspaceId: string,
+  sourceConfigurationVersionId: string,
+): string {
+  return `knowledge-runtime-${createHash("sha256")
+    .update(`${workspaceId}:${sourceConfigurationVersionId}`, "utf8")
+    .digest("hex")
+    .slice(0, 48)}`;
+}
+
+function hasEmbeddingCapability(value: unknown): boolean {
+  return Array.isArray(value) && value.includes("embedding");
 }
 
 function jsonObject(

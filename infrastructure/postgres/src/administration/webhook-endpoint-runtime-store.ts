@@ -32,11 +32,13 @@ export class PostgresWebhookEndpointRuntimeStore
         workspaceId: true,
         lifecycle: true,
         connectorInstanceId: true,
-        configurationVersionId: true,
+        endpointConfigurationVersionId: true,
+        connectorConfigurationVersionId: true,
         verifiedEventTypes: true,
         maximumBodyBytes: true,
         maximumRequestsPerMinute: true,
         analysisTriggerId: true,
+        automatedPrincipalId: true,
       },
     });
     if (row === null) return undefined;
@@ -92,11 +94,13 @@ function toState(
     readonly workspaceId: string;
     readonly lifecycle: string;
     readonly connectorInstanceId: string;
-    readonly configurationVersionId: string;
+    readonly endpointConfigurationVersionId: string;
+    readonly connectorConfigurationVersionId: string | null;
     readonly verifiedEventTypes: Prisma.JsonValue;
     readonly maximumBodyBytes: number;
     readonly maximumRequestsPerMinute: number;
     readonly analysisTriggerId: string | null;
+    readonly automatedPrincipalId: string | null;
   }>,
 ): WebhookEndpointConfigurationState {
   const eventTypes = parseEventTypes(row.verifiedEventTypes);
@@ -105,29 +109,36 @@ function toState(
     !isIdentifier(row.id) ||
     !isIdentifier(row.workspaceId) ||
     !isIdentifier(row.connectorInstanceId) ||
-    !isIdentifier(row.configurationVersionId) ||
+    !isIdentifier(row.endpointConfigurationVersionId) ||
+    !isIdentifier(row.connectorConfigurationVersionId) ||
     !Number.isSafeInteger(row.maximumBodyBytes) ||
     row.maximumBodyBytes < 1 ||
     row.maximumBodyBytes > 10 * 1024 * 1024 ||
     !Number.isSafeInteger(row.maximumRequestsPerMinute) ||
     row.maximumRequestsPerMinute < 1 ||
     row.maximumRequestsPerMinute > 10_000 ||
-    (row.analysisTriggerId !== null && !isIdentifier(row.analysisTriggerId))
+    (row.analysisTriggerId !== null && !isIdentifier(row.analysisTriggerId)) ||
+    (row.analysisTriggerId !== null && !isIdentifier(row.automatedPrincipalId))
   ) {
     throw new AdministrationValidationError();
   }
-  return Object.freeze({
+  const state = {
     endpointId: row.id,
     workspaceId: row.workspaceId,
-    lifecycle: "active",
+    lifecycle: "active" as const,
     connectorRegistrationId: row.connectorInstanceId,
-    configurationVersionId: row.configurationVersionId,
+    endpointConfigurationVersionId: row.endpointConfigurationVersionId,
+    connectorConfigurationVersionId: row.connectorConfigurationVersionId,
     verifiedEventTypes: eventTypes,
     maximumBodyBytes: row.maximumBodyBytes,
     maximumRequestsPerMinute: row.maximumRequestsPerMinute,
-    ...(row.analysisTriggerId === null
-      ? {}
-      : { analysisTriggerId: row.analysisTriggerId }),
+  };
+  if (row.analysisTriggerId === null) return Object.freeze(state);
+  // The validation above narrows both values for an active trigger route.
+  return Object.freeze({
+    ...state,
+    analysisTriggerId: row.analysisTriggerId,
+    automatedPrincipalId: row.automatedPrincipalId as string,
   });
 }
 

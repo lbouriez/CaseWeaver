@@ -64,6 +64,7 @@ function candidate(
     publicationProfileId: "profile-1",
     publicationProfileVersion: "1",
     destinationConnectorInstanceId: "helpdesk-1",
+    destinationConnectorConfigurationVersionId: "helpdesk-configuration-1",
     target: {
       connectorInstanceId: "helpdesk-1",
       resourceType: "case",
@@ -91,6 +92,10 @@ function candidate(
       notices: { disclaimers: [] },
       policy: { mode: "autoPublishInternal", visibility: "internal" },
       limits: { maximumBodyCharacters: 10_000 },
+    },
+    destination: {
+      connectorRegistrationId: "helpdesk-1",
+      connectorConfigurationVersionId: "helpdesk-configuration-1",
     },
     target: {
       connectorInstanceId: "helpdesk-1",

@@ -134,6 +134,7 @@ class PublicationStore implements PublicationIntentStore {
       id: "profile-1",
       version: "1",
       destinationConnectorInstanceId: "connector-1",
+      destinationConnectorConfigurationVersionId: "connector-configuration-1",
       policy: {
         mode: "autoPublishInternal" as const,
         visibility: "internal" as const,

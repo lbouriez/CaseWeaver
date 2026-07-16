@@ -53,6 +53,8 @@ import {
 import { PrismaPg } from "@prisma/adapter-pg";
 import { type Prisma, PrismaClient } from "@prisma/client";
 import { PostgresAdministrationActionPreviewStore } from "./administration/action-preview-store.js";
+import { PostgresAiBindingDraftStore } from "./administration/ai-binding-draft-store.js";
+import { PostgresAiConfigurationStore } from "./administration/ai-configuration-store.js";
 import {
   PostgresAuthAuditRecorder,
   PostgresAuthSessionAuditMutationStore,
@@ -66,6 +68,12 @@ import {
 } from "./administration/diagnostic-export-artifact-store.js";
 import { PostgresDiagnosticExportDispatchStore } from "./administration/diagnostic-export-dispatch-store.js";
 import { PostgresDiagnosticExportStore } from "./administration/diagnostic-export-store.js";
+import { PostgresPlatformLinkConfigurationReadStore } from "./administration/platform-link-configuration-store.js";
+import {
+  PostgresProviderCapabilityTestConfigurationStore,
+  PostgresProviderCapabilityTestStore,
+  type ProviderCapabilityTestTemplateLookup,
+} from "./administration/provider-capability-test-store.js";
 import {
   type AdministrationReadStore,
   PostgresAdministrationReadStore,
@@ -74,17 +82,10 @@ import {
   type AdministrationResourceReadStore,
   PostgresAdministrationResourceReadStore,
 } from "./administration/resource-read-store.js";
-import { PostgresWorkspaceRoleAssignmentStore } from "./administration/workspace-role-assignment-store.js";
-import { PostgresPlatformLinkConfigurationReadStore } from "./administration/platform-link-configuration-store.js";
+import { PostgresRuntimeConnectorConfigurationResolver } from "./administration/runtime-connector-configuration-resolver.js";
 import { PostgresWebhookEndpointRuntimeStore } from "./administration/webhook-endpoint-runtime-store.js";
-import { PostgresAiConfigurationStore } from "./administration/ai-configuration-store.js";
-import { PostgresAiBindingDraftStore } from "./administration/ai-binding-draft-store.js";
+import { PostgresWorkspaceRoleAssignmentStore } from "./administration/workspace-role-assignment-store.js";
 import { PostgresAiBindingResolver } from "./ai/postgres-ai-binding-resolver.js";
-import {
-  type ProviderCapabilityTestTemplateLookup,
-  PostgresProviderCapabilityTestConfigurationStore,
-  PostgresProviderCapabilityTestStore,
-} from "./administration/provider-capability-test-store.js";
 import {
   PostgresAnalysisExecutionStore,
   PostgresCaseSnapshotTombstoneStore,
@@ -97,10 +98,10 @@ import {
   PostgresVerifiedWebhookEventStore,
 } from "./publication/index.js";
 
-export * from "./administration/workspace-role-assignment-store.js";
+export * from "./administration/platform-link-configuration-store.js";
 export * from "./administration/webhook-endpoint-configuration-store.js";
 export * from "./administration/webhook-endpoint-runtime-store.js";
-export * from "./administration/platform-link-configuration-store.js";
+export * from "./administration/workspace-role-assignment-store.js";
 export * from "./retrieval/index.js";
 
 type PrismaTransaction = Prisma.TransactionClient;
@@ -372,7 +373,7 @@ class PostgresAnalysisRequestStore implements AnalysisRequestStore {
     input: Parameters<AnalysisRequestStore["lockIdempotencyKey"]>[1],
   ): Promise<void> {
     const key = `${input.workspaceId}:${input.operation}:${input.keyDigest}`;
-    await this.transactions.get(transaction).$queryRaw`
+    await this.transactions.get(transaction).$executeRaw`
       SELECT pg_advisory_xact_lock(hashtextextended(${key}, 0))
     `;
   }
@@ -421,7 +422,7 @@ class PostgresAnalysisRequestStore implements AnalysisRequestStore {
   ): Promise<AnalysisIdentityRecord> {
     const database = this.transactions.get(transaction);
     const lockKey = `${input.workspaceId}:analysis-identity:${input.identityHash}`;
-    await database.$queryRaw`
+    await database.$executeRaw`
       SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))
     `;
     const existing = await database.analysisIdentity.findUnique({
@@ -817,6 +818,8 @@ export interface PostgresPersistence {
   readonly aiBindingResolver: PostgresAiBindingResolver;
   /** Public-webhook routing state is opaque and contains no secret material. */
   readonly webhookEndpointRuntimeStore: PostgresWebhookEndpointRuntimeStore;
+  /** Server-private immutable connector settings/locator lookup for runtime composition. */
+  readonly runtimeConnectorConfigurationResolver: PostgresRuntimeConnectorConfigurationResolver;
   /** Public-link values are safe but their development URL policy is deployment-owned. */
   platformLinkReadStore(
     policy: PlatformLinkConfigurationPolicy,
@@ -895,6 +898,8 @@ export function createPostgresPersistence(
     webhookEndpointRuntimeStore: new PostgresWebhookEndpointRuntimeStore(
       client,
     ),
+    runtimeConnectorConfigurationResolver:
+      new PostgresRuntimeConnectorConfigurationResolver(client),
     platformLinkReadStore: (policy: PlatformLinkConfigurationPolicy) =>
       new PostgresPlatformLinkConfigurationReadStore(client, policy),
     providerCapabilityTestStores: (
@@ -914,8 +919,8 @@ export function createPostgresPersistence(
 }
 
 export * from "./administration/action-preview-store.js";
-export * from "./administration/ai-configuration-store.js";
 export * from "./administration/ai-binding-draft-store.js";
+export * from "./administration/ai-configuration-store.js";
 export * from "./administration/auth.js";
 export * from "./administration/configuration-store.js";
 export * from "./administration/descriptor-registry.js";
@@ -926,12 +931,16 @@ export * from "./administration/provider-capability-test-store.js";
 export * from "./administration/publication-profile-configuration-store.js";
 export * from "./administration/read-store.js";
 export * from "./administration/resource-read-store.js";
+export * from "./administration/runtime-connector-configuration-resolver.js";
 export * from "./administration/source-schedule-configuration-store.js";
 export * from "./ai/index.js";
 export * from "./analysis/index.js";
 export * from "./attachments/index.js";
 export * from "./knowledge/index.js";
+export * from "./knowledge/runtime.js";
 export * from "./knowledge/source-command-store.js";
 export * from "./operations/index.js";
 export * from "./publication/index.js";
+export * from "./repository-runtime/index.js";
 export * from "./scheduling/index.js";
+export * from "./triggers/index.js";

@@ -33,7 +33,9 @@ PBI-016 supplies the following typed API boundary. The console always renders se
 responses or an explicit unavailable/denied state; it never substitutes sample records:
 
 - Session control: `GET /v1/auth/session`, `GET /v1/auth/login`,
-  `POST /v1/auth/logout`, and `POST /v1/auth/session/workspace`.
+  `POST /v1/auth/login/password`, `POST /v1/auth/logout`, and
+  `POST /v1/auth/session/workspace`. Anonymous session responses advertise
+  whether deployment enables password, OAuth, or both methods.
 - Descriptors: `GET /v1/admin/descriptors/connectors` and
   `GET /v1/admin/descriptors/ai-providers`.
 - Resource-specific, cursor-paginated `GET /v1/admin/*` routes listed in
@@ -50,6 +52,12 @@ responses or an explicit unavailable/denied state; it never substitutes sample r
   edits. Dedicated source/schedule lifecycle routes accept only a server-read
   optimistic revision and `active`/`disabled` state, so the console never sends
   projection settings back to activate or disable a draft.
+- Managed policy-profile draft routes: `POST /v1/admin/retrieval-profiles/drafts`
+  and `POST /v1/admin/prompt-profiles/drafts`. The reusable form appears only
+  when the configuration-surface registry advertises the corresponding managed
+  `create_draft` workflow. It submits a bounded JSON object after rejecting
+  credential-shaped keys; it has no secret, connector, provider, model, or
+  runtime input.
 - Publication and webhook authoring routes:
   `POST /v1/admin/publication-profiles/drafts` and
   `POST /v1/admin/webhook-endpoints/drafts`, with their resource-specific
@@ -93,7 +101,8 @@ audit writes, and outcome reconciliation.
 
 ## Security and UX boundaries
 
-- OAuth/OIDC is API-managed. Tokens are never persisted or inspected by this app.
+- OAuth/OIDC and deployment-owned password login are API-managed. Tokens and
+  passwords are never persisted or inspected by this app beyond one sign-in request.
 - Requests include cookies, UI action/correlation IDs, idempotency headers for
   mutations, and an explicit passive-polling marker when used.
 - Descriptor forms are schema-driven without connector/provider name conditionals.
@@ -116,7 +125,9 @@ pnpm --filter @caseweaver/admin test
 pnpm --filter @caseweaver/admin build
 ```
 
-The API owns OIDC validation, cookie sessions, CSRF, effective permissions, workspace
-scope, idempotency, server-side audit records, and all secret handling. Configure an
-OIDC issuer and one trusted UI origin before starting the API; see the repository root
-README for a complete local run.
+The API owns OIDC validation, password verification, cookie sessions, CSRF, effective
+permissions, workspace scope, idempotency, server-side audit records, and all secret
+handling. Configure one trusted UI origin before starting the API. Password login is
+enabled by default for local self-hosting; OAuth is added when OIDC configuration is
+present and `ADMIN_DISABLE_LOGIN_AUTHENTICATION=true` makes OAuth the sole sign-in
+method.
