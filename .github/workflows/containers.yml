@@ -44,8 +44,11 @@ jobs:
             CREATED=${{ github.run_id }}
           cache-from: type=gha,scope=caseweaver-${{ matrix.target }}
           cache-to: type=gha,mode=max,scope=caseweaver-${{ matrix.target }}
-          sbom: true
-          provenance: mode=max
+          # `load` uses Docker's single-image exporter, which cannot carry an
+          # attested manifest list. This is a non-publishing smoke build; the
+          # tag-gated release job below pushes the SBOM and provenance.
+          sbom: false
+          provenance: false
       - name: Verify image process user and identity
         run: docker image inspect caseweaver-${{ matrix.target }}:ci --format '{{.Id}} {{.Config.User}}'
 

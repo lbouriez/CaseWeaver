@@ -89,6 +89,11 @@ after the local Compose smoke completes, then a clean job pulls each release ima
 Operators must use an immutable `image@sha256:...` reference in production, never a
 mutable release tag.
 
+Pull-request and `main` image checks load a single local Docker image so they can
+verify the final process identity. They intentionally do not attach SBOM/provenance
+there because Docker's local image exporter cannot load an attested manifest list. The
+tag-gated publishing job pushes the release image with both attestations enabled.
+
 `compose.production.yml` expects explicit pinned values for
 `CASEWEAVER_MIGRATION_IMAGE`, `CASEWEAVER_API_IMAGE`,
 `CASEWEAVER_WORKER_IMAGE`, `CASEWEAVER_SCHEDULER_IMAGE`,
