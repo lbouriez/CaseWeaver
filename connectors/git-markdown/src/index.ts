@@ -7,6 +7,7 @@ import type { GitMarkdownSettings } from "./config.js";
 import type { GitMarkdownKnowledgeSource } from "./git-markdown-source.js";
 
 export * from "./administration-descriptor.js";
+export * from "./administration-test.js";
 export * from "./config.js";
 export * from "./fakes.js";
 export * from "./git-markdown-source.js";

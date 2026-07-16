@@ -15,6 +15,7 @@ import { useApiClient } from "../api/context.js";
 import type {
   AdminListItem,
   ConfigurationDescriptor,
+  ConnectorDraftTestOperation,
 } from "../api/contracts.js";
 import { ApiFailure } from "../components/api-failure.js";
 import { DescriptorForm } from "../components/descriptor-form.js";
@@ -35,6 +36,9 @@ export function DescriptorCatalog({
   const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState<unknown>();
   const [saved, setSaved] = useState<string>();
+  const [testOperations, setTestOperations] =
+    useState<readonly ConnectorDraftTestOperation[]>();
+  const [testUnavailable, setTestUnavailable] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -67,6 +71,31 @@ export function DescriptorCatalog({
   const selected = descriptors?.find(
     (descriptor) => descriptor.type === selectedType,
   );
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setTestOperations(undefined);
+    setTestUnavailable(false);
+    if (
+      kind !== "connector" ||
+      selected === undefined ||
+      selected.supportedTestOperations.length === 0
+    ) {
+      setTestOperations([]);
+      return () => controller.abort();
+    }
+    void client
+      .connectorDraftTestOperations(selected.type, controller.signal)
+      .then(setTestOperations)
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setTestOperations([]);
+          setTestUnavailable(true);
+        }
+      });
+    return () => controller.abort();
+  }, [client, kind, selected]);
+
   const selectDescriptor = (type: string) => {
     const next = descriptors?.find((descriptor) => descriptor.type === type);
     setSelectedType(type);
@@ -130,7 +159,14 @@ export function DescriptorCatalog({
             {saved === undefined ? null : (
               <Alert severity="success">{saved}</Alert>
             )}
+            {testUnavailable ? (
+              <Alert severity="info">
+                Connector configuration tests are unavailable until the server
+                composes a safe operation for this descriptor.
+              </Alert>
+            ) : null}
             <DescriptorForm
+              key={selected.type}
               descriptor={selected}
               secretReferences={secretReferences ?? []}
               onSubmit={async (settings) => {
@@ -144,6 +180,31 @@ export function DescriptorCatalog({
                 });
                 setSaved(`Draft ${draft.label} is awaiting server validation.`);
               }}
+              {...(kind === "connector" && testOperations !== undefined
+                ? {
+                    testOperations,
+                    onPreviewTest: (
+                      operation: string,
+                      settings: Readonly<Record<string, unknown>>,
+                    ) =>
+                      client.previewConnectorDraftTest(
+                        selected.type,
+                        operation,
+                        settings,
+                      ),
+                    onRunTest: (
+                      operation: string,
+                      settings: Readonly<Record<string, unknown>>,
+                      confirmationId: string,
+                    ) =>
+                      client.runConnectorDraftTest(
+                        selected.type,
+                        operation,
+                        settings,
+                        confirmationId,
+                      ),
+                  }
+                : {})}
               submitLabel="Create server-validated draft"
             />
           </>

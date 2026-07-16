@@ -71,6 +71,11 @@ Prisma migrations followed by the pg-boss queue migration before application rol
 allowed to start. It is therefore suitable for exercising the actual UI/API/worker
 boundary, but is not a production deployment.
 
+The API image includes the Git CLI because the Git/Markdown connector's optional
+server-side `connector.test` and runtime repository adapter need it. The browser never
+executes Git or receives repository credentials; the container check is bounded and
+returns only a safe status through the API.
+
 ## Published-image production topology
 
 The `v*` release workflow publishes all seven targets to:

@@ -94,3 +94,13 @@ allows the requested capability, and every retained opaque credential locator re
 active in that workspace. It permits an explicitly pinned historical immutable version
 for durable work. It has no cache and never resolves a secret or sends settings/locators
 to an API, audit, log, diagnostic, or trace boundary.
+
+`PostgresConnectorDraftTestStore` persists the equivalent bounded flow for a
+candidate connector configuration that has not been saved. Its confirmation,
+claim, and result tables retain only workspace/principal/session scope, safe
+descriptor identity, SHA-256 candidate digest, idempotency digest, expiry, and
+terminal status. PostgreSQL guards make confirmations (except their one-time
+consumption), completed claims, and results append-only. Preview issuance and
+terminal result writes each share a transaction with their authoritative audit;
+candidate settings, secret registrations/locators, URL values, remote response
+data, and exceptions are never stored.

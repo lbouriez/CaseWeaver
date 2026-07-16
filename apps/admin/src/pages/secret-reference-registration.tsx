@@ -11,6 +11,7 @@ import { useState } from "react";
 
 import { useApiClient } from "../api/context.js";
 import { ApiFailure } from "../components/api-failure.js";
+import { DescriptorFieldHelp } from "../components/descriptor-field-help.js";
 
 /**
  * Registers an external-secret locator only. It intentionally offers no field
@@ -66,19 +67,38 @@ export function SecretReferenceRegistration({
       >
         <Box>
           <Typography variant="overline">Secret references</Typography>
-          <Typography variant="h5">Register an external reference</Typography>
+          <Typography variant="h5">Register where a secret lives</Typography>
           <Typography color="text.secondary" variant="body2">
-            Enter an opaque locator in your configured secret backend, never a
-            password, token, or credential value. The locator is retained only
-            by the API and is never displayed by this console.
+            Register a pointer to a secret that you have already provisioned for
+            the API or worker. Never paste the password, token, or other
+            credential value here. The console sends the pointer once; later
+            forms see only its generated registration ID.
           </Typography>
         </Box>
+        <Alert severity="info">
+          The open-source runtime included with CaseWeaver resolves environment
+          references in the form <code>env:UPPERCASE_NAME</code>. For example,
+          register <code>env:GITHUB_TOKEN</code> for a private Git repository or{" "}
+          <code>env:JITBIT_API_TOKEN</code> for Jitbit, then provide the actual
+          value only to the API/worker deployment environment. A deployment can
+          supply a different server-side resolver, but the browser never
+          receives the secret value or its resolved location.
+        </Alert>
         {error === undefined ? null : <ApiFailure error={error} />}
         {saved === undefined ? null : <Alert severity="success">{saved}</Alert>}
+        <Stack direction="row" spacing={1} sx={{ alignItems: "center" }}>
+          <Typography variant="subtitle2">External secret reference</Typography>
+          <DescriptorFieldHelp
+            description="This is an opaque server-side locator, not a password or token. In the bundled runtime use env: followed by an uppercase environment-variable name."
+            examples={["env:GITHUB_TOKEN", "env:JITBIT_API_TOKEN"]}
+            label="External secret reference"
+            onUseExample={setReference}
+          />
+        </Stack>
         <TextField
           autoComplete="off"
           fullWidth
-          helperText="For example, a scheme-qualified reference accepted by your secret backend."
+          helperText="For the bundled runtime: env:UPPERCASE_NAME. The actual secret belongs in the API/worker environment, never in this form."
           label="External secret reference"
           onChange={(event) => setReference(event.target.value)}
           required

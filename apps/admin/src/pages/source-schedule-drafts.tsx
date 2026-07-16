@@ -309,7 +309,9 @@ export function SourceScheduleDrafts({
               <Typography color="text.secondary" variant="body2">
                 The API validates the selected active connector capability and
                 collection workspace, text-profile revisions, and a hard budget
-                before storing an immutable draft.
+                before storing an immutable draft. Creating a draft does not
+                contact a connector, schedule work, or ingest content; use the
+                lifecycle control only when it is ready to activate.
               </Typography>
             </Box>
             {sourceError === undefined ? null : (
@@ -355,6 +357,7 @@ export function SourceScheduleDrafts({
             </TextField>
             <TextField
               fullWidth
+              helperText="Collections are created and maintained in Knowledge & Analysis. Select an existing workspace-scoped collection here."
               label="Knowledge collection"
               onChange={(event) => setCollectionId(event.target.value)}
               required

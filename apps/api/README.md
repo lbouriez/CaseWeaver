@@ -53,6 +53,23 @@ never connector, collection, filters, or schedule settings. An enabled schedule 
 reference an enabled source; disabling a source with enabled schedules is conflict-safe
 and requires those schedules to be disabled first.
 
+`POST /v1/admin/collections` creates a workspace-scoped immutable vector-space
+identity. It accepts an active embedding-binding aggregate ID plus the
+deployment-selected compatibility profile and vector dimension; the API resolves
+and pins the binding's active immutable version inside the same PostgreSQL
+transaction as idempotency and the authoritative audit record. A collection is
+never silently rebound when an AI binding changes.
+
+Connector configuration tests use the typed
+`/v1/admin/connector-descriptors/:type/draft-tests` read, preview, and
+execution routes. Composition, rather than the UI, registers each bounded,
+read-only operation. The API validates a candidate using the owning connector,
+replaces all candidate settings and secret locators with a SHA-256 digest before
+issuing a short-lived session-bound confirmation, and returns only a terminal
+status. Preview/result persistence and its server-owned audit event are atomic;
+remote response data, URLs, credentials, locator values, and exceptions do not
+enter browser DTOs, audit data, or diagnostics.
+
 Publication profiles, webhook endpoints, and platform links have their own draft,
 lifecycle, and public-link routes. A webhook draft never becomes public until its
 successor configuration activates; public ingress resolves the endpoint's opaque ID and

@@ -40,7 +40,16 @@ responses or an explicit unavailable/denied state; it never substitutes sample r
   `POST /v1/auth/session/workspace`. Anonymous session responses advertise
   whether deployment enables password, OAuth, or both methods.
 - Descriptors: `GET /v1/admin/descriptors/connectors` and
-  `GET /v1/admin/descriptors/ai-providers`.
+  `GET /v1/admin/descriptors/ai-providers`. Safe descriptor schema metadata
+  controls field help and examples, plus reusable `structured_repository` and
+  `git_reference` inputs with an advanced JSON fallback; no connector or
+  provider name changes the form logic.
+- Connector draft-test routes: `GET
+  /v1/admin/connector-descriptors/:type/draft-tests`, followed by an audited
+  `POST` preview and confirmed execution under that descriptor/type operation.
+  A preview is required before an unpersisted configuration test can run. The
+  resulting DTO is bounded status only: no connector response, endpoint,
+  secret, or runtime detail reaches the browser.
 - Resource-specific, cursor-paginated `GET /v1/admin/*` routes listed in
   `src/api/contracts.ts`, including redacted secret-reference metadata,
   integrations, AI, knowledge, publication, operations, access, and platform
@@ -111,6 +120,16 @@ audit writes, and outcome reconciliation.
 - Descriptor forms are schema-driven without connector/provider name conditionals.
   Secret slots are generic selectors of redacted, active server registrations;
   they are never credential inputs or returned values.
+- Collections are authored in the Knowledge & Analysis collections workflow;
+  integration-source drafts can only select an existing workspace-scoped
+  collection. Collection creation selects an active embedding-role binding, then
+  asks the operator for that deployment's documented immutable compatibility
+  profile and vector dimensions; the console intentionally does not assume a
+  provider, model, or dimension.
+- Small circular information controls expose descriptor-owned help and safe
+  examples without hiding input meaning. The external-secret reference form
+  explains the bundled `env:UPPERCASE_NAME` resolver and examples such as
+  `env:GITHUB_TOKEN`; it never offers a secret-value input.
 - Workspace selection is derived from the API session's memberships and sent through
   the CSRF-protected session-switch endpoint. The browser cannot submit a role,
   permission, or arbitrary workspace grant.

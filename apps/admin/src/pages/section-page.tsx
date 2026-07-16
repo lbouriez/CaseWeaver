@@ -1,5 +1,7 @@
 import {
+  Alert,
   Box,
+  Button,
   CircularProgress,
   Divider,
   List,
@@ -27,6 +29,7 @@ import { AiConfigurationAuthoring } from "./ai-configuration-authoring.js";
 import { ControlPlaneAuthoring } from "./control-plane-authoring.js";
 import { DescriptorCatalog } from "./descriptor-catalog.js";
 import { DiagnosticExportPanel } from "./diagnostic-export.js";
+import { KnowledgeCollectionAuthoring } from "./knowledge-collection-authoring.js";
 import { PrivacyPurgeDialog } from "./privacy-purge-dialog.js";
 import { RoleAssignmentEditor } from "./role-assignment-editor.js";
 import { SecretReferenceRegistration } from "./secret-reference-registration.js";
@@ -471,6 +474,7 @@ export function SectionPage({
   const aiRoleDefaultSurface = surfaceFor("ai-role-defaults");
   const aiPricingSurface = surfaceFor("ai-pricing-overrides");
   const aiBudgetSurface = surfaceFor("ai-budgets");
+  const collectionSurface = surfaceFor("collections");
   const retrievalProfileSurface = surfaceFor("retrieval-profiles");
   const promptProfileSurface = surfaceFor("prompt-profiles");
   const platformSurface = surfaceFor("platform");
@@ -492,6 +496,29 @@ export function SectionPage({
           {lead}
         </Typography>
       </Box>
+      {section === "knowledge" ? (
+        <Alert
+          action={
+            <Button component="a" href="#/collections" size="small">
+              Open collections
+            </Button>
+          }
+          severity="info"
+        >
+          Create a workspace-scoped collection here, then use it in an
+          integration source draft. The Collections screen lists the immutable
+          spaces already created in this workspace.
+        </Alert>
+      ) : null}
+      {section === "knowledge" ? (
+        <KnowledgeCollectionAuthoring
+          enabled={
+            collectionSurface?.mode === "managed" &&
+            collectionSurface.workflows.includes("create")
+          }
+          onCreated={() => refresh()}
+        />
+      ) : null}
       {section === "integrations" || section === "ai" ? (
         <SecretReferenceRegistration
           onRegistered={() =>

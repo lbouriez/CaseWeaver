@@ -106,6 +106,12 @@ WORKDIR /opt/caseweaver/api
 
 EXPOSE 3000
 
+# The API performs the bounded, read-only Git connector validation requested
+# from the operator console; worker and API use the same trusted Git binary.
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY --from=api-build --chown=node:node /opt/caseweaver/api ./
 COPY --chown=node:node deploy/docker/container-entrypoint.sh /usr/local/bin/caseweaver-entrypoint
 

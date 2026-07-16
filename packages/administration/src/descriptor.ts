@@ -31,6 +31,7 @@ const stableIdentifier = z
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u);
 const safeText = z.string().trim().min(1).max(2_000);
 const safeUrl = z.url().max(2_000);
+const safeExample = z.string().trim().min(1).max(2_000);
 
 export type SafeJsonSchema = Readonly<{
   readonly type?:
@@ -42,6 +43,13 @@ export type SafeJsonSchema = Readonly<{
     | "object";
   readonly title?: string;
   readonly description?: string;
+  /** Safe operator-facing examples. They are documentation only, never draft data. */
+  readonly examples?: readonly string[];
+  /**
+   * Optional generic presentation hint. The console may enhance this input but
+   * must retain its structured JSON editor as a compatible fallback.
+   */
+  readonly inputKind?: "structured_repository" | "git_reference";
   readonly format?: string;
   readonly enum?: readonly (string | number | boolean | null)[];
   readonly properties?: Readonly<Record<string, SafeJsonSchema>>;
@@ -58,6 +66,8 @@ const safeJsonSchema: z.ZodType<SafeJsonSchema> = z.lazy(() =>
         .optional(),
       title: z.string().trim().min(1).max(160).optional(),
       description: z.string().trim().min(1).max(2_000).optional(),
+      examples: z.array(safeExample).min(1).max(5).optional(),
+      inputKind: z.enum(["structured_repository", "git_reference"]).optional(),
       format: z.string().trim().min(1).max(80).optional(),
       enum: z
         .array(

@@ -95,6 +95,14 @@ const sourceDraft = z
     deletionBehavior: z.enum(["tombstone", "retain"]),
   })
   .strict();
+const collectionCreate = z
+  .object({
+    collectionId: identifier,
+    embeddingBindingId: identifier,
+    embeddingProfileVersion: identifier,
+    dimensions: z.number().int().min(1).max(100_000),
+  })
+  .strict();
 const scheduleCadence = z.discriminatedUnion("kind", [
   z
     .object({
@@ -388,6 +396,10 @@ export interface AdministrationRouteOperations {
     input: z.infer<typeof sourceDraft>,
     context: AdminRequestContext,
   ): Promise<unknown>;
+  createKnowledgeCollection?(
+    input: z.infer<typeof collectionCreate>,
+    context: AdminRequestContext,
+  ): Promise<unknown>;
   createKnowledgeScheduleDraft(
     input: z.infer<typeof scheduleDraft>,
     context: AdminRequestContext,
@@ -524,6 +536,27 @@ export interface AdministrationRouteOperations {
     input: Readonly<{
       readonly providerInstanceId: string;
       readonly testOperation: string;
+      readonly confirmationId: string;
+    }>,
+    context: AdminRequestContext,
+  ): Promise<unknown>;
+  connectorDraftTestOperations?(
+    descriptorType: string,
+    context: AdminRequestContext,
+  ): Promise<unknown>;
+  previewConnectorDraftTest?(
+    input: Readonly<{
+      readonly descriptorType: string;
+      readonly operation: string;
+      readonly settings: Readonly<Record<string, unknown>>;
+    }>,
+    context: AdminRequestContext,
+  ): Promise<unknown>;
+  runConnectorDraftTest?(
+    input: Readonly<{
+      readonly descriptorType: string;
+      readonly operation: string;
+      readonly settings: Readonly<Record<string, unknown>>;
       readonly confirmationId: string;
     }>,
     context: AdminRequestContext,
@@ -809,6 +842,29 @@ export function registerAdministrationRoutes(
   app.post("/v1/admin/ai/provider-instances/drafts", async (request, reply) =>
     createDraft("ai-provider", request, reply),
   );
+  app.post("/v1/admin/collections", async (request, reply) => {
+    const audit = invalidMutationAudit(
+      "admin.collection.create.invalid",
+      "configuration.manage",
+      "knowledge_collection",
+      "new",
+    );
+    if (!(await requireIdempotency(operations, request, reply, audit))) return;
+    const body = collectionCreate.safeParse(request.body);
+    if (!body.success)
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(audit, "request.invalid"),
+      );
+    if (operations.createKnowledgeCollection === undefined)
+      return failure(reply, 503, "service.unavailable");
+    return operations.createKnowledgeCollection(
+      body.data,
+      await operations.resolve(request, { mutation: true }),
+    );
+  });
   app.post("/v1/admin/knowledge-sources/drafts", async (request, reply) => {
     const audit = invalidMutationAudit(
       "admin.knowledgeSource.draft.create.invalid",
@@ -1380,6 +1436,113 @@ export function registerAdministrationRoutes(
         {
           providerInstanceId: params.data.id,
           testOperation: params.data.operation,
+          confirmationId: body.data.confirmationId,
+        },
+        await operations.resolve(request, { mutation: true }),
+      );
+    },
+  );
+  app.get(
+    "/v1/admin/connector-descriptors/:type/draft-tests",
+    async (request, reply) => {
+      const params = z
+        .object({ type: identifier })
+        .strict()
+        .safeParse(request.params);
+      if (!params.success)
+        return rejectInvalidRequest(
+          operations,
+          request,
+          reply,
+          invalidRequestAudit(
+            invalidReadAudit(
+              "admin.connectorDraftTest.operations.read",
+              "configuration.read",
+              "connector_descriptor",
+              "invalid",
+            ),
+            "request.invalid",
+          ),
+        );
+      if (operations.connectorDraftTestOperations === undefined)
+        return failure(reply, 503, "service.unavailable");
+      return operations.connectorDraftTestOperations(
+        params.data.type,
+        await operations.resolve(request, { mutation: false }),
+      );
+    },
+  );
+  app.post(
+    "/v1/admin/connector-descriptors/:type/draft-tests/:operation/previews",
+    async (request, reply) => {
+      const audit = invalidMutationAudit(
+        "admin.connectorDraftTest.preview.invalid",
+        "connector.manage",
+        "connector_descriptor",
+        "invalid",
+      );
+      if (!(await requireIdempotency(operations, request, reply, audit)))
+        return;
+      const params = z
+        .object({ type: identifier, operation: identifier })
+        .strict()
+        .safeParse(request.params);
+      const body = z
+        .object({ settings: draft.shape.settings })
+        .strict()
+        .safeParse(request.body);
+      if (!params.success || !body.success)
+        return rejectInvalidRequest(
+          operations,
+          request,
+          reply,
+          invalidRequestAudit(audit, "request.invalid"),
+        );
+      if (operations.previewConnectorDraftTest === undefined)
+        return failure(reply, 503, "service.unavailable");
+      return operations.previewConnectorDraftTest(
+        {
+          descriptorType: params.data.type,
+          operation: params.data.operation,
+          settings: body.data.settings,
+        },
+        await operations.resolve(request, { mutation: true }),
+      );
+    },
+  );
+  app.post(
+    "/v1/admin/connector-descriptors/:type/draft-tests/:operation/executions",
+    async (request, reply) => {
+      const audit = invalidMutationAudit(
+        "admin.connectorDraftTest.execute.invalid",
+        "connector.manage",
+        "connector_descriptor",
+        "invalid",
+      );
+      if (!(await requireIdempotency(operations, request, reply, audit)))
+        return;
+      const params = z
+        .object({ type: identifier, operation: identifier })
+        .strict()
+        .safeParse(request.params);
+      const body = z
+        .object({ settings: draft.shape.settings, confirmationId: identifier })
+        .strict()
+        .safeParse(request.body);
+      if (!params.success || !body.success)
+        return rejectInvalidRequest(
+          operations,
+          request,
+          reply,
+          invalidRequestAudit(audit, "request.invalid"),
+        );
+      if (operations.runConnectorDraftTest === undefined)
+        return failure(reply, 503, "service.unavailable");
+      return operations.runConnectorDraftTest(
+        {
+          descriptorType: params.data.type,
+          operation: params.data.operation,
+          settings: body.data.settings,
           confirmationId: body.data.confirmationId,
         },
         await operations.resolve(request, { mutation: true }),

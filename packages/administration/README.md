@@ -134,3 +134,12 @@ including server-only opaque secret-locator metadata. It is not an HTTP/API read
 settings, locator metadata, and resolved secret values must never enter browser state,
 DTOs, audit data, logs, traces, or errors. AI binding resolution remains exclusively in
 `@caseweaver/ai-execution` and is deliberately not duplicated by this connector port.
+
+`ConnectorDraftTestStore` is the provider-neutral contract for a bounded,
+unpersisted connector configuration test. Composition validates settings with
+the owning connector and supplies only a descriptor identity plus a candidate
+SHA-256 digest to the store. A short-lived, session-bound confirmation is
+one-use; an execution idempotency claim and bounded terminal outcome are
+durable. Implementations must atomically append the preview/result audit with
+the corresponding safe state and must never accept or retain settings, secret
+registration IDs/locators, credential values, remote URLs, responses, or errors.

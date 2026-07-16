@@ -25,6 +25,13 @@ completed administration control plane and production runtime host:
 - The UI includes permission-aware navigation, generic descriptor-driven connector and
   AI-provider draft forms, secret-reference redaction, operational resource views, and
   server-preview-required confirmation for costly/destructive commands.
+- A follow-up operator-usability pass adds small accessible information controls with
+  descriptor-owned explanations and safe examples, a structured remote/local Git
+  repository and Git-reference editor, a bounded auditable **Test before Create**
+  workflow for connector candidates, and Knowledge & Analysis collection authoring.
+  Collection creation pins an active embedding binding and asks for the deployment's
+  documented compatibility profile and vector dimension; it does not assume a provider,
+  model, or dimension.
 - `packages/administration`, PostgreSQL descriptor/configuration/version/outbox/session
   persistence, provider-neutral OIDC/PKCE, API-managed cookies/CSRF, dynamic descriptor
   registration, workspace-scoped redacted reads, mandatory server audit paths, and the
@@ -71,7 +78,8 @@ completed administration control plane and production runtime host:
 
 ## Remaining work
 
-None for PBI-016. PBI-017 continues separately with production TLS, backup/restore,
+None for PBI-016. The operator-usability follow-up is included in this completed
+delivery. PBI-017 continues separately with production TLS, backup/restore,
 vulnerability scanning, and provenance/attestation verification.
 
 ## Existing implementation references

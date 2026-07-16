@@ -10,6 +10,12 @@ The package exports safe administration discovery metadata for API composition. 
 validation remains in this package's configuration schema; descriptors never contain
 configured secret values, clients, filesystem state, or repository runtime state.
 
+Its composition-registered `connector.test` operation validates candidate settings
+with that same schema, resolves an optional server-side opaque token reference only
+for the check, and performs one bounded `GitRepository.inspect` read. It returns no
+repository path, URL, ref, commit, file, credential, or Git error; the administration
+API records only a safe terminal outcome.
+
 `GitMarkdownKnowledgeSource` accepts an injected `GitRepository`; it does not invoke a
 shell, Git executable, filesystem, or network client. The injected boundary must safely
 resolve configured local/remote repositories and return validated tree and blob data.

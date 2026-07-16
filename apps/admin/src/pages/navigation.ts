@@ -10,7 +10,7 @@ export const navigationSections: readonly NavigationSection[] = [
   {
     path: "/integrations",
     label: "Integrations",
-    kicker: "01 / intake",
+    kicker: "01 / sources",
     permissions: ["configuration.read"],
   },
   {

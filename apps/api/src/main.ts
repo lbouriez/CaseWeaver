@@ -72,6 +72,7 @@ import {
   registeredAiProviderDispatcher,
 } from "./modules/administration/ai-runtime.js";
 import { PostgresDescriptorConfigurationLifecycle } from "./modules/administration/configuration-lifecycle-action.js";
+import { createConnectorDraftTestRegistrations } from "./modules/administration/connector-draft-tests.js";
 import {
   AdministrationOperationDispatcher,
   digestIdempotencyKey,
@@ -300,6 +301,7 @@ export async function createApiRuntimeFromEnvironment(
       requestKnowledgeSourceSynchronization,
       providerCapabilityTests,
     },
+    env,
   );
   const app = buildApi({
     config,
@@ -380,6 +382,7 @@ async function createAdministrationOperations(
       readonly run: Pick<RunProviderCapabilityTest, "execute">;
     }>;
   }>,
+  environment: NodeJS.ProcessEnv,
 ): Promise<AdministrationApiOperations> {
   const oidc =
     config.oidc === undefined
@@ -433,6 +436,8 @@ async function createAdministrationOperations(
       persistence.descriptorRegistry.register(descriptor),
     ),
   );
+  const connectorDraftTestRegistrations =
+    createConnectorDraftTestRegistrations(environment);
   const secretReferences = new PostgresSecretReferenceLifecycle({
     unitOfWork: persistence.unitOfWork as typeof persistence.unitOfWork &
       PostgresTransactionLookup,
@@ -443,6 +448,111 @@ async function createAdministrationOperations(
       PostgresTransactionLookup,
     auditStore: persistence.auditStore,
   });
+  const createKnowledgeCollection = async (
+    input: Readonly<{
+      readonly workspaceId: string;
+      readonly collectionId: string;
+      readonly embeddingBindingId: string;
+      readonly embeddingProfileVersion: string;
+      readonly dimensions: number;
+      readonly context: import("./modules/administration/routes.js").AdminRequestContext;
+    }>,
+  ) =>
+    persistence.unitOfWork.transaction(async (transaction) => {
+      const database = (
+        persistence.unitOfWork as typeof persistence.unitOfWork &
+          PostgresTransactionLookup
+      ).get(transaction);
+      const keyDigest = digestIdempotencyKey(
+        input.context.idempotencyKey ?? input.context.requestId,
+      );
+      const requestDigest = sha256Base64Url(
+        canonicalizeConfiguration({
+          collectionId: input.collectionId,
+          embeddingBindingId: input.embeddingBindingId,
+          embeddingProfileVersion: input.embeddingProfileVersion,
+          dimensions: input.dimensions,
+        }),
+      );
+      const existing = await database.idempotencyRecord.findUnique({
+        where: {
+          workspaceId_operation_keyDigest: {
+            workspaceId: input.workspaceId,
+            operation: "admin.collection.create",
+            keyDigest,
+          },
+        },
+      });
+      if (existing !== null) {
+        if (existing.requestDigest !== requestDigest)
+          throw new IdempotencyConflictError();
+        return Object.freeze({ id: existing.resourceId });
+      }
+      const binding = await database.aiModelBinding.findUnique({
+        where: {
+          workspaceId_id: {
+            workspaceId: input.workspaceId,
+            id: input.embeddingBindingId,
+          },
+        },
+        select: { lifecycle: true, activeVersionId: true },
+      });
+      if (binding?.lifecycle !== "active" || binding.activeVersionId === null)
+        throw new Error("resource.notFound");
+      const version = await database.aiModelBindingVersion.findUnique({
+        where: {
+          workspaceId_id: {
+            workspaceId: input.workspaceId,
+            id: binding.activeVersionId,
+          },
+        },
+        select: { capabilities: true },
+      });
+      if (
+        version === null ||
+        !Array.isArray(version.capabilities) ||
+        !version.capabilities.includes("embedding")
+      ) {
+        throw new Error("resource.notFound");
+      }
+      await database.knowledgeCollection.create({
+        data: {
+          id: input.collectionId,
+          workspaceId: input.workspaceId,
+          embeddingBindingVersionId: binding.activeVersionId,
+          embeddingProfileVersion: input.embeddingProfileVersion,
+          dimensions: input.dimensions,
+        },
+      });
+      await database.idempotencyRecord.create({
+        data: {
+          workspaceId: input.workspaceId,
+          operation: "admin.collection.create",
+          keyDigest,
+          requestDigest,
+          resourceId: input.collectionId,
+        },
+      });
+      await persistence.auditStore.append(transaction, {
+        id: auditEventId(randomUUID()),
+        workspaceId: workspaceId(input.workspaceId),
+        actorPrincipalId: principalId(input.context.principalId),
+        action: "admin.collection.created",
+        targetId: input.collectionId,
+        targetType: "knowledge_collection",
+        permission: "configuration.manage",
+        outcome: "succeeded",
+        origin: "admin_ui",
+        occurredAt: utcInstant(new Date()),
+        requestId: input.context.requestId,
+        correlationId: input.context.correlationId,
+        ...(input.context.uiActionId === undefined
+          ? {}
+          : { uiActionId: input.context.uiActionId }),
+        idempotencyKeyDigest: keyDigest,
+      });
+      return Object.freeze({ id: input.collectionId });
+    });
   const createKnowledgeSourceDraft = async (
     input: Readonly<{
       readonly workspaceId: string;
@@ -1686,6 +1796,7 @@ async function createAdministrationOperations(
     },
     dispatcher,
     createKnowledgeSourceDraft,
+    createKnowledgeCollection,
     createKnowledgeScheduleDraft,
     transitionKnowledgeSource,
     transitionKnowledgeSchedule,
@@ -1704,6 +1815,61 @@ async function createAdministrationOperations(
     createAiPriceOverride,
     replaceAiBudget,
     providerCapabilityTests: operationUseCases.providerCapabilityTests,
+    connectorDraftTests: {
+      store: persistence.connectorDraftTestStore,
+      available: (descriptorType) =>
+        Object.freeze(
+          connectorDraftTestRegistrations
+            .filter((entry) => entry.descriptorType === descriptorType)
+            .map(({ operation }) => Object.freeze({ operation })),
+        ),
+      prepare: async ({
+        workspaceId: candidateWorkspaceId,
+        descriptorType,
+        operation,
+        settings,
+      }) => {
+        const registration = runtimeDescriptorRegistration(
+          "connector",
+          descriptorType,
+        );
+        const test = connectorDraftTestRegistrations.find(
+          (entry) =>
+            entry.descriptorType === descriptorType &&
+            entry.descriptorVersion === registration?.descriptor.version &&
+            entry.operation === operation,
+        );
+        if (
+          registration === undefined ||
+          test === undefined ||
+          !registration.descriptor.supportedTestOperations.includes(operation)
+        ) {
+          throw new Error("resource.notFound");
+        }
+        const validated = await persistence.unitOfWork.transaction(
+          async (transaction) =>
+            registration.validateSettings(
+              await resolveRegisteredSecretReferences({
+                transaction,
+                persistence,
+                workspaceId: candidateWorkspaceId,
+                descriptor: registration.descriptor,
+                settings: {
+                  ...settings,
+                  connectorInstanceId: "connector-test",
+                },
+              }),
+            ),
+        );
+        return Object.freeze({
+          descriptorVersion: registration.descriptor.version,
+          candidateDigest: createHash("sha256")
+            .update(canonicalizeConfiguration(validated), "utf8")
+            .digest("hex"),
+          execute: (signal: AbortSignal) => test.execute(validated, signal),
+        });
+      },
+    },
     replaceWorkspacePrincipalRoles: new ReplaceWorkspacePrincipalRoles(
       persistence.workspaceRoleAssignmentStore,
     ),

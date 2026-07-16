@@ -92,6 +92,12 @@ function createOperations(): AdministrationRouteOperations {
       version: "1",
       fields: {},
     })),
+    createKnowledgeCollection: vi.fn(async () => ({
+      id: "support-knowledge",
+      label: "support-knowledge",
+      status: "active",
+      fields: {},
+    })),
     createKnowledgeScheduleDraft: vi.fn(async () => ({
       id: "schedule-1",
       label: "Hourly synchronization",
@@ -148,6 +154,34 @@ function createOperations(): AdministrationRouteOperations {
       outcome: "succeeded",
       idempotency: "created",
       completedAt: "2026-07-15T12:01:00.000Z",
+    })),
+    connectorDraftTestOperations: vi.fn(async () => ({
+      items: [
+        {
+          operation: "connector.test",
+          requiresConfirmation: true,
+          requiresIdempotencyKey: true,
+        },
+      ],
+    })),
+    previewConnectorDraftTest: vi.fn(async () => ({
+      descriptorType: "git-markdown",
+      descriptorVersion: "1",
+      testOperation: "connector.test",
+      canConfirm: true,
+      confirmationId: "connector-confirmation-1",
+      confirmation: "Run connector connection test",
+      impact: "One bounded read-only server check will run.",
+      expiresAt: "2026-07-15T12:05:00.000Z",
+    })),
+    runConnectorDraftTest: vi.fn(async () => ({
+      id: "connector-test-1",
+      descriptorType: "git-markdown",
+      descriptorVersion: "1",
+      testOperation: "connector.test",
+      outcome: "succeeded",
+      completedAt: "2026-07-15T12:01:00.000Z",
+      idempotency: "created",
     })),
     replaceWorkspacePrincipalRoles: vi.fn(async () => ({
       id: "principal-2",
@@ -699,6 +733,34 @@ describe("administration API routes", () => {
     await built.app.close();
   });
 
+  it("creates an immutable collection through its resource-specific, idempotent route", async () => {
+    const built = createApp();
+    const response = await built.app.inject({
+      method: "POST",
+      url: "/v1/admin/collections",
+      headers: { "idempotency-key": "collection-create-request-0001" },
+      payload: {
+        collectionId: "support-knowledge",
+        embeddingBindingId: "embedding-binding-1",
+        embeddingProfileVersion: "profile-v1",
+        dimensions: 3,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(built.operations.createKnowledgeCollection).toHaveBeenCalledWith(
+      {
+        collectionId: "support-knowledge",
+        embeddingBindingId: "embedding-binding-1",
+        embeddingProfileVersion: "profile-v1",
+        dimensions: 3,
+      },
+      context,
+    );
+    expect(response.body).not.toMatch(/secret|token|locator|settings/iu);
+    await built.app.close();
+  });
+
   it("rejects source and schedule drafts before they reach an operation", async () => {
     const built = createApp();
     const source = await built.app.inject({
@@ -917,6 +979,60 @@ describe("administration API routes", () => {
         confirmationId: "confirmation-1",
       },
       context,
+    );
+    await built.app.close();
+  });
+
+  it("keeps connector candidate tests server-owned, confirmation-bound, and non-disclosing", async () => {
+    const built = createApp();
+    const settings = {
+      repository: { kind: "remote", url: "https://example.test/docs.git" },
+      ref: { kind: "branch", name: "main" },
+      gitTokenReference: "secret-registration-1",
+    };
+    const listed = await built.app.inject({
+      method: "GET",
+      url: "/v1/admin/connector-descriptors/git-markdown/draft-tests",
+    });
+    const preview = await built.app.inject({
+      method: "POST",
+      url: "/v1/admin/connector-descriptors/git-markdown/draft-tests/connector.test/previews",
+      headers: { "idempotency-key": "connector-test-preview-0001" },
+      payload: { settings },
+    });
+    const execution = await built.app.inject({
+      method: "POST",
+      url: "/v1/admin/connector-descriptors/git-markdown/draft-tests/connector.test/executions",
+      headers: { "idempotency-key": "connector-test-run-0001" },
+      payload: { settings, confirmationId: "connector-confirmation-1" },
+    });
+
+    expect(listed.statusCode).toBe(200);
+    expect(preview.statusCode).toBe(200);
+    expect(execution.statusCode).toBe(200);
+    expect(built.operations.connectorDraftTestOperations).toHaveBeenCalledWith(
+      "git-markdown",
+      context,
+    );
+    expect(built.operations.previewConnectorDraftTest).toHaveBeenCalledWith(
+      {
+        descriptorType: "git-markdown",
+        operation: "connector.test",
+        settings,
+      },
+      context,
+    );
+    expect(built.operations.runConnectorDraftTest).toHaveBeenCalledWith(
+      {
+        descriptorType: "git-markdown",
+        operation: "connector.test",
+        settings,
+        confirmationId: "connector-confirmation-1",
+      },
+      context,
+    );
+    expect(`${preview.body}${execution.body}`).not.toMatch(
+      /example\.test|secret-registration|repository|settings|token/iu,
     );
     await built.app.close();
   });

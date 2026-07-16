@@ -9,6 +9,7 @@ import type { JitbitAnalysisDestination } from "./jitbit-destination.js";
 import type { JitbitKnowledgeSource } from "./jitbit-knowledge-source.js";
 
 export * from "./administration-descriptor.js";
+export * from "./administration-test.js";
 export * from "./client.js";
 export * from "./config.js";
 export * from "./fakes.js";

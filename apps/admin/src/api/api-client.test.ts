@@ -277,6 +277,94 @@ describe("CaseWeaverApiClient", () => {
     ]);
   });
 
+  it("uses explicit two-stage connector draft-test endpoints without exposing secret material", async () => {
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          items: [
+            {
+              operation: "connector.test",
+              requiresConfirmation: true,
+              requiresIdempotencyKey: true,
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          descriptorType: "fixture-source",
+          descriptorVersion: "v1",
+          testOperation: "connector.test",
+          canConfirm: true,
+          confirmationId: "confirmation-1",
+          impact: "The server will run one bounded test.",
+          expiresAt: "2026-07-16T12:05:00.000Z",
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: "connector-test-1",
+          descriptorType: "fixture-source",
+          descriptorVersion: "v1",
+          testOperation: "connector.test",
+          outcome: "succeeded",
+          completedAt: "2026-07-16T12:01:00.000Z",
+          idempotency: "created",
+        }),
+      );
+    const client = new CaseWeaverApiClient(
+      { apiBaseUrl: "https://api.example.test", uiTitle: "Control" },
+      { fetchImplementation },
+    );
+    const settings = {
+      endpoint: "https://connector.example.test",
+      credentialReference: "registration-1",
+    };
+
+    await expect(
+      client.connectorDraftTestOperations("fixture-source"),
+    ).resolves.toEqual([
+      {
+        operation: "connector.test",
+        requiresConfirmation: true,
+        requiresIdempotencyKey: true,
+      },
+    ]);
+    await client.previewConnectorDraftTest(
+      "fixture-source",
+      "connector.test",
+      settings,
+    );
+    await client.runConnectorDraftTest(
+      "fixture-source",
+      "connector.test",
+      settings,
+      "confirmation-1",
+    );
+
+    expect(fetchImplementation.mock.calls.map((call) => call[0])).toEqual([
+      new URL(
+        "https://api.example.test/v1/admin/connector-descriptors/fixture-source/draft-tests",
+      ),
+      new URL(
+        "https://api.example.test/v1/admin/connector-descriptors/fixture-source/draft-tests/connector.test/previews",
+      ),
+      new URL(
+        "https://api.example.test/v1/admin/connector-descriptors/fixture-source/draft-tests/connector.test/executions",
+      ),
+    ]);
+    expect(
+      JSON.parse(String(fetchImplementation.mock.calls[1]?.[1]?.body)),
+    ).toEqual({ settings });
+    expect(
+      JSON.parse(String(fetchImplementation.mock.calls[2]?.[1]?.body)),
+    ).toEqual({ settings, confirmationId: "confirmation-1" });
+    expect(JSON.stringify(fetchImplementation.mock.calls)).not.toMatch(
+      /vault:|secret[-_ ]?value|password|actual[-_ ]?token/iu,
+    );
+  });
+
   it("submits resource-specific source and source-version-pinned schedule drafts without client secrets", async () => {
     const fetchImplementation = vi
       .fn<typeof fetch>()
@@ -335,6 +423,43 @@ describe("CaseWeaverApiClient", () => {
     expect(fetchImplementation.mock.calls[1]?.[0]).toEqual(
       new URL("https://api.example.test/v1/admin/schedules/drafts"),
     );
+    expect(JSON.stringify(fetchImplementation.mock.calls)).not.toMatch(
+      /secret|token|password|locator/iu,
+    );
+  });
+
+  it("creates a collection through its dedicated, audited API route", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        id: "support-knowledge",
+        label: "support-knowledge",
+        status: "active",
+        fields: {},
+      }),
+    );
+    const client = new CaseWeaverApiClient(
+      { apiBaseUrl: "https://api.example.test", uiTitle: "Control" },
+      { fetchImplementation },
+    );
+
+    await client.createKnowledgeCollection({
+      collectionId: "support-knowledge",
+      embeddingBindingId: "embedding-binding-1",
+      embeddingProfileVersion: "embedding-v1",
+      dimensions: 1536,
+    });
+
+    expect(fetchImplementation.mock.calls[0]?.[0]).toEqual(
+      new URL("https://api.example.test/v1/admin/collections"),
+    );
+    expect(
+      JSON.parse(String(fetchImplementation.mock.calls[0]?.[1]?.body)),
+    ).toEqual({
+      collectionId: "support-knowledge",
+      embeddingBindingId: "embedding-binding-1",
+      embeddingProfileVersion: "embedding-v1",
+      dimensions: 1536,
+    });
     expect(JSON.stringify(fetchImplementation.mock.calls)).not.toMatch(
       /secret|token|password|locator/iu,
     );

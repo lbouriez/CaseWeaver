@@ -3,6 +3,7 @@ export * from "./auth.js";
 export * from "./configuration.js";
 export * from "./configuration-inspection.js";
 export * from "./configuration-lifecycle.js";
+export * from "./connector-draft-test.js";
 export * from "./descriptor.js";
 export * from "./diagnostics-export.js";
 export * from "./dto.js";

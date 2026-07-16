@@ -455,6 +455,141 @@ describe("AdministrationApiOperations audit boundary", () => {
     );
   });
 
+  it("binds a connector candidate test to a server-side digest, one-use confirmation, and atomic terminal audit", async () => {
+    const append = vi.fn(async () => undefined);
+    const execute = vi.fn(async () => undefined);
+    const prepare = vi.fn(async () => ({
+      descriptorVersion: "1",
+      candidateDigest: "candidate-sha256",
+      execute,
+    }));
+    const issueAndRecord = vi.fn(async () => ({
+      confirmationId: "confirmation-1",
+      confirmation: "Run connector connection test",
+      impact: "One bounded read-only check will run.",
+      expiresAt: "2026-07-15T12:05:00.000Z",
+    }));
+    const consumeAndClaim = vi.fn(async () => ({
+      kind: "acquired" as const,
+      claimId: "claim-1",
+    }));
+    const completeAndRecord = vi.fn(async () => ({
+      id: "claim-1",
+      outcome: "succeeded" as const,
+      completedAt: "2026-07-15T12:01:00.000Z",
+    }));
+    const api = operations({
+      unitOfWork: {
+        transaction: async (operation: (value: unknown) => unknown) =>
+          operation({}),
+      },
+      auditStore: { append },
+      connectorDraftTests: {
+        available: () => [{ operation: "connector.test" }],
+        prepare,
+        store: { issueAndRecord, consumeAndClaim, completeAndRecord },
+      },
+    });
+    const context = {
+      principalId: "principal-1",
+      workspaceId: "workspace-1",
+      sessionId: "session-1",
+      permissions: ["configuration.read", "connector.manage"],
+      requestId: "request-1",
+      correlationId: "correlation-1",
+      idempotencyKey: "browser-idempotency-key",
+      requestMode: "user" as const,
+    };
+    const candidate = {
+      repository: {
+        kind: "remote",
+        url: "https://private.example.test/docs.git",
+      },
+      gitTokenReference: "secret-registration-1",
+    };
+
+    await expect(
+      api.connectorDraftTestOperations("git-markdown", context),
+    ).resolves.toEqual({
+      items: [
+        {
+          operation: "connector.test",
+          requiresConfirmation: true,
+          requiresIdempotencyKey: true,
+        },
+      ],
+    });
+    const preview = await api.previewConnectorDraftTest(
+      {
+        descriptorType: "git-markdown",
+        operation: "connector.test",
+        settings: candidate,
+      },
+      context,
+    );
+    const result = await api.runConnectorDraftTest(
+      {
+        descriptorType: "git-markdown",
+        operation: "connector.test",
+        settings: candidate,
+        confirmationId: "confirmation-1",
+      },
+      context,
+    );
+
+    expect(preview).toEqual(
+      expect.objectContaining({
+        descriptorType: "git-markdown",
+        descriptorVersion: "1",
+        testOperation: "connector.test",
+        canConfirm: true,
+        confirmationId: "confirmation-1",
+      }),
+    );
+    expect(result).toEqual({
+      id: "claim-1",
+      descriptorType: "git-markdown",
+      descriptorVersion: "1",
+      testOperation: "connector.test",
+      outcome: "succeeded",
+      completedAt: "2026-07-15T12:01:00.000Z",
+      idempotency: "created",
+    });
+    expect(prepare).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceId: "workspace-1",
+        settings: candidate,
+      }),
+    );
+    expect(issueAndRecord).toHaveBeenCalledWith(
+      expect.objectContaining({
+        identity: expect.objectContaining({
+          candidateDigest: "candidate-sha256",
+        }),
+        audit: expect.objectContaining({
+          action: "admin.connectorDraftTest.preview",
+          outcome: "succeeded",
+        }),
+      }),
+    );
+    expect(completeAndRecord).toHaveBeenCalledWith(
+      expect.objectContaining({
+        result: expect.objectContaining({ outcome: "succeeded" }),
+        audit: expect.objectContaining({
+          action: "admin.connectorDraftTest.executed",
+          outcome: "succeeded",
+        }),
+      }),
+    );
+    expect(JSON.stringify(issueAndRecord.mock.calls)).not.toMatch(
+      /private\.example|secret-registration|repository|settings/iu,
+    );
+    expect(JSON.stringify(completeAndRecord.mock.calls)).not.toMatch(
+      /private\.example|secret-registration|repository|settings/iu,
+    );
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
   it("audits a privacy purge preview without persisting its deletion reason", async () => {
     const append = vi.fn(async () => undefined);
     const reason = "Verified data-subject deletion request";

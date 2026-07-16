@@ -32,6 +32,12 @@ The exported administration descriptor supplies safe discovery/form metadata onl
 composition registers it dynamically, while this adapter remains authoritative for
 Jitbit settings and secret-reference validation.
 
+The composition-registered `connector.test` operation parses the same authoritative
+settings, resolves its opaque API-token reference only inside the server runtime, and
+performs one `count=1` ticket-summary read. It deliberately discards the ticket and
+remote error details, leaving the administration API with only a bounded terminal
+status to audit and return.
+
 ## Production runtime contribution
 
 `createJitbitRuntimeContribution` is the connector-owned construction boundary for a

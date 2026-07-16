@@ -1436,6 +1436,58 @@ model AdministrationProviderCapabilityTestRateWindow {
 }
 
 /**
+ * One-use confirmation for a non-destructive connector configuration test.
+ * Candidate settings and secret locators are represented only by a SHA-256
+ * digest, never stored in this operational audit path.
+ */
+model AdministrationConnectorDraftTestConfirmation {
+  id                String    @id
+  workspaceId       String    @map("workspace_id")
+  principalId       String    @map("principal_id")
+  sessionId         String    @map("session_id")
+  descriptorType    String    @map("descriptor_type")
+  descriptorVersion String    @map("descriptor_version")
+  testOperation     String    @map("test_operation")
+  candidateDigest   String    @map("candidate_digest") @db.Char(64)
+  confirmation      String
+  impact            String
+  expiresAt         DateTime  @map("expires_at") @db.Timestamptz(6)
+  consumedAt        DateTime? @map("consumed_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([workspaceId, principalId, sessionId, expiresAt, consumedAt])
+  @@map("administration_connector_draft_test_confirmations")
+}
+
+/** Durable idempotency claim retained if connectivity completed but audit finalization failed. */
+model AdministrationConnectorDraftTestClaim {
+  id                String    @id
+  workspaceId       String    @map("workspace_id")
+  principalId       String    @map("principal_id")
+  descriptorType    String    @map("descriptor_type")
+  descriptorVersion String    @map("descriptor_version")
+  testOperation     String    @map("test_operation")
+  candidateDigest   String    @map("candidate_digest") @db.Char(64)
+  keyDigest         String    @map("key_digest") @db.Char(64)
+  createdAt         DateTime  @map("created_at") @db.Timestamptz(6)
+  completedAt       DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  @@unique([workspaceId, keyDigest])
+  @@map("administration_connector_draft_test_claims")
+}
+
+/** Append-only safe result for a connector draft test. */
+model AdministrationConnectorDraftTestResult {
+  id          String   @id
+  claimId     String   @unique @map("claim_id")
+  workspaceId String   @map("workspace_id")
+  outcome     String
+  completedAt DateTime @map("completed_at") @db.Timestamptz(6)
+
+  @@map("administration_connector_draft_test_results")
+}
+
+/**
  * Server-only state for bounded, redacted diagnostics exports.
  */
 model AdministrationDiagnosticExport {

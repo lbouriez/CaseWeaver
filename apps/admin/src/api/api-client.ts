@@ -18,12 +18,19 @@ import {
   type ConfigurationHistoryResponse,
   type ConfigurationInspection,
   type ConfigurationSurface,
+  type ConnectorDraftTestOperation,
+  type ConnectorDraftTestPreview,
+  type ConnectorDraftTestResult,
   configurationHistoryResponseSchema,
   configurationInspectionSchema,
   configurationSurfacesSchema,
+  connectorDraftTestOperationsSchema,
+  connectorDraftTestPreviewSchema,
+  connectorDraftTestResultSchema,
   type DiagnosticExportStatus,
   descriptorCatalogSchema,
   diagnosticExportStatusSchema,
+  type KnowledgeCollectionCreateInput,
   type PlatformLinkConfiguration,
   type ProviderCapabilityTestPreview,
   type ProviderCapabilityTestResult,
@@ -476,6 +483,65 @@ export class CaseWeaverApiClient {
     );
   }
 
+  /**
+   * Discovers only server-composed, descriptor-bound tests. An advertised
+   * descriptor capability alone never grants the browser permission to invoke
+   * a connector or expose a runtime implementation.
+   */
+  public async connectorDraftTestOperations(
+    descriptorType: string,
+    signal?: AbortSignal,
+  ): Promise<readonly ConnectorDraftTestOperation[]> {
+    const result = await this.requestJson(
+      `/v1/admin/connector-descriptors/${safelyEncodeIdentifier(descriptorType)}/draft-tests`,
+      { method: "GET", signal },
+      connectorDraftTestOperationsSchema,
+      "user",
+    );
+    return result.items;
+  }
+
+  /** Preview is an audited, no-dispatch confirmation step for an unpersisted
+   * descriptor configuration. The settings contain only normal fields and
+   * opaque registration IDs for secret slots. */
+  public async previewConnectorDraftTest(
+    descriptorType: string,
+    testOperation: string,
+    settings: Readonly<Record<string, unknown>>,
+    signal?: AbortSignal,
+  ): Promise<ConnectorDraftTestPreview> {
+    return this.requestJson(
+      `/v1/admin/connector-descriptors/${safelyEncodeIdentifier(descriptorType)}/draft-tests/${safelyEncodeIdentifier(testOperation)}/previews`,
+      { method: "POST", signal, body: JSON.stringify({ settings }) },
+      connectorDraftTestPreviewSchema,
+      "user",
+    );
+  }
+
+  /** The API revalidates and hashes settings before consuming the one-use
+   * confirmation. It returns no connector response, locator, or secret. */
+  public async runConnectorDraftTest(
+    descriptorType: string,
+    testOperation: string,
+    settings: Readonly<Record<string, unknown>>,
+    confirmationId: string,
+    signal?: AbortSignal,
+  ): Promise<ConnectorDraftTestResult> {
+    return this.requestJson(
+      `/v1/admin/connector-descriptors/${safelyEncodeIdentifier(descriptorType)}/draft-tests/${safelyEncodeIdentifier(testOperation)}/executions`,
+      {
+        method: "POST",
+        signal,
+        body: JSON.stringify({
+          settings,
+          confirmationId: safelyEncodeIdentifier(confirmationId),
+        }),
+      },
+      connectorDraftTestResultSchema,
+      "user",
+    );
+  }
+
   public async createSecretReference(
     input: SecretReferenceRegistrationInput,
     signal?: AbortSignal,
@@ -498,6 +564,20 @@ export class CaseWeaverApiClient {
   ): Promise<AdminDetail> {
     return this.requestJson(
       "/v1/admin/knowledge-sources/drafts",
+      { method: "POST", signal, body: JSON.stringify(input) },
+      adminDetailSchema,
+      "user",
+    );
+  }
+
+  /** Creates an immutable workspace vector-space identity. The server selects
+   * the selected binding's active version and records the audited mutation. */
+  public async createKnowledgeCollection(
+    input: KnowledgeCollectionCreateInput,
+    signal?: AbortSignal,
+  ): Promise<AdminDetail> {
+    return this.requestJson(
+      "/v1/admin/collections",
       { method: "POST", signal, body: JSON.stringify(input) },
       adminDetailSchema,
       "user",

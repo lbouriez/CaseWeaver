@@ -22,21 +22,39 @@ export const gitMarkdownAdministrationDescriptor: ConfigurationDescriptor =
           type: "object",
           title: "Repository",
           description:
-            "JSON: local {kind, path} or remote {kind, url}. Local paths are validated against trusted roots.",
-          format: "json",
+            "Choose a remote HTTPS Git URL, or a local server path that is inside an allowed local root. The console never reads your workstation files.",
+          inputKind: "structured_repository",
+          examples: [
+            '{"kind":"remote","url":"https://github.com/acme/documentation.git"}',
+            '{"kind":"local","path":"/srv/caseweaver/repositories/documentation"}',
+          ],
         },
         allowedLocalRoots: {
           type: "array",
           title: "Allowed local roots",
-          description: "One absolute trusted filesystem root per line.",
+          description:
+            "Server directories that this connector may use for local repositories. Leave blank for a remote repository. These are paths inside the API or worker host/container, never paths on the browser computer.",
+          examples: ["/srv/caseweaver/repositories"],
         },
         ref: {
           type: "object",
           title: "Git reference",
-          description: "JSON: {kind: branch|tag, name: safe-reference}.",
-          format: "json",
+          description:
+            "The branch or tag to pin when CaseWeaver reads the repository. A branch can move later; each synchronization records the resulting immutable commit.",
+          inputKind: "git_reference",
+          examples: [
+            '{"kind":"branch","name":"main"}',
+            '{"kind":"tag","name":"v2.4.0"}',
+          ],
         },
-        browserUrl: { type: "string", title: "Browser URL", format: "uri" },
+        browserUrl: {
+          type: "string",
+          title: "Browser URL",
+          format: "uri",
+          description:
+            "Optional public web base URL used only to create links back to source pages. It is not the Git clone URL and does not grant access to the repository.",
+          examples: ["https://docs.example.com"],
+        },
         gitTokenReference: {
           type: "string",
           title: "Git token secret reference",

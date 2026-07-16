@@ -330,6 +330,15 @@ export interface AiBindingDraftRequest {
   readonly maximumOutputTokens?: number;
 }
 
+/** A collection is a permanent workspace vector space. The selected binding
+ * is an aggregate ID only; the API pins its active immutable version. */
+export interface KnowledgeCollectionCreateInput {
+  readonly collectionId: string;
+  readonly embeddingBindingId: string;
+  readonly embeddingProfileVersion: string;
+  readonly dimensions: number;
+}
+
 export interface AiRoleDefaultRequest {
   readonly bindingVersionId: string;
   readonly expectedRevision: number;
@@ -413,6 +422,40 @@ export interface ProviderCapabilityTestResult {
   readonly idempotency: "created" | "replayed" | "in_progress";
 }
 
+/** Safe server-discovered operation for testing an unpersisted connector
+ * configuration. It contains no endpoint, secret, or adapter implementation
+ * detail. */
+export interface ConnectorDraftTestOperation {
+  readonly operation: string;
+  readonly requiresConfirmation: boolean;
+  readonly requiresIdempotencyKey: boolean;
+}
+
+/** A one-use server-owned confirmation for a validated configuration candidate. */
+export interface ConnectorDraftTestPreview {
+  readonly descriptorType: string;
+  readonly descriptorVersion: string;
+  readonly testOperation: string;
+  readonly canConfirm: boolean;
+  readonly reasonCode?: string;
+  readonly confirmationId?: string;
+  readonly confirmation?: string;
+  readonly impact?: string;
+  readonly expiresAt?: string;
+}
+
+/** Redacted terminal result for a bounded connector configuration test. */
+export interface ConnectorDraftTestResult {
+  readonly id: string;
+  readonly descriptorType: string;
+  readonly descriptorVersion: string;
+  readonly testOperation: string;
+  readonly outcome: "succeeded" | "failed" | "denied" | "outcome_unknown";
+  readonly reasonCode?: string;
+  readonly completedAt?: string;
+  readonly idempotency: "created" | "replayed" | "in_progress";
+}
+
 const costSchema = z
   .object({
     amount: z.string().regex(/^(?:0|[1-9]\d*)(?:\.\d+)?$/u),
@@ -467,6 +510,53 @@ export const providerCapabilityTestResultSchema: z.ZodType<ProviderCapabilityTes
       operationId: identifierSchema.optional(),
       estimatedCost: costSchema.optional(),
       actualCost: costSchema.optional(),
+      reasonCode: z.string().trim().min(1).max(100).optional(),
+      completedAt: z.string().datetime({ offset: true }).optional(),
+      idempotency: z.enum(["created", "replayed", "in_progress"]),
+    })
+    .strict();
+
+export const connectorDraftTestOperationsSchema: z.ZodType<{
+  readonly items: readonly ConnectorDraftTestOperation[];
+}> = z
+  .object({
+    items: z
+      .array(
+        z
+          .object({
+            operation: identifierSchema,
+            requiresConfirmation: z.boolean(),
+            requiresIdempotencyKey: z.boolean(),
+          })
+          .strict(),
+      )
+      .max(20),
+  })
+  .strict();
+
+export const connectorDraftTestPreviewSchema: z.ZodType<ConnectorDraftTestPreview> =
+  z
+    .object({
+      descriptorType: identifierSchema,
+      descriptorVersion: identifierSchema,
+      testOperation: identifierSchema,
+      canConfirm: z.boolean(),
+      reasonCode: z.string().trim().min(1).max(100).optional(),
+      confirmationId: identifierSchema.optional(),
+      confirmation: z.string().trim().min(1).max(2_000).optional(),
+      impact: z.string().trim().min(1).max(2_000).optional(),
+      expiresAt: z.string().datetime({ offset: true }).optional(),
+    })
+    .strict();
+
+export const connectorDraftTestResultSchema: z.ZodType<ConnectorDraftTestResult> =
+  z
+    .object({
+      id: identifierSchema,
+      descriptorType: identifierSchema,
+      descriptorVersion: identifierSchema,
+      testOperation: identifierSchema,
+      outcome: z.enum(["succeeded", "failed", "denied", "outcome_unknown"]),
       reasonCode: z.string().trim().min(1).max(100).optional(),
       completedAt: z.string().datetime({ offset: true }).optional(),
       idempotency: z.enum(["created", "replayed", "in_progress"]),
@@ -600,6 +690,8 @@ export interface DescriptorSchema {
     | "object";
   readonly title?: string;
   readonly description?: string;
+  readonly examples?: readonly string[];
+  readonly inputKind?: "structured_repository" | "git_reference";
   readonly enum?: readonly JsonScalar[];
   readonly default?: JsonScalar;
   readonly format?: string;
@@ -618,6 +710,12 @@ const descriptorSchema: z.ZodType<DescriptorSchema> = z.lazy(() =>
         .optional(),
       title: z.string().trim().min(1).max(160).optional(),
       description: z.string().trim().min(1).max(1_000).optional(),
+      examples: z
+        .array(z.string().trim().min(1).max(2_000))
+        .min(1)
+        .max(5)
+        .optional(),
+      inputKind: z.enum(["structured_repository", "git_reference"]).optional(),
       enum: z
         .array(
           z.union([z.string(), z.number().finite(), z.boolean(), z.null()]),

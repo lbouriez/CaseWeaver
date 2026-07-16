@@ -8,15 +8,16 @@ import {
   type AuthAuditRequestMetadata,
   type ConfigurationDescriptor,
   type ConfigurationHistoryQuery,
+  type ConnectorDraftTestStore,
   canonicalizeConfiguration,
   type DescriptorRegistry,
   type DiagnosticExportArtifactStore,
   type DiagnosticExportRequestMutationStore,
   type DiagnosticExportRequestStore,
+  type PreviewProviderCapabilityTest,
   policyForAction,
   policyForResource,
   type ReplaceWorkspacePrincipalRoles,
-  type PreviewProviderCapabilityTest,
   type RunProviderCapabilityTest,
   requestDiagnosticExport,
   type SecretReferenceRegistrationCommand,
@@ -229,6 +230,16 @@ export class AdministrationApiOperations
           readonly context: AdminRequestContext;
         }>,
       ) => Promise<{ id: string; revision: number }>;
+      createKnowledgeCollection?: (
+        input: Readonly<{
+          readonly workspaceId: string;
+          readonly collectionId: string;
+          readonly embeddingBindingId: string;
+          readonly embeddingProfileVersion: string;
+          readonly dimensions: number;
+          readonly context: AdminRequestContext;
+        }>,
+      ) => Promise<Readonly<{ readonly id: string }>>;
       createKnowledgeScheduleDraft: (
         input: Readonly<{
           readonly workspaceId: string;
@@ -461,6 +472,26 @@ export class AdministrationApiOperations
       providerCapabilityTests?: Readonly<{
         readonly preview: Pick<PreviewProviderCapabilityTest, "execute">;
         readonly run: Pick<RunProviderCapabilityTest, "execute">;
+      }>;
+      connectorDraftTests?: Readonly<{
+        readonly store: ConnectorDraftTestStore;
+        readonly available: (
+          descriptorType: string,
+        ) => readonly Readonly<{ readonly operation: string }>[];
+        readonly prepare: (
+          input: Readonly<{
+            readonly workspaceId: string;
+            readonly descriptorType: string;
+            readonly operation: string;
+            readonly settings: Readonly<Record<string, unknown>>;
+          }>,
+        ) => Promise<
+          Readonly<{
+            readonly descriptorVersion: string;
+            readonly candidateDigest: string;
+            readonly execute: (signal: AbortSignal) => Promise<void>;
+          }>
+        >;
       }>;
       replaceWorkspacePrincipalRoles?: Pick<
         ReplaceWorkspacePrincipalRoles,
@@ -855,6 +886,17 @@ export class AdministrationApiOperations
     );
     const surfaces = configurationSurfaces.map((surface) => {
       if (
+        surface.surface === "collections" &&
+        this.dependencies.createKnowledgeCollection !== undefined
+      ) {
+        return Object.freeze({
+          surface: "collections",
+          mode: "managed" as const,
+          workflows: ["create", "inspect_history"] as const,
+          operationalActions: [] as const,
+        });
+      }
+      if (
         surface.surface === "publication-profiles" &&
         this.dependencies.createPublicationProfile === undefined
       ) {
@@ -1042,6 +1084,38 @@ export class AdministrationApiOperations
       label: input.displayName,
       status: "draft",
       version: String(created.revision),
+      fields: Object.freeze({}),
+    });
+  }
+  /** A collection is an immutable vector space. The binding's active exact
+   * version is selected inside the persistence transaction; clients never
+   * choose it directly. */
+  public async createKnowledgeCollection(
+    input: Readonly<{
+      readonly collectionId: string;
+      readonly embeddingBindingId: string;
+      readonly embeddingProfileVersion: string;
+      readonly dimensions: number;
+    }>,
+    context: AdminRequestContext,
+  ) {
+    await this.requireMutationPermission(
+      context,
+      "configuration.manage",
+      "admin.collection.create.denied",
+      input.collectionId,
+    );
+    const create = this.dependencies.createKnowledgeCollection;
+    if (create === undefined) throw new AdministrationUnavailableError();
+    const result = await create({
+      workspaceId: context.workspaceId,
+      ...input,
+      context,
+    });
+    return Object.freeze({
+      id: result.id,
+      label: result.id,
+      status: "active",
       fields: Object.freeze({}),
     });
   }
@@ -1602,6 +1676,175 @@ export class AdministrationApiOperations
       ]),
     });
   }
+  /** Lists only composition-registered, non-destructive candidate checks. */
+  public async connectorDraftTestOperations(
+    descriptorType: string,
+    context: AdminRequestContext,
+  ) {
+    await this.authorizeAndAudit(
+      context,
+      "configuration.read",
+      "admin.connectorDraftTest.operations.read",
+      descriptorType,
+    );
+    const tests = this.dependencies.connectorDraftTests;
+    if (tests === undefined) throw new AdministrationUnavailableError();
+    return Object.freeze({
+      items: Object.freeze(
+        tests.available(descriptorType).map(({ operation }) =>
+          Object.freeze({
+            operation,
+            requiresConfirmation: true,
+            requiresIdempotencyKey: true,
+          }),
+        ),
+      ),
+    });
+  }
+  /** Preview is persisted with its audit. Candidate settings are reduced to a
+   * server-only digest before the confirmation boundary. */
+  public async previewConnectorDraftTest(
+    input: Readonly<{
+      readonly descriptorType: string;
+      readonly operation: string;
+      readonly settings: Readonly<Record<string, unknown>>;
+    }>,
+    context: AdminRequestContext,
+  ) {
+    await this.requireMutationPermission(
+      context,
+      "connector.manage",
+      "admin.connectorDraftTest.preview.denied",
+      input.descriptorType,
+    );
+    const tests = this.dependencies.connectorDraftTests;
+    if (tests === undefined) throw new AdministrationUnavailableError();
+    let prepared: Awaited<ReturnType<typeof tests.prepare>>;
+    try {
+      prepared = await tests.prepare({
+        workspaceId: context.workspaceId,
+        descriptorType: input.descriptorType,
+        operation: input.operation,
+        settings: input.settings,
+      });
+    } catch {
+      await this.recordConnectorDraftTestAudit(
+        context,
+        input.descriptorType,
+        "admin.connectorDraftTest.preview",
+        "failed",
+      );
+      throw new AdministrationUnavailableError();
+    }
+    const preview = await tests.store.issueAndRecord({
+      identity: {
+        workspaceId: context.workspaceId,
+        principalId: context.principalId,
+        sessionId: context.sessionId,
+        descriptorType: input.descriptorType,
+        descriptorVersion: prepared.descriptorVersion,
+        operation: input.operation,
+        candidateDigest: prepared.candidateDigest,
+      },
+      audit: this.connectorDraftTestAudit(
+        context,
+        input.descriptorType,
+        prepared.descriptorVersion,
+        "admin.connectorDraftTest.preview",
+        "succeeded",
+      ),
+      now: new Date().toISOString(),
+    });
+    return Object.freeze({
+      descriptorType: input.descriptorType,
+      descriptorVersion: prepared.descriptorVersion,
+      testOperation: input.operation,
+      canConfirm: true,
+      ...preview,
+    });
+  }
+  /** Executes a server-side candidate test after consuming an exact one-use
+   * confirmation. The browser gets no external response or exception text. */
+  public async runConnectorDraftTest(
+    input: Readonly<{
+      readonly descriptorType: string;
+      readonly operation: string;
+      readonly settings: Readonly<Record<string, unknown>>;
+      readonly confirmationId: string;
+    }>,
+    context: AdminRequestContext,
+  ) {
+    if (context.idempotencyKey === undefined) {
+      throw new AdministrationUnavailableError();
+    }
+    await this.requireMutationPermission(
+      context,
+      "connector.manage",
+      "admin.connectorDraftTest.execute.denied",
+      input.descriptorType,
+    );
+    const tests = this.dependencies.connectorDraftTests;
+    if (tests === undefined) throw new AdministrationUnavailableError();
+    let prepared: Awaited<ReturnType<typeof tests.prepare>>;
+    try {
+      prepared = await tests.prepare({
+        workspaceId: context.workspaceId,
+        descriptorType: input.descriptorType,
+        operation: input.operation,
+        settings: input.settings,
+      });
+    } catch {
+      await this.recordConnectorDraftTestAudit(
+        context,
+        input.descriptorType,
+        "admin.connectorDraftTest.executed",
+        "failed",
+      );
+      throw new AdministrationUnavailableError();
+    }
+    const identity = {
+      workspaceId: context.workspaceId,
+      principalId: context.principalId,
+      sessionId: context.sessionId,
+      descriptorType: input.descriptorType,
+      descriptorVersion: prepared.descriptorVersion,
+      operation: input.operation,
+      candidateDigest: prepared.candidateDigest,
+    } as const;
+    const claim = await tests.store.consumeAndClaim({
+      identity,
+      confirmationId: input.confirmationId,
+      idempotencyKeyDigest: digestIdempotencyKey(context.idempotencyKey),
+      now: new Date().toISOString(),
+    });
+    if (claim.kind === "replayed")
+      return connectorDraftTestDto(claim.result, identity, "replayed");
+    if (claim.kind !== "acquired") throw new AdministrationUnavailableError();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    let outcome: "succeeded" | "failed" = "succeeded";
+    try {
+      await prepared.execute(controller.signal);
+    } catch {
+      outcome = "failed";
+    } finally {
+      clearTimeout(timeout);
+    }
+    const completedAt = new Date().toISOString();
+    const result = await tests.store.completeAndRecord({
+      claimId: claim.claimId,
+      identity,
+      result: { outcome, completedAt },
+      audit: this.connectorDraftTestAudit(
+        context,
+        input.descriptorType,
+        prepared.descriptorVersion,
+        "admin.connectorDraftTest.executed",
+        outcome,
+      ),
+    });
+    return connectorDraftTestDto(result, identity, "created");
+  }
   /** Preview auditing is owned by the administration use case because issuance
    * and its append-only audit must commit atomically. */
   public async previewProviderCapabilityTest(
@@ -1995,6 +2238,89 @@ export class AdministrationApiOperations
       throw error;
     }
   }
+  private connectorDraftTestAudit(
+    context: AdminRequestContext,
+    descriptorType: string,
+    descriptorVersion: string,
+    action:
+      | "admin.connectorDraftTest.preview"
+      | "admin.connectorDraftTest.executed",
+    outcome: "succeeded" | "failed",
+  ) {
+    return Object.freeze({
+      workspaceId: context.workspaceId,
+      actorPrincipalId: context.principalId,
+      action,
+      targetId: `${descriptorType}@${descriptorVersion}`,
+      targetType: "connector-descriptor" as const,
+      permission: "connector.manage" as const,
+      outcome,
+      requestId: context.requestId,
+      correlationId: context.correlationId,
+      ...(context.idempotencyKey === undefined
+        ? {}
+        : {
+            idempotencyKeyDigest: digestIdempotencyKey(context.idempotencyKey),
+          }),
+      ...(context.uiActionId === undefined
+        ? {}
+        : { uiActionId: context.uiActionId }),
+      ...(context.traceId === undefined ? {} : { traceId: context.traceId }),
+      ...(context.clientAddress === undefined
+        ? {}
+        : { clientAddress: context.clientAddress }),
+      ...(context.userAgent === undefined
+        ? {}
+        : { userAgent: context.userAgent }),
+      occurredAt: new Date().toISOString(),
+    });
+  }
+  /** Invalid candidate configuration still needs a server-owned audit record;
+   * it never carries the candidate settings or their digest into audit data. */
+  private async recordConnectorDraftTestAudit(
+    context: AdminRequestContext,
+    descriptorType: string,
+    action:
+      | "admin.connectorDraftTest.preview"
+      | "admin.connectorDraftTest.executed",
+    outcome: "failed",
+  ): Promise<void> {
+    if (!context.permissions.includes("connector.manage")) {
+      await this.authorizeAndAudit(
+        context,
+        "connector.manage",
+        action,
+        descriptorType,
+      );
+      return;
+    }
+    await this.dependencies.unitOfWork.transaction(async (transaction) =>
+      this.dependencies.auditStore.append(transaction, {
+        id: auditEventId(randomUUID()),
+        workspaceId: workspaceId(context.workspaceId),
+        actorPrincipalId: principalId(context.principalId),
+        action,
+        targetId: descriptorType,
+        targetType: "connector-descriptor",
+        permission: "connector.manage",
+        outcome,
+        origin: "admin_ui",
+        occurredAt: utcInstant(new Date()),
+        requestId: context.requestId,
+        correlationId: context.correlationId,
+        ...(context.uiActionId === undefined
+          ? {}
+          : { uiActionId: context.uiActionId }),
+        ...(context.idempotencyKey === undefined
+          ? {}
+          : {
+              idempotencyKeyDigest: digestIdempotencyKey(
+                context.idempotencyKey,
+              ),
+            }),
+      }),
+    );
+  }
   private async authorizeAndAudit(
     context: AdminRequestContext,
     permission: import("@caseweaver/security").Permission,
@@ -2181,6 +2507,26 @@ function providerCapabilityAuditMetadata(
     ...(context.userAgent === undefined
       ? {}
       : { userAgent: context.userAgent }),
+  });
+}
+
+function connectorDraftTestDto(
+  result: import("@caseweaver/administration").ConnectorDraftTestResult,
+  identity: Readonly<{
+    readonly descriptorType: string;
+    readonly descriptorVersion: string;
+    readonly operation: string;
+  }>,
+  idempotency: "created" | "replayed",
+) {
+  return Object.freeze({
+    id: result.id,
+    descriptorType: identity.descriptorType,
+    descriptorVersion: identity.descriptorVersion,
+    testOperation: identity.operation,
+    outcome: result.outcome,
+    completedAt: result.completedAt,
+    idempotency,
   });
 }
 function authReason(error: unknown): AuthAuditReasonCode {

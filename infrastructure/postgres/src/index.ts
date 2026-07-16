@@ -3,6 +3,7 @@ import type {
   AuthAuditRecorder,
   AuthSessionAuditMutationStore,
   AuthSessionStore,
+  ConnectorDraftTestStore,
   DescriptorRegistry,
   DiagnosticExportArtifactStore,
   DiagnosticExportRequestMutationStore,
@@ -61,6 +62,7 @@ import {
   PostgresAuthSessionStore,
   PostgresOidcIdentityMappingStore,
 } from "./administration/auth.js";
+import { PostgresConnectorDraftTestStore } from "./administration/connector-draft-test-store.js";
 import { PostgresDescriptorRegistry } from "./administration/descriptor-registry.js";
 import {
   PostgresDiagnosticExportArtifactStore,
@@ -803,6 +805,7 @@ export interface PostgresPersistence {
     register(value: unknown): Promise<unknown>;
   };
   readonly administrationActionPreviewStore: PostgresAdministrationActionPreviewStore;
+  readonly connectorDraftTestStore: ConnectorDraftTestStore;
   readonly diagnosticExportStore: DiagnosticExportRequestStore &
     DiagnosticExportRequestMutationStore;
   readonly diagnosticExportArtifactStore: DiagnosticExportArtifactStore;
@@ -878,6 +881,7 @@ export function createPostgresPersistence(
     descriptorRegistry: new PostgresDescriptorRegistry(client),
     administrationActionPreviewStore:
       new PostgresAdministrationActionPreviewStore(client),
+    connectorDraftTestStore: new PostgresConnectorDraftTestStore(client),
     diagnosticExportStore,
     diagnosticExportArtifactStore: new PostgresDiagnosticExportArtifactStore(
       client,
@@ -923,6 +927,7 @@ export * from "./administration/ai-binding-draft-store.js";
 export * from "./administration/ai-configuration-store.js";
 export * from "./administration/auth.js";
 export * from "./administration/configuration-store.js";
+export * from "./administration/connector-draft-test-store.js";
 export * from "./administration/descriptor-registry.js";
 export * from "./administration/diagnostic-export-artifact-store.js";
 export * from "./administration/diagnostic-export-dispatch-store.js";

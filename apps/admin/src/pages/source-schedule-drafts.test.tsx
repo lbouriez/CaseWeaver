@@ -88,6 +88,16 @@ describe("source and schedule drafts", () => {
     );
 
     await screen.findByText("Create an inert source draft");
+    expect(
+      screen.getByText(
+        /does not contact a connector, schedule work, or ingest content/u,
+      ),
+    ).not.toBeNull();
+    expect(
+      screen.getByText(
+        /Collections are created and maintained in Knowledge & Analysis/u,
+      ),
+    ).not.toBeNull();
     await userEvent.type(
       screen.getByLabelText(/Source display name/u),
       "New source",

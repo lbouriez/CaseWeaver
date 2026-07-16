@@ -111,12 +111,18 @@ importers:
       '@caseweaver/connector-jitbit':
         specifier: workspace:*
         version: link:../../connectors/jitbit
+      '@caseweaver/connector-runtime':
+        specifier: workspace:*
+        version: link:../../infrastructure/connector-runtime
       '@caseweaver/copilot-sdk-agent':
         specifier: workspace:*
         version: link:../../providers/copilot-sdk-agent
       '@caseweaver/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@caseweaver/git-repository-runtime':
+        specifier: workspace:*
+        version: link:../../infrastructure/git-repository-runtime
       '@caseweaver/observability':
         specifier: workspace:*
         version: link:../../packages/observability
