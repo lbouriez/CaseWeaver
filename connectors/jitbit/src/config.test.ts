@@ -32,8 +32,8 @@ describe("Jitbit configuration", () => {
     ).toThrow(/secret reference is required/);
   });
 
-  it("publishes a new immutable descriptor revision with the schema timeout field", () => {
-    expect(jitbitAdministrationDescriptor.version).toBe("2");
+  it("publishes the current immutable descriptor revision with the schema timeout field", () => {
+    expect(jitbitAdministrationDescriptor.version).toBe("3");
     expect(
       jitbitAdministrationDescriptor.settingsSchema.properties,
     ).toHaveProperty("requestTimeoutMs");

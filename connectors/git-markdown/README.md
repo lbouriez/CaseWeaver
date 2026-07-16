@@ -16,6 +16,10 @@ for the check, and performs one bounded `GitRepository.inspect` read. It returns
 repository path, URL, ref, commit, file, credential, or Git error; the administration
 API records only a safe terminal outcome.
 
+The current descriptor revision is `2`. Revision `1` remains immutable in an
+installation's configuration history; revision `2` provides clearer safe operator
+guidance while retaining the same connector-owned runtime settings shape.
+
 `GitMarkdownKnowledgeSource` accepts an injected `GitRepository`; it does not invoke a
 shell, Git executable, filesystem, or network client. The injected boundary must safely
 resolve configured local/remote repositories and return validated tree and blob data.

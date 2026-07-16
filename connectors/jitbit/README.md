@@ -49,9 +49,10 @@ analysis-destination ports sharing one `JitbitClient`. It resolves no secret whi
 is constructed; the client resolves the opaque reference only for a cancellable outbound
 request.
 
-The current descriptor revision is `2`, whose `requestTimeoutMs` field matches the
+The current descriptor revision is `3`, whose `requestTimeoutMs` field matches the
 authoritative settings schema. Revision `1` is retained only so durable historical
 configuration versions can be read by trusted runtime composition through
-`createJitbitRuntimeContributions`; new API drafts must use revision `2`. Neither
-revision exposes a secret value, locator, client, or runtime exception through
+`createJitbitRuntimeContributions`; revision `2` remains retained in installations
+that registered it, and new API drafts use revision `3`. Neither revision exposes a
+secret value, locator, client, or runtime exception through
 descriptor metadata.

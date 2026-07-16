@@ -23,8 +23,10 @@ pnpm exec playwright test tests/e2e/admin-compose.spec.ts
 ```
 
 It signs in with the disposable development account, creates an immutable retrieval
-profile through the real cookie/CSRF API, observes its server-side audit record, and
-signs out while asserting that session credentials/tokens never enter browser storage.
+profile through the real cookie/CSRF API, verifies the current Git descriptor's
+human-language reference guidance in the built console, observes its server-side audit
+record, and signs out while asserting that session credentials/tokens never enter
+browser storage.
 The container workflow runs this path after its real Compose smoke. It never runs
 against a production environment or sends a secret value.
 

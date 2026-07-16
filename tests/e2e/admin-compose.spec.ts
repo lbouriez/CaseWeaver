@@ -47,6 +47,18 @@ test.describe("disposable Compose operator journey", () => {
     expect(serializedStorage).not.toContain("caseweaver-session");
     expect(serializedStorage).not.toContain("admin");
 
+    await page.getByRole("link", { name: /Integrations/u }).click();
+    await expect(
+      page.getByRole("heading", { name: "Connector configuration drafts" }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Help for Git reference" }).click();
+    await expect(page.getByText("Branch: main")).toBeVisible();
+    await expect(page.getByText("Tag: v2.4.0")).toBeVisible();
+    await expect(
+      page.getByText('{"kind":"branch","name":"main"}'),
+    ).not.toBeVisible();
+    await page.keyboard.press("Escape");
+
     await page.getByRole("link", { name: /Knowledge & Analysis/u }).click();
     await expect(
       page.getByRole("heading", { name: "Create a retrieval profile draft" }),
@@ -55,7 +67,7 @@ test.describe("disposable Compose operator journey", () => {
       .getByLabel("Retrieval profile display name")
       .fill("Compose retrieval policy");
     await page
-      .getByLabel("Retrieval policy settings")
+      .getByRole("textbox", { name: "Retrieval policy settings" })
       .fill('{"policy":"hybrid","maximumResults":12}');
     await page
       .getByRole("button", { name: "Create retrieval profile draft" })

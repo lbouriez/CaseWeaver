@@ -1,5 +1,11 @@
-import { testGitMarkdownAdministrationSettings } from "@caseweaver/connector-git-markdown";
-import { testJitbitAdministrationSettings } from "@caseweaver/connector-jitbit";
+import {
+  gitMarkdownAdministrationDescriptor,
+  testGitMarkdownAdministrationSettings,
+} from "@caseweaver/connector-git-markdown";
+import {
+  jitbitAdministrationDescriptor,
+  testJitbitAdministrationSettings,
+} from "@caseweaver/connector-jitbit";
 import { EnvironmentConnectorSecretResolver } from "@caseweaver/connector-runtime";
 import { GitCliRepository } from "@caseweaver/git-repository-runtime";
 
@@ -23,7 +29,7 @@ export function createConnectorDraftTestRegistrations(
   return Object.freeze([
     Object.freeze({
       descriptorType: "git-markdown",
-      descriptorVersion: "1",
+      descriptorVersion: gitMarkdownAdministrationDescriptor.version,
       operation: "connector.test" as const,
       execute: (
         settings: Readonly<Record<string, unknown>>,
@@ -38,7 +44,7 @@ export function createConnectorDraftTestRegistrations(
     }),
     Object.freeze({
       descriptorType: "jitbit",
-      descriptorVersion: "2",
+      descriptorVersion: jitbitAdministrationDescriptor.version,
       operation: "connector.test" as const,
       execute: (
         settings: Readonly<Record<string, unknown>>,

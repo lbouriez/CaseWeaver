@@ -19,6 +19,57 @@ function operations(overrides: Record<string, unknown> = {}) {
 }
 
 describe("AdministrationApiOperations audit boundary", () => {
+  it("returns only the newest immutable descriptor revision for each authoring type", async () => {
+    const api = operations({
+      descriptors: {
+        list: vi.fn(async () => [
+          {
+            kind: "connector",
+            type: "git-markdown",
+            version: "1",
+            displayName: "Git / Markdown",
+            description: "Historical copy.",
+            connectorCapabilities: ["knowledgeSource"],
+            aiCapabilities: [],
+            supportedWireApis: [],
+            supportedWebhookEventTypes: [],
+            settingsSchema: { type: "object", properties: {} },
+            uiGroups: [],
+            secretSlots: [],
+            supportsConfigurationMigration: false,
+            supportedTestOperations: [],
+          },
+          {
+            kind: "connector",
+            type: "git-markdown",
+            version: "2",
+            displayName: "Git / Markdown",
+            description: "Current operator guidance.",
+            connectorCapabilities: ["knowledgeSource"],
+            aiCapabilities: [],
+            supportedWireApis: [],
+            supportedWebhookEventTypes: [],
+            settingsSchema: { type: "object", properties: {} },
+            uiGroups: [],
+            secretSlots: [],
+            supportsConfigurationMigration: false,
+            supportedTestOperations: [],
+          },
+        ]),
+      },
+    });
+
+    await expect(api.descriptors("connector")).resolves.toEqual({
+      items: [
+        expect.objectContaining({
+          type: "git-markdown",
+          version: "2",
+          description: "Current operator guidance.",
+        }),
+      ],
+    });
+  });
+
   it("audits an unauthenticated administrative request before returning its denial", async () => {
     const record = vi.fn(async () => undefined);
     const api = operations({

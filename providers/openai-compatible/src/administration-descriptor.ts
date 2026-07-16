@@ -14,7 +14,9 @@ export const openAiCompatibleAdministrationDescriptor: ConfigurationDescriptor =
   Object.freeze({
     kind: "aiProvider",
     type: "openai-compatible",
-    version: "1",
+    // Existing version 1 rows remain immutable configuration history. Version
+    // 2 improves only the safe operator guidance presented by the console.
+    version: "2",
     displayName: "OpenAI-compatible",
     description:
       "Uses a configured OpenAI-compatible HTTPS endpoint through the metered AI execution gateway.",
@@ -25,13 +27,25 @@ export const openAiCompatibleAdministrationDescriptor: ConfigurationDescriptor =
     settingsSchema: {
       type: "object",
       properties: {
-        endpoint: { type: "string", title: "HTTPS endpoint", format: "uri" },
+        endpoint: {
+          type: "string",
+          title: "HTTPS endpoint",
+          format: "uri",
+          description:
+            "The HTTPS base endpoint for the provider's OpenAI-compatible API. Use the provider base address, never a browser page, request URL, or credential-bearing URL.",
+        },
         secretReference: {
           type: "string",
           title: "API credential reference",
-          description: "Reference only; never an API key.",
+          description:
+            "Choose the registered secret location for this provider credential. The API key is never entered, returned, or displayed by the console.",
         },
-        defaultTimeoutMs: { type: "integer", title: "Default timeout (ms)" },
+        defaultTimeoutMs: {
+          type: "integer",
+          title: "Default timeout (ms)",
+          description:
+            "Maximum time the execution gateway waits for a provider call before it is treated as unavailable. This is a default in milliseconds; request-specific server limits still apply.",
+        },
       },
       required: ["endpoint", "secretReference"],
       additionalProperties: false,

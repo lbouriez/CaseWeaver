@@ -778,7 +778,7 @@ export class AdministrationApiOperations
       kind: kind === "connector" ? "connector" : "aiProvider",
       limit: 200,
     });
-    const mapped = values
+    const mapped = newestDescriptorRevisions(values)
       .map(toDescriptor)
       .filter((entry) => type === undefined || entry.type === type);
     return Object.freeze({ items: mapped });
@@ -2569,4 +2569,33 @@ function toDescriptor(value: ConfigurationDescriptor) {
     supportsConfigurationMigration: value.supportsConfigurationMigration,
     supportedTestOperations: value.supportedTestOperations,
   });
+}
+
+/**
+ * Descriptor revisions are retained for immutable configuration history. New
+ * authoring must receive one current descriptor per registered type, otherwise
+ * an older explanatory revision can shadow a newly published revision in a
+ * generic selector.
+ */
+function newestDescriptorRevisions(
+  values: readonly ConfigurationDescriptor[],
+): readonly ConfigurationDescriptor[] {
+  const newestByType = new Map<string, ConfigurationDescriptor>();
+  for (const value of values) {
+    const current = newestByType.get(value.type);
+    if (
+      current === undefined ||
+      value.version.localeCompare(current.version, undefined, {
+        numeric: true,
+        sensitivity: "base",
+      }) > 0
+    ) {
+      newestByType.set(value.type, value);
+    }
+  }
+  return Object.freeze(
+    [...newestByType.values()].sort((left, right) =>
+      left.type.localeCompare(right.type),
+    ),
+  );
 }

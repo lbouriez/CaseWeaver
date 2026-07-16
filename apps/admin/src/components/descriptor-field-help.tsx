@@ -8,6 +8,13 @@ import {
 } from "@mui/material";
 import { useId, useState } from "react";
 
+export interface DescriptorFieldHelpExample {
+  /** Safe form value applied only after the operator explicitly chooses it. */
+  readonly value: string;
+  /** Human-language explanation shown in the popover instead of syntax. */
+  readonly label: string;
+}
+
 /**
  * Safe descriptor metadata is the sole source of form help. The component
  * deliberately has no access to configuration history, secret registrations,
@@ -21,11 +28,14 @@ export function DescriptorFieldHelp({
 }: {
   readonly label: string;
   readonly description?: string;
-  readonly examples?: readonly string[];
+  readonly examples?: readonly (DescriptorFieldHelpExample | string)[];
   readonly onUseExample?: (example: string) => void;
 }) {
   const [anchor, setAnchor] = useState<HTMLElement>();
   const popoverId = useId();
+  const displayExamples = examples.map((example) =>
+    typeof example === "string" ? { value: example, label: example } : example,
+  );
   if (description === undefined && examples.length === 0) return null;
   const open = anchor !== undefined;
   const id = open ? popoverId : undefined;
@@ -58,22 +68,21 @@ export function DescriptorFieldHelp({
           {description === undefined ? null : (
             <Typography variant="body2">{description}</Typography>
           )}
-          {examples.length === 0 ? null : (
+          {displayExamples.length === 0 ? null : (
             <>
               <Typography variant="subtitle2">Examples</Typography>
-              {examples.map((example, index) => (
-                <Stack key={example} direction="row" spacing={1}>
+              {displayExamples.map((example, index) => (
+                <Stack key={example.value} direction="row" spacing={1}>
                   <Typography
-                    component="code"
                     sx={{ overflowWrap: "anywhere", flex: 1 }}
                     variant="body2"
                   >
-                    {example}
+                    {example.label}
                   </Typography>
                   {onUseExample === undefined ? null : (
                     <Button
                       onClick={() => {
-                        onUseExample(example);
+                        onUseExample(example.value);
                         setAnchor(undefined);
                       }}
                       size="small"

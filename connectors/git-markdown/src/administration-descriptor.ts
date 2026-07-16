@@ -7,7 +7,10 @@ export const gitMarkdownAdministrationDescriptor: ConfigurationDescriptor =
   Object.freeze({
     kind: "connector",
     type: "git-markdown",
-    version: "1",
+    // Descriptor revisions are immutable in PostgreSQL. Version 1 is retained
+    // for historical configurations; version 2 replaces operator-facing JSON
+    // implementation wording with clear authoring guidance.
+    version: "2",
     displayName: "Git / Markdown",
     description:
       "Indexes Markdown and Docusaurus content from a pinned local or remote Git repository.",
@@ -65,18 +68,20 @@ export const gitMarkdownAdministrationDescriptor: ConfigurationDescriptor =
           type: "object",
           title: "Path filters",
           description:
-            "JSON with include and optional exclude relative POSIX glob arrays.",
+            "Choose which repository files CaseWeaver may index. Include patterns select relative paths; optional exclude patterns remove matching files after that selection. Use forward-slash repository paths, not local computer paths.",
           format: "json",
         },
         maximumMarkdownCharacters: {
           type: "integer",
           title: "Maximum Markdown characters",
+          description:
+            "Safety limit for one Markdown document after it is read. Larger documents are bounded before processing so one file cannot consume an unplanned amount of work.",
         },
         docusaurus: {
           type: "object",
           title: "Docusaurus settings",
           description:
-            "JSON with enabled, siteUrl, baseUrl, routeBasePath, and docsPath.",
+            "Enable this only when the repository is a Docusaurus site. It tells CaseWeaver where the site and documentation routes live so source links point to the published documentation, not to the Git clone address.",
           format: "json",
         },
       },

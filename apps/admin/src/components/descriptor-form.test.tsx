@@ -227,7 +227,7 @@ describe("DescriptorForm", () => {
     });
   });
 
-  it("applies descriptor-provided structured examples as structured settings", async () => {
+  it("explains structured examples in human language while applying their safe structured setting", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn(async () => undefined);
     render(
@@ -246,8 +246,17 @@ describe("DescriptorForm", () => {
                   '{"kind":"remote","url":"https://repository.example.test/project.git"}',
                 ],
               },
+              ref: {
+                type: "object",
+                title: "Git reference",
+                inputKind: "git_reference",
+                examples: [
+                  '{"kind":"branch","name":"main"}',
+                  '{"kind":"tag","name":"v2.4.0"}',
+                ],
+              },
             },
-            required: ["repository"],
+            required: ["repository", "ref"],
           },
           uiGroups: [],
         }}
@@ -259,6 +268,23 @@ describe("DescriptorForm", () => {
     await user.click(
       screen.getByRole("button", { name: "Help for Repository" }),
     );
+    expect(
+      screen.getByText(
+        "Remote HTTPS repository: https://repository.example.test/project.git",
+      ),
+    ).not.toBeNull();
+    expect(
+      screen.queryByText(
+        '{"kind":"remote","url":"https://repository.example.test/project.git"}',
+      ),
+    ).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Use example 1" }));
+    await user.click(
+      screen.getByRole("button", { name: "Help for Git reference" }),
+    );
+    expect(screen.getByText("Branch: main")).not.toBeNull();
+    expect(screen.getByText("Tag: v2.4.0")).not.toBeNull();
+    expect(screen.queryByText('{"kind":"branch","name":"main"}')).toBeNull();
     await user.click(screen.getByRole("button", { name: "Use example 1" }));
     await user.click(screen.getByRole("button", { name: "Save draft" }));
 
@@ -267,6 +293,7 @@ describe("DescriptorForm", () => {
         kind: "remote",
         url: "https://repository.example.test/project.git",
       },
+      ref: { kind: "branch", name: "main" },
     });
   });
 

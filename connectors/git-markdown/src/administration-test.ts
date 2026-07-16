@@ -1,4 +1,7 @@
-import type { ConnectorSecretResolver } from "@caseweaver/connector-sdk";
+import type {
+  ConnectorSecretReference,
+  ConnectorSecretResolver,
+} from "@caseweaver/connector-sdk";
 
 import { gitMarkdownSettingsSchema } from "./config.js";
 import type { GitRepository } from "./git-repository.js";
@@ -24,7 +27,7 @@ export async function testGitMarkdownAdministrationSettings(
           kind: "token" as const,
           token: (
             await input.secrets.resolve(
-              settings.authentication.secretName,
+              settings.authentication.secretName as ConnectorSecretReference,
               input.signal,
             )
           ).value,

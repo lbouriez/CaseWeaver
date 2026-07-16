@@ -24,6 +24,7 @@ import type {
   JsonScalar,
   SecretReferenceSlot,
 } from "../api/contracts.js";
+import type { DescriptorFieldHelpExample } from "./descriptor-field-help.js";
 import { DescriptorFieldHelp } from "./descriptor-field-help.js";
 import {
   StructuredGitReferenceInput,
@@ -128,6 +129,50 @@ function valueFromExample(value: string, schema: DescriptorSchema): unknown {
     return structuredValueFromInput(value);
   }
   return scalarFromInput(value, schema);
+}
+
+/**
+ * Descriptors retain exact safe values so a chosen example can populate the
+ * generic form. Those wire shapes are useful to the form, but do not belong in
+ * the operator-facing popover. Render the two structured kinds in plain
+ * language and leave all other descriptor examples unchanged.
+ */
+function helpExamples(
+  schema: DescriptorSchema,
+): readonly DescriptorFieldHelpExample[] {
+  return (schema.examples ?? []).map((value) => {
+    if (schema.inputKind === "structured_repository") {
+      const parsed = structuredValueFromInput(value);
+      if (
+        isRecord(parsed) &&
+        parsed.kind === "remote" &&
+        typeof parsed.url === "string"
+      ) {
+        return { value, label: `Remote HTTPS repository: ${parsed.url}` };
+      }
+      if (
+        isRecord(parsed) &&
+        parsed.kind === "local" &&
+        typeof parsed.path === "string"
+      ) {
+        return { value, label: `Local server path: ${parsed.path}` };
+      }
+    }
+    if (schema.inputKind === "git_reference") {
+      const parsed = structuredValueFromInput(value);
+      if (
+        isRecord(parsed) &&
+        (parsed.kind === "branch" || parsed.kind === "tag") &&
+        typeof parsed.name === "string"
+      ) {
+        return {
+          value,
+          label: `${parsed.kind === "branch" ? "Branch" : "Tag"}: ${parsed.name}`,
+        };
+      }
+    }
+    return { value, label: value };
+  });
 }
 
 /** Structured input kinds always represent tagged JSON objects. Their schema
@@ -338,7 +383,7 @@ function DescriptorField({
   const help = (
     <DescriptorFieldHelp
       description={schema.description}
-      examples={schema.examples}
+      examples={helpExamples(schema)}
       label={label}
       onUseExample={(example) => onChange(valueFromExample(example, schema))}
     />

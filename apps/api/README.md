@@ -28,6 +28,11 @@ surface consumed by `apps/admin`; it validates descriptors server-side, scopes a
 records to the session workspace, uses persistent one-use action previews, and composes
 existing publication/operations use cases rather than duplicating their policy.
 
+Descriptor revisions are immutable. The descriptor discovery routes expose only the
+newest registered revision of each type for new authoring, while historical revisions
+remain available only to trusted configuration-history and runtime resolution. This
+prevents an older form/help revision from shadowing current operator guidance.
+
 The API returns credentialed CORS headers only for explicit
 `ADMIN_ALLOWED_ORIGINS`; it never reflects or wildcards an origin. `POST
 /v1/admin/secret-references` accepts an opaque external-secret locator, persists only

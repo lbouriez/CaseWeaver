@@ -10,6 +10,8 @@ choose bindings, resolve secrets, reserve budgets, calculate costs, or persist o
 Its exported administration descriptor is safe metadata registered at API composition
 for dynamic console discovery. It exposes secret references rather than API keys, and
 all actual AI calls continue to flow through `packages/ai-execution`.
+Descriptor revision `2` adds human-language operator guidance; an installation may
+retain revision `1` only for immutable historical configuration references.
 
 The package also contributes exact local token counting for immutable bindings through
 `tokenizerEncoding` (`gpt2`, `r50k_base`, `p50k_base`, `p50k_edit`, `cl100k_base`, or

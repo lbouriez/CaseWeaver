@@ -21,3 +21,5 @@ infer a repository from a binding, case, prompt, or model-tool input.
 The package also exports safe administration discovery metadata for API composition. It
 does not expose BYOK values, runtime clients, repository paths, or provider calls to the
 browser.
+Descriptor revision `2` adds human-language operator guidance; an installation may
+retain revision `1` only for immutable historical configuration references.

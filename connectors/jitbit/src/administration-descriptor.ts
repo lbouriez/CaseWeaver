@@ -3,7 +3,7 @@ import type { ConfigurationDescriptor } from "@caseweaver/administration";
 import { jitbitSettingsSchema } from "./config.js";
 
 function descriptor(
-  version: "1" | "2",
+  version: "1" | "2" | "3",
   timeoutField: "timeoutMs" | "requestTimeoutMs",
 ): ConfigurationDescriptor {
   return Object.freeze({
@@ -28,27 +28,45 @@ function descriptor(
           type: "string",
           title: "Jitbit HTTPS base URL",
           format: "uri",
+          description:
+            "The HTTPS address of the Jitbit installation CaseWeaver will contact. Use the installation base address, not a ticket page or a URL containing credentials.",
         },
         apiTokenReference: {
           type: "string",
           title: "API token secret reference",
           description:
-            "A reference in the configured secret backend; never the token value.",
+            "Choose the registered secret location that holds the Jitbit API token. The token itself is never entered or displayed in this console.",
         },
-        [timeoutField]: { type: "integer", title: "Timeout (ms)" },
-        discoveryPageSize: { type: "integer", title: "Discovery page size" },
+        [timeoutField]: {
+          type: "integer",
+          title: "Timeout (ms)",
+          description:
+            "Maximum time CaseWeaver waits for one Jitbit request before treating it as unavailable. This limit is expressed in milliseconds.",
+        },
+        discoveryPageSize: {
+          type: "integer",
+          title: "Discovery page size",
+          description:
+            "Number of ticket summaries requested per discovery page. Larger pages reduce round trips but make each bounded request heavier.",
+        },
         maximumTicketCharacters: {
           type: "integer",
           title: "Maximum ticket characters",
+          description:
+            "Safety limit for the text retained from a single ticket. Longer tickets are bounded before downstream processing to keep work and costs predictable.",
         },
         initialUpdatedFrom: {
           type: "string",
           title: "Initial update boundary",
           format: "date",
+          description:
+            "Optional date for the first import only. After a completed synchronization, CaseWeaver uses its durable cursor instead of this bootstrap boundary.",
         },
         updatedFromOverlapDays: {
           type: "integer",
           title: "Update overlap days",
+          description:
+            "Extra days re-read on each incremental synchronization. This protects ticket updates that share Jitbit's date-granular timestamp; duplicate work is reconciled by the server.",
         },
       },
       required: ["baseUrl", "apiTokenReference"],
@@ -100,7 +118,9 @@ export const legacyJitbitAdministrationDescriptor: ConfigurationDescriptor =
  * authoritative runtime validator.
  */
 export const jitbitAdministrationDescriptor: ConfigurationDescriptor =
-  descriptor("2", "requestTimeoutMs");
+  // Version 2 remains immutable in existing installations. Version 3 adds
+  // operator-facing guidance without altering the runtime settings shape.
+  descriptor("3", "requestTimeoutMs");
 
 /** Descriptor revisions this adapter can execute for immutable durable work. */
 export const jitbitAdministrationDescriptorRevisions: readonly ConfigurationDescriptor[] =

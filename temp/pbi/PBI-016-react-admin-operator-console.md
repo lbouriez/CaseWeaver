@@ -34,6 +34,10 @@ completed administration control plane and production runtime host:
   model, or dimension. The same reusable control now covers non-routine policy JSON,
   AI limits/pricing/budgets, source and schedule behavior, webhook ingress limits,
   public bases, and workspace-role decisions without adding a client-side policy path.
+  Structured descriptor examples are presented in operator language (for example,
+  `Branch: main`), while a new immutable descriptor revision retains the exact safe
+  value only for an explicit form choice; historical revisions cannot shadow the
+  current authoring guidance.
 - `packages/administration`, PostgreSQL descriptor/configuration/version/outbox/session
   persistence, provider-neutral OIDC/PKCE, API-managed cookies/CSRF, dynamic descriptor
   registration, workspace-scoped redacted reads, mandatory server audit paths, and the

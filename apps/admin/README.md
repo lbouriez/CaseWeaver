@@ -42,8 +42,10 @@ responses or an explicit unavailable/denied state; it never substitutes sample r
 - Descriptors: `GET /v1/admin/descriptors/connectors` and
   `GET /v1/admin/descriptors/ai-providers`. Safe descriptor schema metadata
   controls field help and examples, plus reusable `structured_repository` and
-  `git_reference` inputs with an advanced JSON fallback; no connector or
-  provider name changes the form logic.
+  `git_reference` inputs with an advanced JSON fallback. Structured examples
+  are shown in operator language (for example, `Branch: main`), while their
+  exact safe representation is applied only after an explicit choice; no
+  connector or provider name changes the form logic.
 - Connector draft-test routes: `GET
   /v1/admin/connector-descriptors/:type/draft-tests`, followed by an audited
   `POST` preview and confirmed execution under that descriptor/type operation.
