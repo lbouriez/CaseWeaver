@@ -61,6 +61,7 @@ The `.features` directory is the authoritative implementation specification:
 - [API, MCP, and future UI](.features/10-api-mcp-and-future-ui.md)
 - [Engineering standards](.features/11-engineering-standards.md)
 - [Roadmap](.features/12-roadmap.md)
+- [GitHub Actions and delivery workflows](.github/README.md)
 
 Implementation-ready backlog items are temporarily maintained under
 [`temp/pbi`](temp/pbi/README.md). They can later be imported into GitHub Issues and
