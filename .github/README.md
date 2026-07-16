@@ -113,6 +113,9 @@ four values, verification still succeeds but deployment jobs are skipped.
 
 The token is never given to fork pull requests. The production and preview deployment
 jobs use only the artifact created by the verification job, not an unverified checkout.
+The publishing action installs its isolated Wrangler CLI through npm: the repository
+itself remains pnpm-managed, while this avoids modifying its protected workspace root
+to bootstrap a deployment-only tool.
 
 ## Documentation portal cleanup — remove obsolete Cloudflare deployments
 

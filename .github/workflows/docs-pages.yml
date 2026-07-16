@@ -100,9 +100,6 @@ jobs:
       deployments: write
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - uses: pnpm/action-setup@9fd676a19091d4595eefd76e4bd31c97133911f1
-        with:
-          version: 11.12.0
       - name: Download verified documentation artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
@@ -133,6 +130,7 @@ jobs:
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy website/build --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT || secrets.CLOUDFLARE_PAGES_PROJECT }} --branch=main
           gitHubToken: ${{ github.token }}
+          packageManager: npm
           wranglerVersion: 4.111.0
       - name: Record deployment URL
         env:
@@ -160,9 +158,6 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - uses: pnpm/action-setup@9fd676a19091d4595eefd76e4bd31c97133911f1
-        with:
-          version: 11.12.0
       - name: Download verified documentation artifact
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
@@ -194,6 +189,7 @@ jobs:
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy website/build --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT || secrets.CLOUDFLARE_PAGES_PROJECT }} --branch=pr-${{ github.event.pull_request.number }}
           gitHubToken: ${{ github.token }}
+          packageManager: npm
           wranglerVersion: 4.111.0
       - name: Comment PR with preview URL
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
