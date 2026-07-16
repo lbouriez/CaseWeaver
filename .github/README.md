@@ -98,17 +98,18 @@ and keeps the verified build artifact for seven days.
   `cloudflare-pages-preview` environment deploys a preview to branch `pr-<number>` and
   maintains one bot comment with its HTTPS URL.
 
-Cloudflare publishing becomes eligible only after these **repository variables** are
-configured:
+Cloudflare publishing accepts these as **repository variables** (preferred) or as
+**repository secrets** (supported for existing installations):
 
 - `CASEWEAVER_DOCS_SITE_URL` — the production HTTPS origin;
 - `CLOUDFLARE_ACCOUNT_ID`;
 - `CLOUDFLARE_PAGES_PROJECT`.
 
-`CLOUDFLARE_API_TOKEN` is a secret in both `cloudflare-pages-preview` and
-`cloudflare-pages-production`; protect the production environment. Without all public
-variables, verification still succeeds but deployment jobs are skipped. Once a
-deployment job is eligible, its environment validates the token before it can upload.
+`CLOUDFLARE_API_TOKEN` is always a secret. Scope it to both
+`cloudflare-pages-preview` and `cloudflare-pages-production` when those environments
+are configured, and protect production. The legacy repository-secret arrangement is
+also accepted so existing values never need to be recovered or re-entered. Without all
+four values, verification still succeeds but deployment jobs are skipped.
 
 The token is never given to fork pull requests. The production and preview deployment
 jobs use only the artifact created by the verification job, not an unverified checkout.

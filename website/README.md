@@ -38,16 +38,19 @@ repository owner must:
    access for that project. Keep `cloudflare-pages-production` protected if you want to
    gate production deploys; keep `cloudflare-pages-preview` unprotected so previews and
    cleanup can run automatically.
-3. Add `CASEWEAVER_DOCS_SITE_URL` as a repository variable. The production build embeds
-   this public HTTPS origin into the static artifact, so it must be available before the
-   protected deployment job begins.
+3. Prefer `CASEWEAVER_DOCS_SITE_URL` as a repository variable. The production build
+   embeds this public HTTPS origin into the static artifact, so it must be available
+   before the protected deployment job begins. An existing repository secret with that
+   name is also supported.
 4. Add `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_PAGES_PROJECT` as repository variables.
    The workflow uses them to decide whether publication is eligible and to create
-   trusted same-repository preview URLs.
+   trusted same-repository preview URLs. Existing repository secrets with these names
+   are also supported, so their values do not need to be recovered before publishing.
 
 Do not add an API token to this repository, a local `.env` file, website content, or a
 GitHub Actions log. Pull requests intentionally do not receive deployment credentials.
-Until these variables and protected-environment secrets exist, the workflow runs the
+Until these variables (or existing repository secrets) and protected-environment
+secrets exist, the workflow runs the
 same install/typecheck/test/build verification but safely skips Cloudflare publication
 and cleanup.
 
