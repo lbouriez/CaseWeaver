@@ -38,6 +38,31 @@ $env:ADMIN_PASSWORD = "change-this-before-sharing-the-ui"
 docker compose -f deploy\docker\compose.local.yml up --build --wait
 ```
 
+### Local Docusaurus knowledge-source evaluation
+
+The base stack intentionally does not assume any contributor's workstation paths. To
+make one local Git/Docusaurus repository available for a real connector test and worker
+synchronization, use the read-only documentation overlay. It mounts the repository into
+the API and worker only at `/mnt/caseweaver/repositories/cloud`; the Admin browser and
+the no-network attachment processor receive neither the host path nor the mount.
+
+The provider credential is server-only. It is forwarded to the API and worker, but Admin
+must receive only the opaque reference `env:CASEWEAVER_OPENROUTER_KEY`, never its value.
+
+```powershell
+$env:CASEWEAVER_DOCUMENTATION_REPOSITORY = "C:/GIT/Documentation/Cloud"
+$env:CASEWEAVER_OPENROUTER_KEY = "<your OpenRouter key>"
+docker compose -f deploy\docker\compose.local.yml -f deploy\docker\compose.local.documentation.yml up --build --wait
+```
+
+In Admin, configure the Git/Markdown connector with local repository
+`/mnt/caseweaver/repositories/cloud`, allowed local root
+`/mnt/caseweaver/repositories`, and the desired branch/tag. Configure the
+OpenAI-compatible provider with `env:CASEWEAVER_OPENROUTER_KEY`, then create an active
+priced embedding binding, hard budget, collection, connector instance, and enabled
+knowledge source. The **Synchronize** action on that source queues the real worker run.
+Start with a narrow path filter to bound first-run cost.
+
 ## Why there are several Compose files
 
 | File | One job | What it starts |

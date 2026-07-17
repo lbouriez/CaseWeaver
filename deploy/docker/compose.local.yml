@@ -120,6 +120,10 @@ services:
       ADMIN_LOGIN: ${ADMIN_LOGIN:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
       ADMIN_DISABLE_LOGIN_AUTHENTICATION: ${ADMIN_DISABLE_LOGIN_AUTHENTICATION:-false}
+      # Optional development-only provider credential passthrough. Configure
+      # only its opaque env:CASEWEAVER_OPENROUTER_KEY reference in Admin; this
+      # value is never served to the browser or persisted by the API.
+      CASEWEAVER_OPENROUTER_KEY: ${CASEWEAVER_OPENROUTER_KEY:-}
       # OIDC is deliberately host-environment passthrough. Compose omits an unset
       # mapping-form variable rather than injecting an invalid empty value. A login
       # requires every value below plus a real provider/client registration.
@@ -183,6 +187,9 @@ services:
       OBJECT_STORAGE_LOCAL_ROOT: /tmp/caseweaver-objects
       WORKER_GIT_TEMPORARY_DIRECTORY: /tmp/caseweaver-git
       WORKER_GIT_REMOTE_CACHE_DIRECTORY: /tmp/caseweaver-git-cache
+      # Matches the API's development credential passthrough so metered worker
+      # embedding calls can resolve the same server-only opaque reference.
+      CASEWEAVER_OPENROUTER_KEY: ${CASEWEAVER_OPENROUTER_KEY:-}
       WORKER_ATTACHMENT_RUNTIME_SOCKET_PATH: /var/run/caseweaver-attachments/processor.sock
       WORKER_ATTACHMENT_RUNTIME_JOBS_DIRECTORY: /var/run/caseweaver-attachments/jobs
     depends_on:

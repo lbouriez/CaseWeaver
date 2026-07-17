@@ -1,0 +1,22 @@
+name: caseweaver-local
+
+# Optional developer-machine overlay for exercising a local Docusaurus/Git
+# knowledge source. The host path is deliberately required rather than
+# committed: an open-source Compose stack must not assume a contributor's
+# filesystem layout. It is read-only and reaches only the API (bounded
+# connector test) and worker (actual ingestion), never the browser or the
+# no-network attachment processor.
+services:
+  api:
+    volumes:
+      - type: bind
+        source: ${CASEWEAVER_DOCUMENTATION_REPOSITORY:?Set CASEWEAVER_DOCUMENTATION_REPOSITORY to the local Git repository directory.}
+        target: /mnt/caseweaver/repositories/cloud
+        read_only: true
+
+  worker:
+    volumes:
+      - type: bind
+        source: ${CASEWEAVER_DOCUMENTATION_REPOSITORY:?Set CASEWEAVER_DOCUMENTATION_REPOSITORY to the local Git repository directory.}
+        target: /mnt/caseweaver/repositories/cloud
+        read_only: true
