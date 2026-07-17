@@ -38,6 +38,8 @@ export function SourceScheduleDrafts({
   const [connectors, setConnectors] = useState<readonly AdminListItem[]>();
   const [collections, setCollections] = useState<readonly AdminListItem[]>();
   const [budgets, setBudgets] = useState<readonly AdminListItem[]>();
+  const [attachmentPolicies, setAttachmentPolicies] =
+    useState<readonly AdminListItem[]>();
   const [sources, setSources] = useState<readonly AdminListItem[]>();
   const [sourceId, setSourceId] = useState("");
   const [sourceVersionId, setSourceVersionId] = useState<string>();
@@ -61,6 +63,13 @@ export function SourceScheduleDrafts({
   const [chunkingProfileVersion, setChunkingProfileVersion] = useState("v1");
   const [embeddingBatchSize, setEmbeddingBatchSize] = useState("16");
   const [embeddingBudgetPolicyId, setEmbeddingBudgetPolicyId] = useState("");
+  const [attachmentMode, setAttachmentMode] = useState<
+    "disabled" | "optional" | "required"
+  >("disabled");
+  const [attachmentPolicyId, setAttachmentPolicyId] = useState("");
+  const [attachmentPolicyVersionId, setAttachmentPolicyVersionId] = useState<
+    string | undefined
+  >();
   const [synchronizationPolicy, setSynchronizationPolicy] = useState(
     '{"triggers":[{"mode":"manual"}]}',
   );
@@ -108,6 +117,11 @@ export function SourceScheduleDrafts({
       client.list("collections", { limit: 200 }, { signal: controller.signal }),
       client.list("ai-budgets", { limit: 200 }, { signal: controller.signal }),
       client.list(
+        "attachment-policies",
+        { limit: 200 },
+        { signal: controller.signal },
+      ),
+      client.list(
         "knowledge-sources",
         { limit: 200 },
         { signal: controller.signal },
@@ -119,6 +133,7 @@ export function SourceScheduleDrafts({
           descriptors,
           collectionResult,
           budgetResult,
+          attachmentPolicyResult,
           sourceResult,
         ]) => {
           const knowledgeSourceTypes = new Set(
@@ -140,6 +155,11 @@ export function SourceScheduleDrafts({
             (item) => item.status === "hard",
           );
           setBudgets(hardBudgets);
+          const activeAttachmentPolicies = attachmentPolicyResult.items.filter(
+            (item) => item.status === "active",
+          );
+          setAttachmentPolicies(activeAttachmentPolicies);
+          setAttachmentPolicyId(activeAttachmentPolicies[0]?.id ?? "");
           setSources(sourceResult.items);
           setConnectorId(eligibleConnectors[0]?.id ?? "");
           setCollectionId(collectionResult.items[0]?.id ?? "");
@@ -152,6 +172,29 @@ export function SourceScheduleDrafts({
       });
     return () => controller.abort();
   }, [client]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setAttachmentPolicyVersionId(undefined);
+    if (attachmentMode === "disabled" || attachmentPolicyId.length === 0) {
+      return () => controller.abort();
+    }
+    void client
+      .configurationInspection(attachmentPolicyId, controller.signal)
+      .then((inspection) => {
+        if (
+          inspection.lifecycle !== "active" ||
+          inspection.currentVersionId === undefined
+        ) {
+          throw new Error("The selected attachment policy is not active.");
+        }
+        setAttachmentPolicyVersionId(inspection.currentVersionId);
+      })
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setSourceError(error);
+      });
+    return () => controller.abort();
+  }, [attachmentMode, attachmentPolicyId, client]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -193,6 +236,9 @@ export function SourceScheduleDrafts({
       chunkingProfileId.trim().length === 0 ||
       chunkingProfileVersion.trim().length === 0 ||
       embeddingBudgetPolicyId.length === 0 ||
+      (attachmentMode !== "disabled" &&
+        (attachmentPolicyId.length === 0 ||
+          attachmentPolicyVersionId === undefined)) ||
       !Number.isSafeInteger(Number(embeddingBatchSize)) ||
       Number(embeddingBatchSize) < 1 ||
       Number(embeddingBatchSize) > 1_000
@@ -216,6 +262,15 @@ export function SourceScheduleDrafts({
         chunkingProfileVersion: chunkingProfileVersion.trim(),
         embeddingBatchSize: Number(embeddingBatchSize),
         embeddingBudgetPolicyId,
+        attachmentStage:
+          attachmentMode === "disabled"
+            ? { mode: "disabled" }
+            : {
+                mode: attachmentMode,
+                attachmentPolicyId,
+                attachmentPolicyConfigurationVersionId:
+                  attachmentPolicyVersionId as string,
+              },
         synchronizationPolicy: policy,
         deletionBehavior,
       });
@@ -441,6 +496,55 @@ export function SourceScheduleDrafts({
               ))}
             </TextField>
             <AuthoringFieldLabel
+              description="Attachment handling is chosen by this source version, not by a later analysis recipe. Disabled keeps original source content unchanged. Optional records safe warnings when a picture or file cannot be processed. Required blocks activation work if required evidence cannot reach a terminal prepared state."
+              label="Source attachment handling"
+            />
+            <TextField
+              fullWidth
+              helperText="Select disabled when this source has no useful images or files. Selecting a policy freezes its exact version with this source draft; policy limits, vision binding and processor security rules stay server-owned."
+              label="Attachment handling"
+              onChange={(event) =>
+                setAttachmentMode(
+                  event.target.value as "disabled" | "optional" | "required",
+                )
+              }
+              required
+              select
+              value={attachmentMode}
+            >
+              <MenuItem value="disabled">Do not process attachments</MenuItem>
+              <MenuItem value="optional">
+                Process attachments when available (warnings allowed)
+              </MenuItem>
+              <MenuItem value="required">
+                Require terminal attachment evidence
+              </MenuItem>
+            </TextField>
+            {attachmentMode === "disabled" ? null : (
+              <TextField
+                fullWidth
+                helperText={
+                  attachmentPolicyVersionId === undefined
+                    ? "Choose an active attachment policy; its exact immutable version is checked before creating the draft."
+                    : `An immutable policy version is pinned by the API before this source can run.`
+                }
+                label="Active attachment policy"
+                onChange={(event) => setAttachmentPolicyId(event.target.value)}
+                required
+                select
+                value={attachmentPolicyId}
+              >
+                <MenuItem disabled value="">
+                  Select an active attachment policy
+                </MenuItem>
+                {attachmentPolicies?.map((item) => (
+                  <MenuItem key={item.id} value={item.id}>
+                    {item.label}
+                  </MenuItem>
+                ))}
+              </TextField>
+            )}
+            <AuthoringFieldLabel
               description="A bounded, feature-level JSON policy for when the source may synchronize. Connector-specific filters belong only to the selected connector configuration."
               label="Source synchronization policy"
             />
@@ -479,7 +583,8 @@ export function SourceScheduleDrafts({
                   sourceBusy ||
                   activeConnectors === undefined ||
                   collections === undefined ||
-                  budgets === undefined
+                  budgets === undefined ||
+                  attachmentPolicies === undefined
                 }
                 onClick={() => void createSource()}
                 variant="contained"

@@ -37,6 +37,37 @@ describe("worker production configuration", () => {
     );
   });
 
+  it("accepts a complete private attachment processor boundary and rejects partial or unsafe paths", () => {
+    const environment = {
+      DATABASE_URL: "postgresql://caseweaver:caseweaver@localhost/test",
+      WORKER_ATTACHMENT_RUNTIME_SOCKET_PATH:
+        "/var/run/caseweaver/attachment-processor.sock",
+      WORKER_ATTACHMENT_RUNTIME_JOBS_DIRECTORY:
+        "/var/lib/caseweaver/attachment-jobs",
+      WORKER_ATTACHMENT_RUNTIME_MAXIMUM_ARCHIVE_DEPTH: "0",
+    };
+
+    expect(loadWorkerRuntimeConfiguration(environment)).toMatchObject({
+      attachmentRuntime: {
+        socketPath: "/var/run/caseweaver/attachment-processor.sock",
+        jobsDirectory: "/var/lib/caseweaver/attachment-jobs",
+        hardCeilings: { maximumArchiveDepth: 0 },
+      },
+    });
+    expect(() =>
+      loadWorkerRuntimeConfiguration({
+        ...environment,
+        WORKER_ATTACHMENT_RUNTIME_JOBS_DIRECTORY: undefined,
+      }),
+    ).toThrow(WorkerConfigurationError);
+    expect(() =>
+      loadWorkerRuntimeConfiguration({
+        ...environment,
+        WORKER_ATTACHMENT_RUNTIME_SOCKET_PATH: "relative/socket",
+      }),
+    ).toThrow(WorkerConfigurationError);
+  });
+
   it("accepts only an explicit immutable local repository-agent host mapping", () => {
     expect(
       loadWorkerRuntimeConfiguration({

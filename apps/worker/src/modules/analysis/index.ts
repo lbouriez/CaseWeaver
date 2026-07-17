@@ -9,8 +9,12 @@ export {
   RepositoryInvestigationRuntimeError,
 } from "./repository-investigation.js";
 export {
+  CompositePinnedRepositoryAgentRuntimeResolver,
+  CompositeRepositoryRuntimeExecutionResolver,
   ComposedPinnedRepositoryAgentRuntimeResolver,
   createLocalGitOciPinnedRepositoryRuntimeResolver,
+  createRepositoryAnalysisPinnedRuntimeResolver,
+  RepositoryAnalysisRuntimeExecutionResolver,
 } from "./pinned-repository-runtime.js";
 
 export type AnalysisExecuteCommand = EnvelopeFor<"analysis.execute.v1">;

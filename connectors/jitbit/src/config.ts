@@ -1,6 +1,6 @@
 import {
-  createConnectorConfigurationSchema,
   type ConnectorConfiguration,
+  createConnectorConfigurationSchema,
 } from "@caseweaver/connector-sdk";
 import { z } from "zod";
 

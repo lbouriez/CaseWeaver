@@ -287,6 +287,17 @@ function asKnowledgeSourceConfiguration(
     chunkingProfileVersion: input.chunkingProfile.version,
     synchronization: input.synchronization,
     embeddingBatchSize: input.embeddingBatchSize,
+    ...(input.attachmentPreparation === undefined
+      ? {}
+      : {
+          attachmentPreparation: input.attachmentPreparation,
+          attachmentPreparationPins: Object.freeze({
+            sourceConfigurationVersionId: input.sourceConfigurationVersionId,
+            connectorRegistrationId: input.connectorRegistrationId,
+            connectorConfigurationVersionId:
+              input.connectorConfigurationVersionId,
+          }),
+        }),
   });
 }
 

@@ -1,6 +1,4 @@
 import {
-  toConfigurationHistoryPageDto,
-  toConfigurationInspectionDto,
   type AdministrationDetailDto,
   type AdministrationListItemDto,
   type AdministrationResource,
@@ -9,8 +7,12 @@ import {
   type ConfigurationInspectionDto,
   type ConfigurationVersionSummaryDto,
   type CursorPageDto,
+  toConfigurationHistoryPageDto,
+  toConfigurationInspectionDto,
 } from "@caseweaver/administration";
 import type { PrismaClient } from "@prisma/client";
+
+import { PostgresRepositoryAnalysisResourceReadStore } from "./repository-analysis-resource-read-store.js";
 
 export interface AdministrationResourceReadStore {
   list(
@@ -164,7 +166,13 @@ function idCursor(after: string | undefined): Readonly<{
 export class PostgresAdministrationResourceReadStore
   implements AdministrationResourceReadStore
 {
-  public constructor(private readonly client: PrismaClient) {}
+  private readonly repositoryAnalysis: PostgresRepositoryAnalysisResourceReadStore;
+
+  public constructor(private readonly client: PrismaClient) {
+    this.repositoryAnalysis = new PostgresRepositoryAnalysisResourceReadStore(
+      client,
+    );
+  }
 
   public async list(
     input: Readonly<{
@@ -174,6 +182,10 @@ export class PostgresAdministrationResourceReadStore
       readonly after?: string;
     }>,
   ): Promise<CursorPageDto<Item>> {
+    const resource = input.resource;
+    if (this.repositoryAnalysis.supports(resource)) {
+      return this.repositoryAnalysis.list({ ...input, resource });
+    }
     if (
       !Number.isSafeInteger(input.limit) ||
       input.limit < 1 ||
@@ -192,6 +204,10 @@ export class PostgresAdministrationResourceReadStore
       readonly id: string;
     }>,
   ): Promise<AdministrationDetailDto | undefined> {
+    const resource = input.resource;
+    if (this.repositoryAnalysis.supports(resource)) {
+      return this.repositoryAnalysis.detail({ ...input, resource });
+    }
     const values = await this.items({ ...input, limit: 200 });
     const found = values.find((value) => value.id === input.id);
     return found === undefined ? undefined : detailFrom(found);

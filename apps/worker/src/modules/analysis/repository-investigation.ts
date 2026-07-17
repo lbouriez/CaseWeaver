@@ -2,14 +2,15 @@ import { createHash } from "node:crypto";
 
 import type { AiExecutionGateway } from "@caseweaver/ai-execution";
 import type {
-  AnalysisEvidence,
-  RepositoryInvestigationPort,
-} from "@caseweaver/analysis";
-import type {
   RepositoryAgentEvidence,
+  RepositoryAgentFinding,
   RepositoryAgentResult,
   RepositoryAgentRuntimePin,
 } from "@caseweaver/ai-sdk";
+import type {
+  AnalysisEvidence,
+  RepositoryInvestigationPort,
+} from "@caseweaver/analysis";
 import type { RepositoryRuntimeExecutionConfigurationResolver } from "@caseweaver/postgres";
 
 const shaPattern = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/iu;
@@ -44,6 +45,10 @@ function safeEvidence(
       reference === null ||
       typeof reference !== "object" ||
       typeof reference.path !== "string" ||
+      typeof reference.id !== "string" ||
+      !/^repository-evidence-[a-f0-9]{64}$/iu.test(reference.id) ||
+      typeof reference.excerptHash !== "string" ||
+      !/^[a-f0-9]{64}$/iu.test(reference.excerptHash) ||
       reference.path.length === 0 ||
       reference.path.length > 1_024 ||
       reference.path.startsWith("/") ||
@@ -60,21 +65,16 @@ function safeEvidence(
       unavailable();
     }
     const location = `${reference.path}:${reference.startLine}:${reference.endLine}`;
-    if (positions.has(location)) unavailable();
+    if (positions.has(reference.id) || positions.has(location)) unavailable();
+    positions.add(reference.id);
     positions.add(location);
     // Do not retain source excerpts or model text. The isolated runtime has
     // already validated the location against the immutable tree; downstream
     // prompts receive provenance only, which prevents secret/source leakage.
     const content = `Pinned repository evidence at ${reference.path}:${reference.startLine}-${reference.endLine}.`;
-    const identity = [
-      pin.runtimeVersionId,
-      pin.repositoryId,
-      pin.pinnedCommit.toLowerCase(),
-      location,
-    ].join(":");
     output.push(
       Object.freeze({
-        id: `repository-${sha256(identity)}`,
+        id: reference.id,
         kind: "repository" as const,
         content,
         contentHash: sha256(content),
@@ -83,11 +83,47 @@ function safeEvidence(
         path: reference.path,
         startLine: reference.startLine,
         endLine: reference.endLine,
-        excerptHash: sha256(`location:${identity}`),
+        excerptHash: reference.excerptHash.toLowerCase(),
       }),
     );
   }
   return Object.freeze(output);
+}
+
+function safeFindings(
+  value: readonly RepositoryAgentFinding[],
+  evidence: readonly AnalysisEvidence[],
+): readonly import("@caseweaver/analysis").RepositoryFinding[] {
+  if (!Array.isArray(value) || value.length > 100) unavailable();
+  const evidenceIds = new Set(evidence.map((item) => item.id));
+  const findingIds = new Set<string>();
+  const findings: import("@caseweaver/analysis").RepositoryFinding[] = [];
+  for (const finding of value) {
+    if (
+      finding === null ||
+      typeof finding !== "object" ||
+      typeof finding.id !== "string" ||
+      !/^repository-finding-[a-f0-9]{64}$/iu.test(finding.id) ||
+      findingIds.has(finding.id) ||
+      typeof finding.summary !== "string" ||
+      finding.summary.trim().length === 0 ||
+      finding.summary.length > 16_000 ||
+      !Array.isArray(finding.evidenceIds) ||
+      finding.evidenceIds.length === 0 ||
+      finding.evidenceIds.length > 100 ||
+      new Set(finding.evidenceIds).size !== finding.evidenceIds.length ||
+      finding.evidenceIds.some((id: string) => !evidenceIds.has(id))
+    ) {
+      unavailable();
+    }
+    findingIds.add(finding.id);
+    findings.push({
+      id: finding.id,
+      summary: finding.summary.trim(),
+      evidenceIds: [...finding.evidenceIds],
+    });
+  }
+  return Object.freeze(findings);
 }
 
 function instruction(input: {
@@ -97,7 +133,7 @@ function instruction(input: {
   return [
     "Investigate only the administrator-pinned repository through the supplied read-only tools.",
     "Do not disclose credentials, tokens, configuration values, or source excerpts in the result.",
-    "Return only a concise summary and validated file/line evidence locations.",
+    "Return only a concise summary and bounded findings, each linked to file/line citations.",
     "Case context follows:",
     JSON.stringify({
       caseSummary: input.caseSummary,
@@ -151,16 +187,17 @@ export class PinnedRepositoryInvestigationPort
   ) {
     const pin = runtimePin({
       workspaceId: input.execution.workspaceId,
-      runtimeVersionId: input.runtimeVersionId,
-      repositoryId: input.repositoryId,
-      pinnedCommit: input.pinnedCommit,
+      runtimeVersionId: input.repository.runtimePinId,
+      repositoryId: input.repository.repositoryId,
+      pinnedCommit: input.repository.pinnedCommit,
     });
     const resolved = await this.runtimes.resolveExecution(pin, input.signal);
     if (
       resolved.runtimeVersionId !== pin.runtimeVersionId ||
       resolved.repositoryId !== pin.repositoryId ||
       resolved.pinnedCommit.toLowerCase() !== pin.pinnedCommit ||
-      resolved.execution.bindingVersionId !== input.bindingVersionId
+      resolved.execution.bindingVersionId !==
+        input.repository.repositoryAgentBindingVersionId
     ) {
       unavailable();
     }
@@ -178,7 +215,7 @@ export class PinnedRepositoryInvestigationPort
       {
         kind: "repositoryAgent",
         role: "repositoryAgent",
-        bindingVersionId: input.bindingVersionId,
+        bindingVersionId: input.repository.repositoryAgentBindingVersionId,
         analysisId: input.execution.analysisIdentityId,
         attribution: { analysisJobId: input.execution.analysisJobId },
         requiredCapabilities: ["repositoryAgent", "tools"],
@@ -206,15 +243,17 @@ export class PinnedRepositoryInvestigationPort
       result.value === null ||
       typeof result.value !== "object" ||
       typeof result.value.summary !== "string" ||
-      !Array.isArray(result.value.evidence)
+      result.value.summary.trim().length === 0 ||
+      !Array.isArray(result.value.evidence) ||
+      !Array.isArray(result.value.findings)
     ) {
       unavailable();
     }
+    const evidence = safeEvidence(result.value.evidence, pin);
     return Object.freeze({
-      // Repository-agent summaries are intentionally not propagated to a
-      // result/API. They are untrusted model output and could contain source.
-      summary: "Pinned repository investigation completed.",
-      evidence: safeEvidence(result.value.evidence, pin),
+      summary: result.value.summary.trim(),
+      evidence,
+      findings: safeFindings(result.value.findings, evidence),
       operationIds: Object.freeze([result.operationId]),
     });
   }

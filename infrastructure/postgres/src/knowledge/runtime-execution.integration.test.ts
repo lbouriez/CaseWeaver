@@ -105,6 +105,44 @@ describe("PostgreSQL knowledge execution runtime", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("projects the immutable source attachment stage without following a current policy pointer", async () => {
+    await seedAttachmentPolicy();
+    await insertSourceConfiguration("source-runtime-attachment");
+    await pool.query(
+      `INSERT INTO knowledge_source_runtime_versions (
+         workspace_id, knowledge_source_id, source_configuration_version_id,
+         connector_registration_id, connector_configuration_version_id,
+         knowledge_collection_id, collection_runtime_version_id,
+         normalization_profile_id, normalization_profile_version,
+         chunking_profile_id, chunking_profile_version, synchronization_policy,
+         embedding_batch_size, attachment_stage_mode,
+         attachment_policy_configuration_version_id, attachment_access_policy_hash
+       ) VALUES (
+         $1, $2, 'source-runtime-attachment', 'connector-runtime', 'connector-runtime-v1',
+         'collection-runtime', 'collection-runtime-v1',
+         'text-normalization', 'v1', 'text-chunking', 'v1',
+         '{"triggers":[{"mode":"manual"}]}'::jsonb, 10, 'optional',
+         'attachment-policy-runtime-v1', repeat('d', 64)
+       )`,
+      [workspace, source],
+    );
+
+    await expect(
+      resolver.resolve({
+        workspaceId: workspace,
+        sourceId: source,
+        sourceConfigurationVersionId: "source-runtime-attachment",
+        connectorConfigurationVersionId: "connector-runtime-v1",
+      }),
+    ).resolves.toMatchObject({
+      attachmentPreparation: {
+        mode: "optional",
+        policyVersion: "attachment-policy-runtime-v1",
+        accessPolicyHash: "d".repeat(64),
+      },
+    });
+  });
+
   it("claims cursor and fence atomically, rejects stale commit, and permits the current fence", async () => {
     await pool.query(
       `INSERT INTO knowledge_source_states (
@@ -346,4 +384,42 @@ async function insertSourceConfiguration(versionId: string): Promise<void> {
       [versionId, workspace, source],
     );
   }
+}
+
+async function seedAttachmentPolicy(): Promise<void> {
+  await pool.query(
+    `INSERT INTO administration_configurations (
+       id, workspace_id, resource_type, lifecycle, current_version_id
+     ) VALUES ('attachment-policy-runtime', $1, 'attachment-policies', 'active', NULL)`,
+    [workspace],
+  );
+  await pool.query(
+    `INSERT INTO administration_configuration_versions (
+       id, workspace_id, configuration_id, version, settings, secret_references
+     ) VALUES (
+       'attachment-policy-runtime-v1', $1, 'attachment-policy-runtime', 1,
+       '{}'::jsonb, '[]'::jsonb
+     )`,
+    [workspace],
+  );
+  await pool.query(
+    `UPDATE administration_configurations
+        SET current_version_id = 'attachment-policy-runtime-v1'
+      WHERE workspace_id = $1 AND id = 'attachment-policy-runtime'`,
+    [workspace],
+  );
+  await pool.query(
+    `INSERT INTO attachment_policy_versions (
+       id, workspace_id, configuration_version_id,
+       processor_security_policy_version_id, vision_binding_version_id,
+       maximum_attachment_count, maximum_attachment_bytes,
+       maximum_archive_entries, maximum_expanded_archive_bytes,
+       maximum_archive_depth
+     ) VALUES (
+       'attachment-policy-runtime-record', $1, 'attachment-policy-runtime-v1',
+       'attachment-security-runtime-v1', 'binding-runtime-v1',
+       8, 4096, 20, 8192, 2
+     )`,
+    [workspace],
+  );
 }

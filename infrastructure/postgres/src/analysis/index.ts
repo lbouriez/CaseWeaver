@@ -22,6 +22,12 @@ import type { EnvelopeFor } from "@caseweaver/domain";
 import type { Prisma } from "@prisma/client";
 
 import type { PostgresTransactionLookup } from "../index.js";
+import {
+  effectiveProfileForRepositoryAnalysisRecipe,
+  preparedAttachmentsForPinnedCaseSnapshot,
+  repositoryRunForRepositoryAnalysisRecipe,
+  type RepositoryAnalysisRecipeExecutionRow,
+} from "../triggers/repository-analysis-execution-input-store.js";
 
 type AnalysisUnitOfWork = UnitOfWork & PostgresTransactionLookup;
 
@@ -44,6 +50,12 @@ interface CaseSnapshotRow {
   readonly tombstoned_by_principal_id: string | null;
   readonly tombstoned_at: Date | null;
   readonly tombstone_reason: string | null;
+}
+
+interface RecipeExecutionRow extends RepositoryAnalysisRecipeExecutionRow {
+  readonly resolved_commit_sha: string | null;
+  readonly repository_resolved_at: Date | null;
+  readonly attachment_evidence_hash: string;
 }
 
 interface OrdinalRow {
@@ -186,6 +198,27 @@ function snapshotFromRow(row: CaseSnapshotRow): ImmutableCaseSnapshot {
   ) as ImmutableCaseSnapshot;
 }
 
+async function preparedAttachmentsForRecipe(
+  database: Prisma.TransactionClient,
+  workspaceId: string,
+  caseSnapshotId: string,
+  profile: AnalysisProfile,
+  attachmentEvidenceHash: string,
+): Promise<AnalysisExecution["preparedAttachments"]> {
+  if (profile.attachments.policy === "disabled") return undefined;
+  const prepared = await preparedAttachmentsForPinnedCaseSnapshot(database, {
+    workspaceId,
+    caseSnapshotId,
+  });
+  if (attachmentEvidenceHash.toLowerCase() !== prepared.identityHash) {
+    throw new PostgresAnalysisExecutionStoreError(
+      "Retained attachment preparation is unavailable.",
+      "analysis.invalidCompletion",
+    );
+  }
+  return prepared;
+}
+
 function ensureCompletionMatchesExecution(input: {
   readonly execution: AnalysisExecution;
   readonly result: AnalysisResultRecord;
@@ -258,6 +291,103 @@ export class PostgresAnalysisExecutionStore implements AnalysisExecutionStore {
       const row = rows[0];
       if (row === undefined) return { kind: "notFound" };
 
+      const recipeRows = await database.$queryRaw<readonly RecipeExecutionRow[]>`
+        SELECT
+          request.id AS request_id, request.workspace_id,
+          request.case_snapshot_id, request.analysis_profile_version_id,
+          request.analysis_trigger_version_id,
+          trigger_version.analysis_trigger_id AS trigger_id,
+          request.connector_registration_id, request.connector_configuration_version_id,
+          profile.definition AS profile_definition,
+          recipe.id AS recipe_version_id,
+          recipe.analysis_profile_version_id AS recipe_profile_version_id,
+          recipe.analysis_binding_version_id,
+          recipe.retrieval_profile_version_id,
+          recipe.attachment_policy_version_id,
+          recipe.attachment_stage_mode,
+          recipe.code_repository_version_id,
+          recipe.repository_execution_policy_version_id,
+          recipe.repository_stage_mode,
+          repository_configuration.id AS repository_id,
+          policy_configuration.id AS execution_policy_id,
+          policy.repository_agent_binding_version_id,
+          input.resolved_commit_sha,
+          input.repository_resolved_at,
+          input.attachment_evidence_hash
+        FROM analysis_trigger_request_analyses AS bridge
+        JOIN analysis_trigger_requests AS request
+          ON request.workspace_id = bridge.workspace_id
+         AND request.id = bridge.analysis_trigger_request_id
+        JOIN analysis_trigger_versions AS trigger_version
+          ON trigger_version.workspace_id = request.workspace_id
+         AND trigger_version.id = request.analysis_trigger_version_id
+        JOIN analysis_execution_inputs AS input
+          ON input.workspace_id = request.workspace_id
+         AND input.analysis_trigger_request_id = request.id
+         AND input.state = 'finalized'
+        JOIN analysis_recipe_versions AS recipe
+          ON recipe.workspace_id = input.workspace_id
+         AND recipe.id = input.analysis_recipe_version_id
+        JOIN analysis_profile_versions AS profile
+          ON profile.workspace_id = request.workspace_id
+         AND profile.id = request.analysis_profile_version_id
+        LEFT JOIN administration_configuration_versions AS repository_version
+          ON repository_version.workspace_id = recipe.workspace_id
+         AND repository_version.id = recipe.code_repository_version_id
+        LEFT JOIN administration_configurations AS repository_configuration
+          ON repository_configuration.workspace_id = repository_version.workspace_id
+         AND repository_configuration.id = repository_version.configuration_id
+         AND repository_configuration.resource_type = 'code-repositories'
+        LEFT JOIN repository_execution_policy_versions AS policy
+          ON policy.workspace_id = recipe.workspace_id
+         AND policy.id = recipe.repository_execution_policy_version_id
+        LEFT JOIN administration_configuration_versions AS policy_version
+          ON policy_version.workspace_id = policy.workspace_id
+         AND policy_version.id = policy.configuration_version_id
+        LEFT JOIN administration_configurations AS policy_configuration
+          ON policy_configuration.workspace_id = policy_version.workspace_id
+         AND policy_configuration.id = policy_version.configuration_id
+         AND policy_configuration.resource_type = 'repository-execution-policies'
+        WHERE bridge.workspace_id = ${row.workspace_id}
+          AND bridge.analysis_job_id = ${row.analysis_job_id}
+      `;
+      const recipe = recipeRows[0];
+      const effectiveProfile =
+        recipe === undefined
+          ? (immutableJson(row.profile_definition) as AnalysisProfile)
+          : effectiveProfileForRepositoryAnalysisRecipe(recipe);
+      const repositoryRun =
+        recipe === undefined
+          ? undefined
+          : repositoryRunForRepositoryAnalysisRecipe(
+              recipe,
+              recipe.resolved_commit_sha ?? undefined,
+              recipe.repository_resolved_at?.toISOString(),
+            );
+      if (recipe !== undefined && recipe.case_snapshot_id === null) {
+        throw new PostgresAnalysisExecutionStoreError(
+          "Retained attachment preparation is unavailable.",
+          "analysis.invalidCompletion",
+        );
+      }
+      let preparedAttachments: AnalysisExecution["preparedAttachments"];
+      if (recipe !== undefined) {
+        const recipeCaseSnapshotId = recipe.case_snapshot_id;
+        if (recipeCaseSnapshotId === null) {
+          throw new PostgresAnalysisExecutionStoreError(
+            "Retained attachment preparation is unavailable.",
+            "analysis.invalidCompletion",
+          );
+        }
+        preparedAttachments = await preparedAttachmentsForRecipe(
+          database,
+          row.workspace_id,
+          recipeCaseSnapshotId,
+          effectiveProfile,
+          recipe.attachment_evidence_hash,
+        );
+      }
+
       const completed = await database.analysisResult.findUnique({
         where: {
           workspaceId_analysisJobId: {
@@ -325,7 +455,11 @@ export class PostgresAnalysisExecutionStore implements AnalysisExecutionStore {
             tombstoned_at: row.tombstoned_at,
             tombstone_reason: row.tombstone_reason,
           }),
-          profile: immutableJson(row.profile_definition) as AnalysisProfile,
+          profile: effectiveProfile,
+          ...(repositoryRun === undefined ? {} : { repositoryRun }),
+          ...(preparedAttachments === undefined
+            ? {}
+            : { preparedAttachments }),
         }),
       };
     });

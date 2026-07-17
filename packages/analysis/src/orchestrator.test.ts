@@ -18,8 +18,13 @@ import type {
   AnalysisEvidence,
   AnalysisExecution,
   AnalysisProfile,
+  RepositoryFinding,
+  RepositoryRunPin,
 } from "./contracts.js";
-import { analysisProfileSchema } from "./contracts.js";
+import {
+  analysisProfileSchema,
+  MAXIMUM_REPOSITORY_FINDINGS,
+} from "./contracts.js";
 import {
   DeterministicAnalysisAiGateway,
   DeterministicRepositoryInvestigationPort,
@@ -33,6 +38,7 @@ import {
 import {
   captureAnalysisRequest,
   createAnalysisRequestIdentity,
+  createPreparedAttachmentEvidenceIdentity,
   identityInputFor,
 } from "./identity.js";
 import { AnalysisOrchestrator } from "./orchestrator.js";
@@ -60,6 +66,8 @@ const output = JSON.stringify({
   unansweredQuestions: [],
   confidence: "medium",
 });
+
+const emptyPreparedAttachments = { evidence: [] };
 
 function profile(overrides: Partial<AnalysisProfile> = {}): AnalysisProfile {
   return {
@@ -125,6 +133,12 @@ function execution(configuredProfile = profile()): AnalysisExecution {
       ],
     },
     profile: configuredProfile,
+    preparedAttachments: {
+      ...emptyPreparedAttachments,
+      identityHash: createPreparedAttachmentEvidenceIdentity(
+        emptyPreparedAttachments,
+      ),
+    },
   };
 }
 
@@ -137,6 +151,30 @@ const knowledgeEvidence: AnalysisEvidence = {
   revisionId: "revision-1",
   chunkId: "chunk-1",
   sourceUrl: "https://docs.example.invalid/connection",
+};
+
+const repositoryRun: RepositoryRunPin = {
+  repositoryId: "support-service",
+  repositoryVersionId: "support-service-v2",
+  runtimePinId: "repository-runtime-v9",
+  executionPolicyId: "sandbox-policy",
+  executionPolicyVersionId: "sandbox-policy-v4",
+  repositoryAgentBindingVersionId: "repository-agent-v7",
+  pinnedCommit: "d".repeat(40),
+  resolvedAt: "2026-07-16T17:00:00.000Z",
+};
+
+const repositoryEvidence: AnalysisEvidence = {
+  id: "repository-code-1",
+  kind: "repository",
+  content: "export function connect(): void { throw new Error('offline'); }",
+  contentHash: digest("a"),
+  repositoryId: repositoryRun.repositoryId,
+  commit: repositoryRun.pinnedCommit,
+  path: "src/connect.ts",
+  startLine: 10,
+  endLine: 10,
+  excerptHash: digest("e"),
 };
 
 function command(jobId = "analysis-job-1") {
@@ -158,13 +196,29 @@ function command(jobId = "analysis-job-1") {
 
 function harness(input: {
   readonly configuredProfile?: AnalysisProfile;
+  readonly preparedAttachments?: AnalysisExecution["preparedAttachments"];
   readonly attachmentFailure?: Error;
   readonly retrievalFailure?: Error;
   readonly retrievalOperationIds?: readonly string[];
+  readonly repositoryRun?: RepositoryRunPin;
+  readonly repositoryResult?: Readonly<{
+    readonly summary: string;
+    readonly evidence: readonly AnalysisEvidence[];
+    readonly findings: readonly RepositoryFinding[];
+    readonly operationIds: readonly string[];
+  }>;
   readonly responses?: readonly unknown[];
 }) {
   const store = new InMemoryAnalysisExecutionStore();
-  store.seed(execution(input.configuredProfile));
+  store.seed({
+    ...execution(input.configuredProfile),
+    ...(input.preparedAttachments === undefined
+      ? {}
+      : { preparedAttachments: input.preparedAttachments }),
+    ...(input.repositoryRun === undefined
+      ? {}
+      : { repositoryRun: input.repositoryRun }),
+  });
   const ai = new DeterministicAnalysisAiGateway(
     input.responses ?? [{ text: output }],
   );
@@ -188,7 +242,9 @@ function harness(input: {
       ai,
       ids: new SequentialAnalysisIds(),
       clock: new FixedAnalysisClock(),
-      repository: new DeterministicRepositoryInvestigationPort(),
+      repository: new DeterministicRepositoryInvestigationPort(
+        input.repositoryResult,
+      ),
     }),
   };
 }
@@ -265,6 +321,133 @@ describe("AnalysisOrchestrator", () => {
     expect(test.store.failures[0]).toMatchObject({ outcome: "failed" });
   });
 
+  it("fails a claimed run before any stage when required attachment preparation is unavailable", async () => {
+    const outcomes = {
+      evidence: [
+        {
+          attachmentId: "attachment-required-run-validation-1",
+          outcome: "failed" as const,
+          required: true,
+          warningCode: "attachment.downloadFailed",
+        },
+      ],
+    };
+    const test = harness({
+      configuredProfile: profile({ attachments: { policy: "optional" } }),
+      preparedAttachments: {
+        ...outcomes,
+        identityHash: createPreparedAttachmentEvidenceIdentity(outcomes),
+      },
+    });
+
+    await expect(
+      test.orchestrator.execute(command(), signal),
+    ).rejects.toMatchObject({
+      code: "analysis.invalidConfiguration",
+      retryable: false,
+    });
+    expect(test.store.results).toHaveLength(0);
+    expect(test.ai.calls).toHaveLength(0);
+  });
+
+  it("adds bounded repository-agent findings as delimited, evidence-linked prompt material", async () => {
+    const configured = profile({
+      repository: {
+        policy: "required",
+        repositoryId: repositoryRun.repositoryId,
+        repositoryVersionId: repositoryRun.repositoryVersionId,
+        executionPolicyId: repositoryRun.executionPolicyId,
+        executionPolicyVersionId: repositoryRun.executionPolicyVersionId,
+        repositoryAgentBindingVersionId:
+          repositoryRun.repositoryAgentBindingVersionId,
+        maximumContextCharacters: 4_000,
+        maximumEvidenceCharacters: 4_000,
+      },
+    });
+    const test = harness({
+      configuredProfile: configured,
+      repositoryRun,
+      repositoryResult: {
+        summary: "Repository investigation completed.",
+        evidence: [repositoryEvidence],
+        findings: [
+          {
+            id: "repository-finding-1",
+            summary: "The connection function throws while offline.",
+            evidenceIds: [repositoryEvidence.id],
+          },
+        ],
+        operationIds: ["repository-operation-1"],
+      },
+    });
+
+    await expect(test.orchestrator.execute(command(), signal)).resolves.toEqual(
+      { kind: "completed", resultId: "analysisResult-1" },
+    );
+
+    const result = test.store.results.get("analysisResult-1");
+    expect(result?.repositoryInvestigation).toEqual(
+      expect.objectContaining({
+        run: repositoryRun,
+        findings: [expect.objectContaining({ id: "repository-finding-1" })],
+      }),
+    );
+    expect(result?.evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: repositoryEvidence.id }),
+        expect.objectContaining({
+          id: "repository-finding-1",
+          content: expect.stringContaining("untrusted analytical evidence"),
+        }),
+      ]),
+    );
+    expect(result?.protectedContent?.exchanges[0]?.userPrompt).toContain(
+      "BEGIN UNTRUSTED EVIDENCE id=repository-finding-1",
+    );
+  });
+
+  it("rejects repository-agent output that exceeds the finding contract bound", async () => {
+    const configured = profile({
+      repository: {
+        policy: "required",
+        repositoryId: repositoryRun.repositoryId,
+        repositoryVersionId: repositoryRun.repositoryVersionId,
+        executionPolicyId: repositoryRun.executionPolicyId,
+        executionPolicyVersionId: repositoryRun.executionPolicyVersionId,
+        repositoryAgentBindingVersionId:
+          repositoryRun.repositoryAgentBindingVersionId,
+        maximumContextCharacters: 4_000,
+        maximumEvidenceCharacters: 4_000,
+      },
+    });
+    const test = harness({
+      configuredProfile: configured,
+      repositoryRun,
+      repositoryResult: {
+        summary: "Repository investigation completed.",
+        evidence: [repositoryEvidence],
+        findings: Array.from(
+          { length: MAXIMUM_REPOSITORY_FINDINGS + 1 },
+          (_, index) => ({
+            id: `repository-finding-${index}`,
+            summary: "A bounded finding.",
+            evidenceIds: [repositoryEvidence.id],
+          }),
+        ),
+        operationIds: ["repository-operation-1"],
+      },
+    });
+
+    await expect(
+      test.orchestrator.execute(command(), signal),
+    ).rejects.toMatchObject({
+      code: "analysis.invalidEvidence",
+      retryable: false,
+    });
+    expect(test.store.results).toHaveLength(0);
+    expect(test.ai.calls).toHaveLength(0);
+  });
+
   it("persists a terminal cancelled attempt through a fresh non-aborted signal", async () => {
     const store = new InMemoryAnalysisExecutionStore();
     store.seed(execution());
@@ -310,6 +493,16 @@ describe("AnalysisOrchestrator", () => {
     expect(test.store.results.get("analysisResult-1")?.operationIds).toEqual([
       "operation-1",
       "operation-2",
+    ]);
+    expect(
+      test.store.results.get("analysisResult-1")?.protectedContent?.exchanges,
+    ).toEqual([
+      expect.objectContaining({
+        userPrompt: expect.not.stringContaining("Repair the following"),
+      }),
+      expect.objectContaining({
+        userPrompt: expect.stringContaining("Repair the following"),
+      }),
     ]);
   });
 
@@ -370,7 +563,10 @@ describe("AnalysisOrchestrator", () => {
 
 describe("analysis request identity", () => {
   it("is canonical and changes when immutable input changes", () => {
-    const input = identityInputFor(execution().snapshot, profile());
+    const input = identityInputFor(
+      execution().snapshot,
+      profile({ attachments: { policy: "disabled" } }),
+    );
     const first = createAnalysisRequestIdentity(input);
     const reordered = createAnalysisRequestIdentity({
       ...input,
@@ -398,13 +594,167 @@ describe("analysis request identity", () => {
       {
         workspaceId: "workspace-1",
         caseReference: "case-1",
-        profile: profile(),
+        profile: profile({ attachments: { policy: "disabled" } }),
         signal,
       },
     );
 
     expect(captured.snapshot.id).toBe("snapshot-1");
     expect(captured.identity.caseRevision).toBe("revision-1");
+  });
+
+  it("includes immutable prepared attachment outcomes in identity without retaining attachment content", () => {
+    const outcomes = {
+      evidence: [
+        {
+          attachmentId: "attachment-1",
+          outcome: "skipped" as const,
+          required: false,
+          warningCode: "attachment.unsupportedType",
+        },
+      ],
+    };
+    const prepared = {
+      ...outcomes,
+      identityHash: createPreparedAttachmentEvidenceIdentity(outcomes),
+    };
+    const input = identityInputFor(
+      execution().snapshot,
+      profile(),
+      undefined,
+      prepared,
+    );
+    const changed = {
+      ...outcomes,
+      evidence: [
+        { ...outcomes.evidence[0], warningCode: "attachment.downloadFailed" },
+      ],
+    };
+
+    expect(input.preparedAttachmentEvidenceHash).toBe(prepared.identityHash);
+    expect(
+      createAnalysisRequestIdentity({
+        ...input,
+        preparedAttachmentEvidenceHash:
+          createPreparedAttachmentEvidenceIdentity(changed),
+      }).identityHash,
+    ).not.toBe(createAnalysisRequestIdentity(input).identityHash);
+    expect(JSON.stringify(input)).not.toContain("content");
+  });
+
+  it("rejects an unavailable required attachment before request identity creation", async () => {
+    const outcomes = {
+      evidence: [
+        {
+          attachmentId: "attachment-required-1",
+          outcome: "failed" as const,
+          required: true,
+          warningCode: "attachment.downloadFailed",
+        },
+      ],
+    };
+    const prepared = {
+      ...outcomes,
+      identityHash: createPreparedAttachmentEvidenceIdentity(outcomes),
+    };
+
+    await expect(
+      captureAnalysisRequest(
+        { capture: async () => execution().snapshot },
+        {
+          workspaceId: "workspace-1",
+          caseReference: "case-1",
+          profile: profile({ attachments: { policy: "required" } }),
+          attachments: {
+            async resolve() {
+              return prepared;
+            },
+          },
+          signal,
+        },
+      ),
+    ).rejects.toThrow(/required attachment/i);
+  });
+
+  it("rejects an unavailable required occurrence even for an optional attachment stage", async () => {
+    const outcomes = {
+      evidence: [
+        {
+          attachmentId: "attachment-required-optional-stage-1",
+          outcome: "skipped" as const,
+          required: true,
+          warningCode: "attachment.unsupportedType",
+        },
+      ],
+    };
+    const prepared = {
+      ...outcomes,
+      identityHash: createPreparedAttachmentEvidenceIdentity(outcomes),
+    };
+
+    await expect(
+      captureAnalysisRequest(
+        { capture: async () => execution().snapshot },
+        {
+          workspaceId: "workspace-1",
+          caseReference: "case-1",
+          profile: profile({ attachments: { policy: "optional" } }),
+          attachments: {
+            async resolve() {
+              return prepared;
+            },
+          },
+          signal,
+        },
+      ),
+    ).rejects.toThrow("Required attachment preparation is not ready.");
+  });
+
+  it("resolves one repository commit before deriving an enabled recipe identity", async () => {
+    const configured = profile({
+      attachments: { policy: "disabled" },
+      repository: {
+        policy: "required",
+        repositoryId: "support-service",
+        repositoryVersionId: "support-service-v2",
+        executionPolicyId: "sandbox-policy",
+        executionPolicyVersionId: "sandbox-policy-v4",
+        repositoryAgentBindingVersionId: "repository-agent-v7",
+        maximumContextCharacters: 1_000,
+        maximumEvidenceCharacters: 1_000,
+      },
+    });
+    const captured = await captureAnalysisRequest(
+      { capture: async () => execution().snapshot },
+      {
+        workspaceId: "workspace-1",
+        caseReference: "case-1",
+        profile: configured,
+        repositories: {
+          async resolve() {
+            return {
+              repositoryId: "support-service",
+              repositoryVersionId: "support-service-v2",
+              runtimePinId: "repository-runtime-v9",
+              executionPolicyId: "sandbox-policy",
+              executionPolicyVersionId: "sandbox-policy-v4",
+              repositoryAgentBindingVersionId: "repository-agent-v7",
+              pinnedCommit: "a".repeat(40),
+              resolvedAt: "2026-07-16T17:00:00.000Z",
+            };
+          },
+        },
+        signal,
+      },
+    );
+
+    expect(captured.repositoryRun?.pinnedCommit).toBe("a".repeat(40));
+    expect(captured.identity).toMatchObject({
+      repositoryCommit: "a".repeat(40),
+      repositoryVersionId: "support-service-v2",
+      repositoryRuntimePinId: "repository-runtime-v9",
+      repositoryExecutionPolicyVersionId: "sandbox-policy-v4",
+    });
   });
 });
 
@@ -413,9 +763,7 @@ describe("analysis immutable runtime pins", () => {
     const configured = profile({
       repository: {
         policy: "required",
-        bindingVersionId: "repository-binding-a",
         repositoryId: "repository-a",
-        pinnedCommit: "a".repeat(40),
         maximumContextCharacters: 100,
         maximumEvidenceCharacters: 100,
       },
@@ -427,7 +775,10 @@ describe("analysis immutable runtime pins", () => {
         ...configured,
         repository: {
           ...configured.repository,
-          runtimeVersionId: "repository-runtime-version-a",
+          repositoryVersionId: "repository-version-a",
+          executionPolicyId: "repository-execution-policy-a",
+          executionPolicyVersionId: "repository-execution-policy-version-a",
+          repositoryAgentBindingVersionId: "repository-binding-a",
         },
       }).success,
     ).toBe(true);

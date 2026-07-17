@@ -1,5 +1,6 @@
 import type {
   RepositoryAgentEvidence,
+  RepositoryAgentFinding,
   RepositoryAgentRuntimePin,
 } from "./repository-agent.js";
 
@@ -181,6 +182,8 @@ export interface RepositoryAgentResult {
    * not place source text, checkout metadata, or credentials here.
    */
   readonly evidence: readonly RepositoryAgentEvidence[];
+  /** Runtime-verified, bounded, evidence-linked provider observations. */
+  readonly findings: readonly RepositoryAgentFinding[];
   readonly metering: RepositoryAgentMetering;
 }
 

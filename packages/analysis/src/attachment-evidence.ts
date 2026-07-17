@@ -6,11 +6,13 @@ import {
   type AnalysisExecution,
   type AttachmentDerivativeEvidenceContentReader,
   type AttachmentEvidencePort,
+  analysisEvidenceSchema,
+  type PreparedAttachmentEvidenceSet,
   type SnapshotAttachmentReference,
   type SnapshotAttachmentReferenceStore,
-  analysisEvidenceSchema,
   snapshotAttachmentReferenceSchema,
 } from "./contracts.js";
+import { validatePreparedAttachmentEvidence } from "./identity.js";
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -75,7 +77,7 @@ function evidenceId(
   reference: SnapshotAttachmentReference,
 ): string {
   return `attachment-${sha256(
-    `${execution.workspaceId}:${execution.snapshot.id}:${reference.attachmentId}:${reference.derivativeId}`,
+    `${execution.workspaceId}:${execution.snapshot.id}:${reference.occurrenceIdentity ?? reference.attachmentId}:${reference.derivativeId}`,
   )}`;
 }
 
@@ -98,6 +100,18 @@ export class FrozenSnapshotAttachmentEvidencePort
     readonly signal: AbortSignal;
   }): Promise<AnalysisEvidenceStageResult> {
     assertActive(input.signal);
+    let prepared: PreparedAttachmentEvidenceSet;
+    try {
+      prepared = validatePreparedAttachmentEvidence(
+        input.execution.preparedAttachments,
+      );
+    } catch {
+      throw new FrozenAttachmentEvidenceError(
+        "analysis.attachmentEvidenceIntegrity",
+        "Captured attachment preparation is not immutable and complete.",
+        false,
+      );
+    }
     let references: readonly SnapshotAttachmentReference[];
     try {
       references =
@@ -115,20 +129,43 @@ export class FrozenSnapshotAttachmentEvidencePort
         retryable(error),
       );
     }
-    const seenDerivatives = new Set<string>();
+    const preparedByAttachment = new Map(
+      prepared.evidence
+        .filter((item) => item.outcome === "ready")
+        .map((item) => [item.occurrenceIdentity ?? item.attachmentId, item]),
+    );
+    const referencesByAttachment = new Map<
+      string,
+      SnapshotAttachmentReference
+    >();
     const evidence: AnalysisEvidence[] = [];
 
     for (const rawReference of references) {
       assertActive(input.signal);
       const reference = snapshotAttachmentReferenceSchema.parse(rawReference);
-      if (seenDerivatives.has(reference.derivativeId)) {
+      const occurrenceIdentity =
+        reference.occurrenceIdentity ?? reference.attachmentId;
+      if (referencesByAttachment.has(occurrenceIdentity)) {
         throw new FrozenAttachmentEvidenceError(
           "analysis.attachmentEvidenceIntegrity",
-          "A snapshot contains duplicate attachment derivative evidence.",
+          "A snapshot contains duplicate attachment occurrence evidence.",
           false,
         );
       }
-      seenDerivatives.add(reference.derivativeId);
+      referencesByAttachment.set(occurrenceIdentity, reference);
+      const preparedReference = preparedByAttachment.get(occurrenceIdentity);
+      if (
+        preparedReference === undefined ||
+        preparedReference.derivativeId !== reference.derivativeId ||
+        preparedReference.outputContentHash?.toLowerCase() !==
+          reference.outputContentHash.toLowerCase()
+      ) {
+        throw new FrozenAttachmentEvidenceError(
+          "analysis.attachmentEvidenceIntegrity",
+          "Snapshot attachment evidence does not match its prepared immutable outcome.",
+          false,
+        );
+      }
       let resolved: { readonly content: string; readonly contentHash: string };
       try {
         resolved = await this.dependencies.content.readDerivativeText({
@@ -186,6 +223,13 @@ export class FrozenSnapshotAttachmentEvidencePort
           false,
         );
       }
+    }
+    if (referencesByAttachment.size !== preparedByAttachment.size) {
+      throw new FrozenAttachmentEvidenceError(
+        "analysis.attachmentEvidenceIntegrity",
+        "Prepared attachment evidence is missing from the captured snapshot.",
+        false,
+      );
     }
     return Object.freeze({
       evidence: Object.freeze(evidence),

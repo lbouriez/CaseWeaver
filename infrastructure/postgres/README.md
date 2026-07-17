@@ -1,6 +1,6 @@
 # PostgreSQL infrastructure
 
-**PBIs:** 002, 003, 004, 009, 013, 016
+**PBIs:** 002, 003, 004, 009, 013, 016, 020
 
 Migrations, typed repositories, transactions, outbox, pgvector/full-text queries,
 workspace filtering, leases, audit records, AI operation ledger, and budget reservations.
@@ -257,6 +257,30 @@ Webhook endpoint projections use a dedicated forward schema rather than repurpos
 the existing `webhook_inbox`, which remains delivery history only. Platform public
 links use the immutable administration configuration tables under `platform-links`;
 public-link API projection is composed above this adapter.
+
+## PBI-020 repository-assisted analysis preparation
+
+The PBI-020 forward migration is additive. It leaves historical PBI-011/PBI-012
+analysis, trigger, and publication records readable and never rebinds them to mutable
+configuration. New code-repository, execution-policy, attachment-policy, analysis-
+recipe, trigger, and intake-schedule projections retain immutable configuration-version
+IDs and safe runtime bounds only. Repository URLs, mount paths, checkout secret
+locators, raw settings, and test output remain in private configuration data and are
+never part of generic administration reads.
+
+`attachment_occurrences` has safe immutable occurrence metadata, while the reopen
+locator is encrypted in `attachment_occurrence_private` and must be read only through a
+narrow worker adapter. Leased preparation runs and append-only terminal evidence retain
+the exact derivative selected for a source or case. A PBI-020 analysis execution input
+then pins that evidence and a resolved repository SHA before PBI-011 receives a job;
+retries reuse that pin and never resolve a branch again.
+
+Prompt/context/model output is stored separately in
+`analysis_result_protected_content`, outside `analysis_results.record`. A protected
+read must be workspace-authorized and commit its sensitive-read audit before content is
+returned. Publication acknowledgement is likewise structured in `publication_receipts`
+with connector-neutral `external_publication_id`; Jitbit may map that value to its
+comment ID without making comments a cross-connector contract.
 
 The webhook endpoint migration provides a separate opaque endpoint projection, distinct
 immutable endpoint-routing and connector-adapter configuration pins for the endpoint and

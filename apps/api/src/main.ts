@@ -11,15 +11,19 @@ import {
   canonicalizeConfiguration,
   DisableAiModelBinding,
   IdempotencyConflictError,
+  ListRepositoryAnalysisOptions,
   ManageKnowledgeScheduleConfiguration,
   ManageKnowledgeSourceConfiguration,
   ManagePlatformLinkConfiguration,
   ManagePublicationProfileConfiguration,
+  ManageRepositoryAnalysisConfiguration,
   ManageWebhookEndpointConfiguration,
   PreviewProviderCapabilityTest,
+  PreviewRepositoryDraftTest,
   ReplaceAiBudgetPolicy,
   ReplaceWorkspacePrincipalRoles,
   RunProviderCapabilityTest,
+  RunRepositoryDraftTest,
   SetAiWorkspaceRoleDefault,
   sha256Base64Url,
   TransitionConfigurationVersion,
@@ -57,10 +61,12 @@ import {
   PostgresConfigurationLifecycleStore,
   PostgresPlatformLinkConfigurationStore,
   PostgresPublicationProfileConfigurationStore,
+  PostgresRepositoryAnalysisConfigurationStore,
   PostgresSourceScheduleConfigurationStore,
   type PostgresTransactionLookup,
   PostgresWebhookEndpointConfigurationStore,
 } from "@caseweaver/postgres";
+import { nextRunAt } from "@caseweaver/scheduling";
 import { buildApi } from "./app.js";
 import { parseApiConfig } from "./config.js";
 import { createDatabaseReadiness } from "./database-readiness.js";
@@ -79,6 +85,16 @@ import {
 } from "./modules/administration/operation-dispatcher.js";
 import { AdministrationApiOperations } from "./modules/administration/operations.js";
 import { ExistingOperationsPreflight } from "./modules/administration/operations-preflight.js";
+import {
+  RepositoryAnalysisApiFacade,
+  type RepositoryAnalysisApiResource,
+} from "./modules/administration/repository-analysis-api.js";
+import { RepositoryAnalysisAdministrationAuthorizer } from "./modules/administration/repository-analysis-authorizer.js";
+import {
+  EnvironmentRepositoryAnalysisDeploymentRegistry,
+  parseRepositoryAnalysisDeploymentConfiguration,
+  RepositoryAnalysisDraftTestRunner,
+} from "./modules/administration/repository-analysis-runtime.js";
 import {
   runtimeDescriptorRegistration,
   runtimeDescriptorRegistrations,
@@ -565,6 +581,13 @@ async function createAdministrationOperations(
       readonly chunkingProfileVersion: string;
       readonly embeddingBatchSize: number;
       readonly embeddingBudgetPolicyId: string;
+      readonly attachmentStage:
+        | Readonly<{ readonly mode: "disabled" }>
+        | Readonly<{
+            readonly mode: "optional" | "required";
+            readonly attachmentPolicyId: string;
+            readonly attachmentPolicyConfigurationVersionId: string;
+          }>;
       readonly synchronizationPolicy: Readonly<Record<string, unknown>>;
       readonly deletionBehavior: "tombstone" | "retain";
       readonly context: import("./modules/administration/routes.js").AdminRequestContext;
@@ -580,6 +603,7 @@ async function createAdministrationOperations(
       chunkingProfileVersion: input.chunkingProfileVersion,
       embeddingBatchSize: input.embeddingBatchSize,
       embeddingBudgetPolicyId: input.embeddingBudgetPolicyId,
+      attachmentStage: input.attachmentStage,
       synchronizationPolicy: input.synchronizationPolicy,
       deletionBehavior: input.deletionBehavior,
     });
@@ -608,6 +632,7 @@ async function createAdministrationOperations(
             chunkingProfileVersion: input.chunkingProfileVersion,
             embeddingBatchSize: input.embeddingBatchSize,
             embeddingBudgetPolicyId: input.embeddingBudgetPolicyId,
+            attachmentStage: input.attachmentStage,
             synchronizationPolicy: input.synchronizationPolicy,
             deletionBehavior: input.deletionBehavior,
           },
@@ -1781,6 +1806,85 @@ async function createAdministrationOperations(
     secretReferences,
     configurationLifecycle,
   });
+  const repositoryAnalysisDeployment =
+    parseRepositoryAnalysisDeploymentConfiguration(environment);
+  const repositoryAnalysisFacade = new RepositoryAnalysisApiFacade({
+    // The feature manager is transaction-bound because its generic immutable
+    // version, PBI-020 projection, idempotency claim, cache invalidation, and
+    // authoritative audit must commit or roll back together. The API facade
+    // supplies only already-authenticated, validated commands.
+    manager: new Proxy({} as ManageRepositoryAnalysisConfiguration, {
+      get(_target, property) {
+        if (typeof property !== "string") return undefined;
+        return async (...arguments_: readonly unknown[]) =>
+          persistence.unitOfWork.transaction(async (transaction) => {
+            const manager = new ManageRepositoryAnalysisConfiguration(
+              { transaction: async (operation) => operation() },
+              new PostgresRepositoryAnalysisConfigurationStore(
+                persistence.unitOfWork as typeof persistence.unitOfWork &
+                  PostgresTransactionLookup,
+                transaction,
+              ),
+              repositoryAnalysisLifecycleAudit(persistence, transaction),
+              persistence.repositoryDraftTestStore,
+            );
+            const operation = Reflect.get(manager, property) as
+              | ((...input: readonly unknown[]) => Promise<unknown>)
+              | undefined;
+            if (operation === undefined) {
+              throw new Error("Repository analysis operation is unavailable.");
+            }
+            return operation.apply(manager, [...arguments_]);
+          });
+      },
+    }),
+    options: new ListRepositoryAnalysisOptions(
+      persistence.repositoryAnalysisOptionsStore,
+      new EnvironmentRepositoryAnalysisDeploymentRegistry(
+        repositoryAnalysisDeployment,
+      ),
+    ),
+    previewDraftTest: new PreviewRepositoryDraftTest(
+      persistence.repositoryDraftTestStore,
+      persistence.repositoryDraftTestStore,
+      { now: () => new Date().toISOString() },
+    ),
+    runDraftTest: new RunRepositoryDraftTest(
+      persistence.repositoryDraftTestStore,
+      persistence.repositoryDraftTestStore,
+      new RepositoryAnalysisDraftTestRunner(
+        persistence.repositoryDraftTestStore,
+        repositoryAnalysisDeployment,
+        environment,
+      ),
+      { now: () => new Date().toISOString() },
+    ),
+    transitions: {
+      resolve: (input) =>
+        persistence.repositoryAnalysisTransitionStore.resolveTransitionSnapshot(
+          input,
+        ),
+    },
+    identifiers: {
+      create: (_resource: RepositoryAnalysisApiResource) => randomUUID(),
+    },
+    scheduleTiming: {
+      nextRunAt: ({ scheduleId, cadence, now }) =>
+        nextRunAt(
+          {
+            id: scheduleId,
+            cadence,
+            enabled: false,
+            nextRunAt: now.toISOString(),
+          },
+          now.toISOString(),
+        ),
+    },
+    authorizer: new RepositoryAnalysisAdministrationAuthorizer({
+      unitOfWork: persistence.unitOfWork,
+      auditStore: persistence.auditStore,
+    }),
+  });
   return new AdministrationApiOperations({
     auth,
     reads: persistence.administrationReadStore,
@@ -1790,6 +1894,7 @@ async function createAdministrationOperations(
     auditStore: persistence.auditStore,
     authAudits: persistence.authAuditRecorder,
     auditWorkspaceId: config.workspaceId,
+    repositoryAnalysis: repositoryAnalysisFacade,
     diagnostics: {
       requests: persistence.diagnosticExportStore,
       artifacts: persistence.diagnosticExportArtifactStore,
@@ -2289,6 +2394,74 @@ function configurationLifecycleAudit(
   });
 }
 
+/**
+ * Repository-analysis configurations carry their server-resolved session
+ * context through the feature use case so that its projection write and audit
+ * remain one PostgreSQL transaction. The browser never selects an audit field.
+ */
+function repositoryAnalysisLifecycleAudit(
+  persistence: ReturnType<typeof createPostgresPersistence>,
+  transaction: ApplicationTransaction,
+) {
+  return Object.freeze({
+    append: async (
+      input: Readonly<{
+        readonly context: Readonly<{
+          readonly workspaceId: string;
+          readonly actorPrincipalId: string;
+          readonly sessionId: string;
+          readonly occurredAt: string;
+          readonly origin: "admin_ui" | "api" | "cli";
+          readonly requestId?: string;
+          readonly correlationId?: string;
+          readonly uiActionId?: string;
+        }>;
+        readonly action: string;
+        readonly record: Readonly<{
+          readonly action: string;
+          readonly targetType: string;
+          readonly targetId: string;
+          readonly permission: import("@caseweaver/security").Permission;
+          readonly outcome: "succeeded";
+          readonly beforeHash?: string;
+          readonly afterHash: string;
+        }>;
+      }>,
+    ) => {
+      // The feature's fixed action and lifecycle record must agree. This is a
+      // defence-in-depth check against an accidental future composition mixup.
+      if (input.record.action !== input.action) {
+        throw new Error("Repository analysis audit action is invalid.");
+      }
+      return persistence.auditStore.append(transaction, {
+        id: auditEventId(randomUUID()),
+        workspaceId: workspaceId(input.context.workspaceId),
+        actorPrincipalId: principalId(input.context.actorPrincipalId),
+        action: input.action,
+        targetId: input.record.targetId,
+        targetType: input.record.targetType,
+        permission: input.record.permission,
+        outcome: input.record.outcome,
+        ...(input.record.beforeHash === undefined
+          ? {}
+          : { beforeHash: sha256Digest(input.record.beforeHash) }),
+        afterHash: sha256Digest(input.record.afterHash),
+        origin: input.context.origin,
+        occurredAt: utcInstant(new Date(input.context.occurredAt)),
+        ...(input.context.requestId === undefined
+          ? {}
+          : { requestId: input.context.requestId }),
+        ...(input.context.correlationId === undefined
+          ? {}
+          : { correlationId: input.context.correlationId }),
+        ...(input.context.uiActionId === undefined
+          ? {}
+          : { uiActionId: input.context.uiActionId }),
+      });
+    },
+  });
+}
+
 function aiConfigurationContext(
   context: import("./modules/administration/routes.js").AdminRequestContext,
 ) {
@@ -2342,6 +2515,9 @@ function knowledgeSourceProjectionFromSettings(
   );
   const embeddingBatchSize = settings.embeddingBatchSize;
   const deletionBehavior = settings.deletionBehavior;
+  const attachmentStage = knowledgeSourceAttachmentStageFromSettings(
+    settings.attachmentStage,
+  );
   if (
     typeof embeddingBatchSize !== "number" ||
     !Number.isSafeInteger(embeddingBatchSize) ||
@@ -2364,11 +2540,40 @@ function knowledgeSourceProjectionFromSettings(
     chunkingProfileVersion,
     embeddingBatchSize,
     embeddingBudgetPolicyId,
+    attachmentStage,
     synchronizationPolicy: settings.synchronizationPolicy as Readonly<
       Record<string, unknown>
     >,
     deletionBehavior,
   });
+}
+
+function knowledgeSourceAttachmentStageFromSettings(value: unknown):
+  | Readonly<{ readonly mode: "disabled" }>
+  | Readonly<{
+      readonly mode: "optional" | "required";
+      readonly attachmentPolicyId: string;
+      readonly attachmentPolicyConfigurationVersionId: string;
+    }> {
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    const stage = value as Readonly<Record<string, unknown>>;
+    if (stage.mode === "disabled" && Object.keys(stage).length === 1) {
+      return Object.freeze({ mode: "disabled" });
+    }
+    if (
+      (stage.mode === "optional" || stage.mode === "required") &&
+      Object.keys(stage).length === 3
+    ) {
+      return Object.freeze({
+        mode: stage.mode,
+        attachmentPolicyId: requiredIdentifier(stage.attachmentPolicyId),
+        attachmentPolicyConfigurationVersionId: requiredIdentifier(
+          stage.attachmentPolicyConfigurationVersionId,
+        ),
+      });
+    }
+  }
+  throw new Error("resource.notFound");
 }
 
 function requiredIdentifier(value: unknown): string {

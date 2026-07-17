@@ -20,3 +20,8 @@ or cancelled resolution fails closed.
 Adapter contributions belong to the connector packages. This package owns only
 the provider-neutral registry and resolution boundary; it contains no vendor
 conditionals or feature business policy.
+
+`resolveAttachmentSource` selects a declared `AttachmentSource` only through the same
+exact immutable connector configuration pin as knowledge, case, and destination
+capabilities. It returns a server-side stream capability only; attachment references
+and opaque reopen identities remain within trusted worker composition.

@@ -120,4 +120,47 @@ describe("NormalizedCaseSnapshotProjector", () => {
       }),
     ).rejects.toBeInstanceOf(NormalizedCaseProjectionError);
   });
+
+  it("retains distinct occurrence identities when two locations name one binary", async () => {
+    const projector = new NormalizedCaseSnapshotProjector({
+      now: () => utcInstant("2026-07-15T20:00:00.000Z"),
+    });
+    const attachment = {
+      connectorInstanceId: "connector-1",
+      resourceType: "attachment",
+      externalId: "shared-image",
+    };
+    const snapshot = await projector.project({
+      request,
+      signal: new AbortController().signal,
+      normalizedCase: {
+        reference: request.target,
+        messages: [],
+        attachmentOccurrences: [
+          {
+            owner: { kind: "case", case: request.target },
+            ordinal: 0,
+            relation: "inlineImage",
+            reference: attachment,
+            locator: { version: "fixture.v1", value: "privateone" },
+          },
+          {
+            owner: { kind: "case", case: request.target },
+            ordinal: 1,
+            relation: "inlineImage",
+            reference: attachment,
+            locator: { version: "fixture.v1", value: "privatetwo" },
+          },
+        ],
+      },
+    });
+
+    expect(snapshot.attachmentReferences).toHaveLength(2);
+    expect(snapshot.attachmentReferences?.map((value) => value.occurrenceIdentity)).toEqual(
+      expect.arrayContaining([expect.stringMatching(/^[a-f0-9]{64}$/u)]),
+    );
+    expect(new Set(snapshot.attachmentReferences?.map((value) => value.occurrenceIdentity))).toHaveLength(2);
+    expect(JSON.stringify(snapshot)).not.toContain("private-one");
+    expect(JSON.stringify(snapshot)).not.toContain("private-two");
+  });
 });

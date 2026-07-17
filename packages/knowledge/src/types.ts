@@ -78,6 +78,11 @@ export interface PinnedKnowledgeSourceConfiguration {
   }>;
   readonly synchronization: SourceSynchronizationPolicy;
   readonly embeddingBatchSize: number;
+  /**
+   * Immutable source-owned attachment policy. It is absent only for legacy
+   * source versions that predate attachment preparation.
+   */
+  readonly attachmentPreparation?: AttachmentPreparationPolicy;
 }
 
 /** Fail-closed private resolver: missing, legacy, disabled, or mismatched pins return undefined. */
@@ -127,6 +132,21 @@ export interface KnowledgeSourceConfiguration {
   readonly chunkingProfileVersion: string;
   readonly synchronization: SourceSynchronizationPolicy;
   readonly embeddingBatchSize: number;
+  /**
+   * Immutable attachment handling. Omitted only for legacy source versions that
+   * never requested attachment preparation; new source versions pin this policy.
+   */
+  readonly attachmentPreparation?: AttachmentPreparationPolicy;
+  /**
+   * Exact runtime pins needed to reopen attachment bytes. They are supplied
+   * solely by the durable source-version resolver; callers must never infer
+   * them from a mutable source or connector configuration.
+   */
+  readonly attachmentPreparationPins?: Readonly<{
+    readonly sourceConfigurationVersionId: string;
+    readonly connectorRegistrationId: string;
+    readonly connectorConfigurationVersionId: string;
+  }>;
 }
 
 export interface NormalizedKnowledgeDocument {
@@ -149,6 +169,64 @@ export interface NormalizedKnowledgeDocument {
   >;
 }
 
+export type AttachmentPreparationMode = "disabled" | "optional" | "required";
+
+/**
+ * This consumer projection is structurally compatible with the attachment
+ * package's producer contract. Keeping it local prevents a sibling feature
+ * dependency while allowing trusted composition to adapt PBI-008 processing.
+ */
+export interface AttachmentPreparationPolicy {
+  readonly mode: AttachmentPreparationMode;
+  readonly policyVersion: string;
+  readonly accessPolicyHash: string;
+}
+
+/** A bounded safe diagnostic; it never carries a URL, locator, blob key, or text. */
+export interface AttachmentPreparationWarning {
+  readonly kind: "attachmentPreparationWarning";
+  readonly code: string;
+  readonly retryable: boolean;
+  readonly occurrenceIdentity?: string;
+}
+
+export interface SelectedAttachmentDerivative {
+  readonly occurrenceIdentity: string;
+  readonly derivativeIdentity: string;
+  readonly derivativeContentHash: string;
+}
+
+/**
+ * Server-private result returned by the attachment runtime. The policy remains
+ * here only long enough for knowledge ingestion to verify that the runtime
+ * honoured the immutable source policy that it was given. This type must never
+ * be placed in a durable activation or store payload.
+ */
+export interface AttachmentPreparationOutcome {
+  readonly status: "prepared" | "terminal";
+  readonly identityHash: string;
+  readonly policy: AttachmentPreparationPolicy;
+  readonly selectedDerivatives: readonly SelectedAttachmentDerivative[];
+  readonly warnings: readonly AttachmentPreparationWarning[];
+  readonly retryRequired: boolean;
+}
+
+/**
+ * Policy-free attachment state retained with an activated knowledge revision.
+ *
+ * The policy itself remains in the immutable source configuration. Its hash is
+ * retained separately on the activation for no-op comparison, while this
+ * projection preserves only the result identities that an active revision
+ * needs to describe its derived evidence and retry state.
+ */
+export interface ActivatedAttachmentPreparation {
+  readonly status: "prepared" | "terminal";
+  readonly identityHash: string;
+  readonly selectedDerivatives: readonly SelectedAttachmentDerivative[];
+  readonly warnings: readonly AttachmentPreparationWarning[];
+  readonly retryRequired: boolean;
+}
+
 export interface KnowledgeNormalizer {
   normalize(input: {
     readonly document: KnowledgeDocument;
@@ -157,9 +235,23 @@ export interface KnowledgeNormalizer {
   }): Promise<NormalizedKnowledgeDocument>;
 }
 
-export interface PreparedAttachment {
-  readonly reference: ExternalReference;
-  readonly searchableText?: string;
+/**
+ * Server-private canonical derivative text used only to create derived evidence
+ * chunks. It is never copied into an attachment outcome or durable activation
+ * projection.
+ */
+export interface PreparedAttachment extends SelectedAttachmentDerivative {
+  readonly searchableText: string;
+}
+
+export interface AttachmentPreparationResult {
+  readonly outcome: AttachmentPreparationOutcome;
+  readonly derivatives: readonly PreparedAttachment[];
+  /**
+   * Opaque immutable terminal-attempt identity supplied by trusted worker
+   * composition. It is pinned by persistence, never exposed in a read model.
+   */
+  readonly attemptId?: string;
 }
 
 /**
@@ -170,20 +262,31 @@ export interface AttachmentPreparationPort {
   prepare(input: {
     readonly sourceId: string;
     readonly workspaceId: string;
+    readonly sourceConfigurationVersionId: string;
+    readonly connectorRegistrationId: string;
+    readonly connectorConfigurationVersionId: string;
     readonly document: KnowledgeDocument;
+    readonly policy: AttachmentPreparationPolicy;
     readonly signal: AbortSignal;
-  }): Promise<readonly PreparedAttachment[]>;
+  }): Promise<AttachmentPreparationResult>;
 }
 
 export interface ChunkCandidate {
   readonly content: string;
   readonly sourceAnchor?: string;
+  /** Source chunks are immutable normalizer output; evidence chunks are derived. */
+  readonly kind?: "source" | "attachmentEvidence";
+  readonly attachmentEvidence?: SelectedAttachmentDerivative;
 }
 
 export interface KnowledgeChunker {
   chunk(input: {
     readonly document: NormalizedKnowledgeDocument;
-    readonly attachments: readonly PreparedAttachment[];
+    /**
+     * Attachment text is never supplied to arbitrary chunker implementations.
+     * Ingestion creates dedicated derived evidence chunks after source chunking.
+     */
+    readonly attachments: readonly [];
     readonly chunkingProfileVersion: string;
   }): Promise<readonly ChunkCandidate[]>;
 }
@@ -209,6 +312,13 @@ export interface StoredKnowledgeItem {
   readonly activeRevisionId?: string;
   readonly activeContentHash?: string;
   readonly activeEmbeddingSpace?: ActiveEmbeddingSpace;
+  /**
+   * Hash-only identity of the attachment policy used by the active revision.
+   * `undefined` is the durable representation of a legacy/no-policy revision.
+   */
+  readonly activeAttachmentPreparationPolicyIdentity?: string;
+  /** Retries must not be hidden by an otherwise unchanged source fingerprint. */
+  readonly activeAttachmentPreparationRetryRequired?: boolean;
   readonly lastSuccessfulFingerprint?: ExternalFingerprint;
 }
 
@@ -253,6 +363,8 @@ export interface KnowledgeChunkDraft {
   readonly contentHash: string;
   readonly content: string;
   readonly sourceAnchor?: string;
+  readonly kind: "source" | "attachmentEvidence";
+  readonly attachmentEvidence?: SelectedAttachmentDerivative;
   readonly embedding: EmbeddingCacheIdentity;
 }
 
@@ -264,6 +376,19 @@ export interface ActivatedRevision {
   readonly revisionId: string;
   readonly contentHash: string;
   readonly normalized: NormalizedKnowledgeDocument;
+  /**
+   * Hash-only identity persisted with the active revision/item state. It is
+   * `undefined` clears a former policy identity for a legacy/no-policy source
+   * version, rather than leaving stale policy state on the active item.
+   */
+  readonly attachmentPreparationPolicyIdentity: string | undefined;
+  /**
+   * Policy-free preparation result. The immutable policy remains solely in the
+   * source configuration identified by `attachmentPreparationPolicyIdentity`.
+   */
+  readonly attachmentPreparation?: ActivatedAttachmentPreparation;
+  /** Server-private stable attempt pin, committed with this exact revision. */
+  readonly attachmentPreparationAttemptId?: string;
   readonly normalizationProfileVersion: string;
   readonly chunkingProfileVersion: string;
   readonly embeddingSpace: ActiveEmbeddingSpace;

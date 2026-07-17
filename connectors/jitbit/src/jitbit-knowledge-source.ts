@@ -1,25 +1,28 @@
 import {
   ConnectorCancelledError,
   ConnectorProtocolError,
-  type DiscoveryPage,
   type DiscoveredKnowledgeItem,
+  type DiscoveryPage,
   type KnowledgeDocument,
   type KnowledgeSource,
   type LoadKnowledgeRequest,
   type VersionedOpaqueValue,
   versionedOpaqueValue,
 } from "@caseweaver/connector-sdk";
-
+import type { JitbitClient } from "./client.js";
 import {
   type JitbitConfiguration,
   jitbitConfigurationSchema,
 } from "./config.js";
-import type { JitbitClient } from "./client.js";
 import {
   isResolvedSummary,
   mapResolvedKnowledgeDocument,
   summaryFingerprint,
 } from "./mapping.js";
+import {
+  type JitbitResolvedKnowledgeFilter,
+  parseJitbitResolvedKnowledgeFilter,
+} from "./resolved-knowledge-filter.js";
 
 const cursorVersion = "jitbit.discovery.v1";
 const resourceType = "resolved-case";
@@ -107,17 +110,27 @@ function assertReference(
 export interface JitbitKnowledgeSourceOptions {
   readonly configuration: JitbitConfiguration;
   readonly client: JitbitClient;
+  /**
+   * A source-version projection owned by Jitbit, not connector-instance settings.
+   * Runtime composition injects the immutable source filter when that projection is
+   * available; the safe default excludes non-terminal cases.
+   */
+  readonly resolvedKnowledgeFilter?: JitbitResolvedKnowledgeFilter;
   readonly now?: () => Date;
 }
 
 export class JitbitKnowledgeSource implements KnowledgeSource {
   private readonly configuration: JitbitConfiguration;
   private readonly client: JitbitClient;
+  private readonly resolvedKnowledgeFilter: JitbitResolvedKnowledgeFilter;
   private readonly now: () => Date;
 
   public constructor(options: JitbitKnowledgeSourceOptions) {
     this.configuration = jitbitConfigurationSchema.parse(options.configuration);
     this.client = options.client;
+    this.resolvedKnowledgeFilter = parseJitbitResolvedKnowledgeFilter(
+      options.resolvedKnowledgeFilter,
+    );
     this.now = options.now ?? (() => new Date());
   }
 
@@ -149,18 +162,20 @@ export class JitbitKnowledgeSource implements KnowledgeSource {
         : cursor({ ...state, offset: state.offset + summaries.length });
       yield {
         mode: "delta",
-        events: summaries.filter(isResolvedSummary).map((summary) => ({
-          kind: "upsert" as const,
-          item: {
-            reference: {
-              connectorInstanceId:
-                this.configuration.settings.connectorInstanceId,
-              resourceType,
-              externalId: summary.IssueID,
+        events: summaries
+          .filter((summary) => this.isEligible(summary))
+          .map((summary) => ({
+            kind: "upsert" as const,
+            item: {
+              reference: {
+                connectorInstanceId:
+                  this.configuration.settings.connectorInstanceId,
+                resourceType,
+                externalId: summary.IssueID,
+              },
+              fingerprint: summaryFingerprint(summary),
             },
-            fingerprint: summaryFingerprint(summary),
-          },
-        })),
+          })),
         nextCursor,
         complete,
       };
@@ -182,9 +197,9 @@ export class JitbitKnowledgeSource implements KnowledgeSource {
         "Jitbit returned a ticket with a different ID than requested.",
       );
     }
-    if (!isResolvedSummary(ticket)) {
+    if (!this.isEligible(ticket)) {
       throw new ConnectorProtocolError(
-        "Jitbit returned a case that is not resolved for knowledge ingestion.",
+        "Jitbit returned a case excluded by this knowledge-source filter.",
       );
     }
     return mapResolvedKnowledgeDocument({
@@ -194,5 +209,14 @@ export class JitbitKnowledgeSource implements KnowledgeSource {
       baseUrl: this.configuration.settings.baseUrl,
       maximumCharacters: this.configuration.settings.maximumTicketCharacters,
     });
+  }
+
+  private isEligible(
+    summary: Parameters<typeof isResolvedSummary>[0],
+  ): boolean {
+    return (
+      !this.resolvedKnowledgeFilter.resolvedOrClosedOnly ||
+      isResolvedSummary(summary)
+    );
   }
 }

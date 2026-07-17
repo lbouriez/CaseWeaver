@@ -26,6 +26,12 @@ export const navigationSections: readonly NavigationSection[] = [
     permissions: ["analysis.read"],
   },
   {
+    path: "/repository-analysis",
+    label: "Repository analysis",
+    kicker: "03 / code evidence",
+    permissions: ["configuration.read"],
+  },
+  {
     path: "/publication",
     label: "Publication",
     kicker: "04 / release",

@@ -128,6 +128,7 @@ describe("source and schedule drafts", () => {
           chunkingProfileVersion: "v1",
           embeddingBatchSize: 16,
           embeddingBudgetPolicyId: "budget-1",
+          attachmentStage: { mode: "disabled" },
           synchronizationPolicy: { triggers: [{ mode: "manual" }] },
           deletionBehavior: "tombstone",
         }),

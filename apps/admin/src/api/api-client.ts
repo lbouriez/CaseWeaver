@@ -35,6 +35,17 @@ import {
   type ProviderCapabilityTestPreview,
   type ProviderCapabilityTestResult,
   type PublicApiErrorBody,
+  type RepositoryAnalysisConfiguration,
+  repositoryAnalysisConfigurationSchema,
+  type RepositoryAnalysisDraftInput,
+  type RepositoryAnalysisDraftRevisionInput,
+  type RepositoryAnalysisOptions,
+  repositoryAnalysisOptionsSchema,
+  type RepositoryAnalysisResource,
+  type RepositoryDraftTestExecution,
+  repositoryDraftTestExecutionSchema,
+  type RepositoryDraftTestPreview,
+  repositoryDraftTestPreviewSchema,
   platformLinkConfigurationSchema,
   providerCapabilityTestOperationsSchema,
   providerCapabilityTestPreviewSchema,
@@ -91,6 +102,16 @@ export interface KnowledgeSourceDraftInput {
   readonly chunkingProfileVersion: string;
   readonly embeddingBatchSize: number;
   readonly embeddingBudgetPolicyId: string;
+  /** Source-owned immutable attachment policy selection. The API validates the
+   * policy version and derives all limits, bindings and secret-free runtime
+   * settings; the browser never supplies those fields. */
+  readonly attachmentStage:
+    | Readonly<{ readonly mode: "disabled" }>
+    | Readonly<{
+        readonly mode: "optional" | "required";
+        readonly attachmentPolicyId: string;
+        readonly attachmentPolicyConfigurationVersionId: string;
+      }>;
   readonly synchronizationPolicy: Readonly<Record<string, unknown>>;
   readonly deletionBehavior: "tombstone" | "retain";
 }
@@ -447,6 +468,90 @@ export class CaseWeaverApiClient {
       "user",
     );
     return result.items;
+  }
+
+  /** Safe, server-audited authoring choices for the repository-analysis area. */
+  public async repositoryAnalysisOptions(
+    signal?: AbortSignal,
+  ): Promise<RepositoryAnalysisOptions> {
+    return this.requestJson(
+      "/v1/admin/repository-analysis/options",
+      { method: "GET", signal },
+      repositoryAnalysisOptionsSchema,
+      "user",
+    );
+  }
+
+  public async createRepositoryAnalysisDraft(
+    input: RepositoryAnalysisDraftInput,
+    signal?: AbortSignal,
+  ): Promise<RepositoryAnalysisConfiguration> {
+    return this.requestJson(
+      "/v1/admin/repository-analysis/drafts",
+      { method: "POST", signal, body: JSON.stringify(input) },
+      repositoryAnalysisConfigurationSchema,
+      "user",
+    );
+  }
+
+  public async createRepositoryAnalysisDraftRevision(
+    input: RepositoryAnalysisDraftRevisionInput,
+    signal?: AbortSignal,
+  ): Promise<RepositoryAnalysisConfiguration> {
+    return this.requestJson(
+      "/v1/admin/repository-analysis/draft-revisions",
+      { method: "POST", signal, body: JSON.stringify(input) },
+      repositoryAnalysisConfigurationSchema,
+      "user",
+    );
+  }
+
+  public async transitionRepositoryAnalysis(
+    input: Readonly<{
+      readonly resource: RepositoryAnalysisResource;
+      readonly configurationId: string;
+      readonly expectedRevision: number;
+      readonly lifecycle: "active" | "disabled";
+    }>,
+    signal?: AbortSignal,
+  ): Promise<RepositoryAnalysisConfiguration> {
+    return this.requestJson(
+      "/v1/admin/repository-analysis/lifecycle",
+      { method: "POST", signal, body: JSON.stringify(input) },
+      repositoryAnalysisConfigurationSchema,
+      "user",
+    );
+  }
+
+  public async previewRepositoryDraftTest(
+    input: Readonly<{
+      readonly repositoryId: string;
+      readonly candidateVersionId: string;
+    }>,
+    signal?: AbortSignal,
+  ): Promise<RepositoryDraftTestPreview> {
+    return this.requestJson(
+      "/v1/admin/repository-analysis/code-repositories/draft-tests/previews",
+      { method: "POST", signal, body: JSON.stringify(input) },
+      repositoryDraftTestPreviewSchema,
+      "user",
+    );
+  }
+
+  public async executeRepositoryDraftTest(
+    input: Readonly<{
+      readonly repositoryId: string;
+      readonly candidateVersionId: string;
+      readonly confirmationId: string;
+    }>,
+    signal?: AbortSignal,
+  ): Promise<RepositoryDraftTestExecution> {
+    return this.requestJson(
+      "/v1/admin/repository-analysis/code-repositories/draft-tests/executions",
+      { method: "POST", signal, body: JSON.stringify(input) },
+      repositoryDraftTestExecutionSchema,
+      "user",
+    );
   }
 
   public async listDescriptors(

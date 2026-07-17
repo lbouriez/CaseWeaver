@@ -14,9 +14,9 @@ import {
   type RepositoryAgentRequest,
   type RepositoryAgentResult,
   type RepositoryAgentRuntimePin,
-  type RepositoryAgentRuntimeResult,
   type RepositoryAgentSandboxLimits,
   type RepositoryAgentToolGateway,
+  type RepositoryAgentUnverifiedResult,
   type RerankerRequest,
   type RerankerResult,
   type VisionRequest,
@@ -53,10 +53,13 @@ export interface CopilotSdkByokClient {
   }): Promise<CopilotSdkByokResult>;
 }
 
-export interface CopilotSdkByokResult
-  extends RepositoryAgentRuntimeResult,
-    RepositoryAgentResult {
-  readonly usage?: NormalizedUsage;
+export interface CopilotSdkByokResult extends RepositoryAgentUnverifiedResult {
+  /** Required: hard budget execution cannot price an unmetered agent run. */
+  readonly usage: NormalizedUsage;
+  readonly metering: Extract<
+    import("@caseweaver/ai-sdk").RepositoryAgentMetering,
+    { readonly mode: "observableTurns" }
+  >;
   readonly requestId?: string;
   readonly effectiveModel?: string;
 }
@@ -126,8 +129,8 @@ function assertResolvedRuntime(
   >,
 ): void {
   if (
-    resolved.repository.repositoryId !== pin.repositoryId ||
-    resolved.repository.pinnedCommit.toLowerCase() !==
+    resolved.runtime.repositoryId !== pin.repositoryId ||
+    resolved.runtime.pinnedCommit.toLowerCase() !==
       pin.pinnedCommit.toLowerCase()
   ) {
     throw new AiConfigurationError(
@@ -225,11 +228,15 @@ function assertBinding(binding: AiProviderBinding): void {
 }
 
 function assertUsage(
-  usage: NormalizedUsage | undefined,
+  usage: NormalizedUsage,
   maximumAggregateInputTokens: number,
   maximumAggregateOutputTokens: number,
-): NormalizedUsage | undefined {
-  if (usage === undefined) return undefined;
+): NormalizedUsage {
+  if (usage.inputTokens === undefined || usage.outputTokens === undefined) {
+    throw new AiProviderError("Copilot SDK did not report complete usage.", {
+      provider: "copilot-sdk-agent",
+    });
+  }
   for (const value of Object.values(usage)) {
     if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) {
       throw new AiProviderError("Copilot SDK returned invalid usage.", {
@@ -373,9 +380,9 @@ export class CopilotSdkAgentProvider implements AiProviderDispatcher {
     const started = this.now();
     try {
       let clientResult: CopilotSdkByokResult | undefined;
-      const result = await resolvedRuntime.runtime.run(
+      const result = await resolvedRuntime.executor.run(
         {
-          repository: resolvedRuntime.repository,
+          runtime: resolvedRuntime.runtime,
           instruction: invocation.request.instruction,
           allowedTools: resolvedRuntime.allowedTools,
           limits: sandboxLimits,
@@ -398,7 +405,7 @@ export class CopilotSdkAgentProvider implements AiProviderDispatcher {
             maximumAggregateOutputTokens,
             maximumOutputBytes: sandboxLimits.maximumOutputBytes,
             tools: context.tools,
-            signal: invocation.signal,
+            signal: context.signal,
           });
           return clientResult;
         },
@@ -417,6 +424,7 @@ export class CopilotSdkAgentProvider implements AiProviderDispatcher {
         value: {
           summary: result.summary,
           evidence: Object.freeze([...result.evidence]),
+          findings: Object.freeze([...result.findings]),
           metering: clientResult.metering,
         },
         usage,
@@ -429,7 +437,10 @@ export class CopilotSdkAgentProvider implements AiProviderDispatcher {
             : { effectiveModel: clientResult.effectiveModel }),
           latencyMs: Math.max(0, this.now() - started),
           retryCount: 0,
-          rawRedacted: { evidenceCount: result.evidence.length },
+          rawRedacted: {
+            evidenceCount: result.evidence.length,
+            findingCount: result.findings.length,
+          },
         },
       };
     } catch (cause) {

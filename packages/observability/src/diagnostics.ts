@@ -47,16 +47,27 @@ const sensitiveNames = new Set([
   "authorization",
   "attachment",
   "body",
+  "cause",
   "connectionstring",
+  "context",
   "content",
   "cookie",
   "credential",
   "databaseurl",
+  "evidence",
+  "exception",
+  "filepath",
   "header",
   "headers",
+  "href",
+  "locator",
+  "location",
   "message",
+  "modeloutput",
+  "output",
   "password",
   "payload",
+  "path",
   "privatekey",
   "prompt",
   "query",
@@ -66,9 +77,14 @@ const sensitiveNames = new Set([
   "rawresponse",
   "request",
   "response",
+  "result",
   "secret",
+  "source",
+  "stack",
   "text",
   "token",
+  "transcript",
+  "uri",
   "url",
 ]);
 
@@ -77,9 +93,11 @@ const identifierNames = new Set([
   "attemptid",
   "correlationid",
   "errorcode",
+  "externalpublicationid",
   "failurecode",
   "jobid",
   "operationid",
+  "repositoryid",
   "requestid",
   "sourceid",
   "workspaceid",
@@ -90,21 +108,37 @@ const sensitivePrefixesOrSuffixes = [
   "attachment",
   "authorization",
   "body",
+  "cause",
   "content",
+  "context",
   "credential",
+  "evidence",
+  "exception",
+  "filepath",
   "header",
+  "href",
+  "locator",
+  "location",
   "message",
+  "modeloutput",
+  "output",
   "password",
   "payload",
+  "path",
   "privatekey",
   "prompt",
   "query",
   "raw",
   "request",
   "response",
+  "result",
   "secret",
+  "source",
+  "stack",
   "text",
   "token",
+  "transcript",
+  "uri",
   "url",
 ] as const;
 
@@ -112,7 +146,12 @@ function normalizedName(name: string): string {
   return name.replaceAll(/[^a-z0-9]/giu, "").toLocaleLowerCase("en-US");
 }
 
-function isSensitiveName(name: string): boolean {
+/**
+ * Applies the local diagnostic-content policy. Callers exporting to a third
+ * party must additionally use a purpose-specific allow-list; key-based
+ * redaction alone cannot make arbitrary free text safe for external export.
+ */
+export function isSensitiveDiagnosticAttributeName(name: string): boolean {
   const normalized = normalizedName(name);
   if (identifierNames.has(normalized)) return false;
   return (
@@ -188,7 +227,7 @@ function redactValue(
 
     const attributes: Record<string, DiagnosticValue> = {};
     for (const key of Object.keys(value)) {
-      if (isSensitiveName(key)) {
+      if (isSensitiveDiagnosticAttributeName(key)) {
         attributes[key] = REDACTED_DIAGNOSTIC_VALUE;
         continue;
       }
@@ -209,7 +248,7 @@ export function redactDiagnosticAttributes(
 ): DiagnosticAttributes {
   const redacted: Record<string, DiagnosticValue> = {};
   for (const key of Object.keys(attributes)) {
-    if (isSensitiveName(key)) {
+    if (isSensitiveDiagnosticAttributeName(key)) {
       redacted[key] = REDACTED_DIAGNOSTIC_VALUE;
       continue;
     }

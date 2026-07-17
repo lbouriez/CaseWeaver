@@ -293,6 +293,7 @@ describe("attachment derivative identity and processing", () => {
       quotas: {
         timeoutMs: 100,
         maximumMemoryBytes: 1_024,
+        maximumInputBytes: 1_024,
         maximumOutputBytes: 100,
         maximumFiles: 1,
         maximumExpandedBytes: 1_024,
@@ -399,6 +400,7 @@ describe("attachment derivative identity and processing", () => {
         quotas: {
           timeoutMs: 100,
           maximumMemoryBytes: 1_024,
+          maximumInputBytes: 1_024,
           maximumOutputBytes: 1_024,
           maximumFiles: 1,
           maximumExpandedBytes: 1_024,
@@ -451,6 +453,7 @@ describe("attachment derivative identity and processing", () => {
         quotas: {
           timeoutMs: 100,
           maximumMemoryBytes: 100,
+          maximumInputBytes: 100,
           maximumOutputBytes: 100,
           maximumFiles: 1,
           maximumExpandedBytes: 100,
@@ -515,6 +518,7 @@ describe("attachment derivative identity and processing", () => {
       quotas: {
         timeoutMs: 100,
         maximumMemoryBytes: 100,
+        maximumInputBytes: 100,
         maximumOutputBytes: 100,
         maximumFiles: 1,
         maximumExpandedBytes: 100,
@@ -604,6 +608,7 @@ describe("attachment derivative identity and processing", () => {
         quotas: {
           timeoutMs: 100,
           maximumMemoryBytes: 100,
+          maximumInputBytes: 100,
           maximumOutputBytes: 100,
           maximumFiles: 1,
           maximumExpandedBytes: 100,
@@ -691,6 +696,7 @@ describe("attachment derivative identity and processing", () => {
         quotas: {
           timeoutMs: 100,
           maximumMemoryBytes: 100,
+          maximumInputBytes: 100,
           maximumOutputBytes: 100,
           maximumFiles: 1,
           maximumExpandedBytes: 100,

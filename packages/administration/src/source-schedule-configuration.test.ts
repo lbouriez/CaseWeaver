@@ -20,6 +20,7 @@ const source = {
   chunkingProfileVersion: "chunking-v1",
   embeddingBatchSize: 16,
   embeddingBudgetPolicyId: "budget-a",
+  attachmentStage: { mode: "disabled" as const },
   synchronizationPolicy: { triggers: [{ mode: "manual" }] },
   deletionBehavior: "tombstone" as const,
 };

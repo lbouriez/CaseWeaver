@@ -23,6 +23,17 @@ const booleanEnvironmentValue = z
   .enum(["true", "false"])
   .transform((value) => value === "true");
 
+/** Docker Compose mapping-form optional variables become empty strings. */
+function optionalEnvironmentValue<T extends z.ZodType>(schema: T) {
+  return z.preprocess(
+    (value) =>
+      typeof value === "string" && value.trim().length === 0
+        ? undefined
+        : value,
+    schema.optional(),
+  );
+}
+
 function validEphemeralKey(value: string): boolean {
   try {
     return Buffer.from(value, "base64url").length === 32;
@@ -56,25 +67,26 @@ const apiConfigSchema = z
       .int()
       .min(1)
       .max(maximumReadinessTimeoutMs),
-    OIDC_ISSUER: httpsUrl.optional(),
-    OIDC_CLIENT_ID: identifier.optional(),
-    OIDC_CLIENT_SECRET: z.string().min(1).max(4_000).optional(),
-    OIDC_CALLBACK_URL: httpsUrl.optional(),
-    OIDC_EPHEMERAL_ENCRYPTION_KEY: z
-      .string()
-      .min(1)
-      .max(500)
-      .refine(validEphemeralKey, {
+    OIDC_ISSUER: optionalEnvironmentValue(httpsUrl),
+    OIDC_CLIENT_ID: optionalEnvironmentValue(identifier),
+    OIDC_CLIENT_SECRET: optionalEnvironmentValue(z.string().min(1).max(4_000)),
+    OIDC_CALLBACK_URL: optionalEnvironmentValue(httpsUrl),
+    OIDC_EPHEMERAL_ENCRYPTION_KEY: optionalEnvironmentValue(
+      z.string().min(1).max(500).refine(validEphemeralKey, {
         message: "Expected a base64url 32-byte encryption key.",
-      })
-      .optional(),
-    OIDC_EPHEMERAL_KEY_ID: identifier.optional(),
+      }),
+    ),
+    OIDC_EPHEMERAL_KEY_ID: optionalEnvironmentValue(identifier),
     /** Deployment-only first-administrator bootstrap; never exposed by the API. */
-    ADMIN_BOOTSTRAP_OIDC_SUBJECT: z.string().trim().min(1).max(500).optional(),
-    ADMIN_BOOTSTRAP_DISPLAY_NAME: z.string().trim().min(1).max(160).optional(),
+    ADMIN_BOOTSTRAP_OIDC_SUBJECT: optionalEnvironmentValue(
+      z.string().trim().min(1).max(500),
+    ),
+    ADMIN_BOOTSTRAP_DISPLAY_NAME: optionalEnvironmentValue(
+      z.string().trim().min(1).max(160),
+    ),
     /** Local-only operator login. Development and test have safe-to-discover defaults. */
-    ADMIN_LOGIN: z.string().trim().min(1).max(160).optional(),
-    ADMIN_PASSWORD: z.string().min(1).max(1_024).optional(),
+    ADMIN_LOGIN: optionalEnvironmentValue(z.string().trim().min(1).max(160)),
+    ADMIN_PASSWORD: optionalEnvironmentValue(z.string().min(1).max(1_024)),
     /** Required to deliberately enable password login in production. */
     ADMIN_ENABLE_PASSWORD_AUTHENTICATION: booleanEnvironmentValue.optional(),
     ADMIN_DISABLE_LOGIN_AUTHENTICATION: booleanEnvironmentValue

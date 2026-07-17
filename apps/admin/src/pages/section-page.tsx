@@ -32,6 +32,7 @@ import { DiagnosticExportPanel } from "./diagnostic-export.js";
 import { KnowledgeCollectionAuthoring } from "./knowledge-collection-authoring.js";
 import { PrivacyPurgeDialog } from "./privacy-purge-dialog.js";
 import { RoleAssignmentEditor } from "./role-assignment-editor.js";
+import { RepositoryAnalysisWorkflows } from "./repository-analysis-workflows.js";
 import { SecretReferenceRegistration } from "./secret-reference-registration.js";
 import { SourceScheduleDrafts } from "./source-schedule-drafts.js";
 
@@ -545,6 +546,9 @@ export function SectionPage({
           }
         />
       ) : null}
+      {section === "integrations" ? (
+        <RepositoryAnalysisWorkflows section="automation" />
+      ) : null}
       {section === "integrations" ||
       section === "publication" ||
       section === "platform" ? (
@@ -614,6 +618,9 @@ export function SectionPage({
             />
           ) : null}
         </Stack>
+      ) : null}
+      {section === "knowledge" ? (
+        <RepositoryAnalysisWorkflows section="knowledge" />
       ) : null}
       {section === "operations" ? <DiagnosticExportPanel /> : null}
       {section === "access" ? <RoleAssignmentEditor /> : null}

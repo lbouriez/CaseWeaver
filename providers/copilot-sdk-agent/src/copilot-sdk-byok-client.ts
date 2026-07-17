@@ -1,40 +1,49 @@
-import {
-  CopilotClient,
-  CopilotRequestHandler,
-  ToolSet,
-  type SessionConfig,
-} from "@github/copilot-sdk";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { z } from "zod";
-
 import {
   AiConfigurationError,
   AiProviderError,
   type NormalizedUsage,
   type RepositoryAgentMetering,
-  type RepositoryAgentRuntimeResult,
   type RepositoryAgentToolGateway,
+  type RepositoryAgentUnverifiedResult,
   type RepositoryReadOnlyTool,
 } from "@caseweaver/ai-sdk";
+import {
+  CopilotClient,
+  CopilotRequestHandler,
+  type SessionConfig,
+  ToolSet,
+} from "@github/copilot-sdk";
+import { z } from "zod";
 
 import type { CopilotSdkByokClient, CopilotSdkByokResult } from "./index.js";
 
 const toolNames = ["listFiles", "readFile", "searchFiles"] as const;
 const modelOutput = z
   .object({
-    summary: z.string().trim().min(1).max(32_000),
-    evidence: z
+    summary: z.string().trim().min(1).max(16_000),
+    findings: z
       .array(
         z
           .object({
-            path: z.string().min(1).max(1_024),
-            startLine: z.number().int().min(1).max(1_000_000),
-            endLine: z.number().int().min(1).max(1_000_000),
+            summary: z.string().trim().min(1).max(16_000),
+            citations: z
+              .array(
+                z
+                  .object({
+                    path: z.string().min(1).max(1_024),
+                    startLine: z.number().int().min(1).max(1_000_000),
+                    endLine: z.number().int().min(1).max(1_000_000),
+                  })
+                  .strict()
+                  .refine((value) => value.endLine >= value.startLine),
+              )
+              .min(1)
+              .max(100),
           })
-          .strict()
-          .refine((value) => value.endLine >= value.startLine),
+          .strict(),
       )
       .max(100),
   })
@@ -235,15 +244,15 @@ function systemInstruction(): string {
     "You are a repository investigation agent running in an isolated multi-tenant service.",
     "Use only the supplied read-only repository tools. Do not ask for, access, infer, or disclose credentials, configuration values, environment data, URLs, or source excerpts.",
     "Do not use shell, filesystem, network, Git, MCP, skills, subagents, plugins, or write tools.",
-    "Return exactly one JSON object with a concise summary and evidence locations.",
-    'Schema: {"summary":"safe concise finding","evidence":[{"path":"relative/file","startLine":1,"endLine":1}]}.',
+    "Return exactly one JSON object with a concise summary and evidence-linked findings.",
+    'Schema: {"summary":"safe concise overview","findings":[{"summary":"untrusted analytical observation","citations":[{"path":"relative/file","startLine":1,"endLine":1}]}]}.',
   ].join("\n");
 }
 
 function parseModelOutput(
   value: string,
   maximumOutputBytes: number,
-): RepositoryAgentRuntimeResult {
+): RepositoryAgentUnverifiedResult {
   if (new TextEncoder().encode(value).byteLength > maximumOutputBytes) {
     throw new AiProviderError("Copilot SDK returned an oversized result.", {
       provider: "copilot-sdk-agent",
@@ -265,14 +274,27 @@ function parseModelOutput(
   }
   return Object.freeze({
     summary: output.data.summary,
-    evidence: Object.freeze(
-      output.data.evidence.map((item) => Object.freeze(item)),
+    findings: Object.freeze(
+      output.data.findings.map((finding) =>
+        Object.freeze({
+          summary: finding.summary,
+          citations: Object.freeze(
+            finding.citations.map((citation) => Object.freeze(citation)),
+          ),
+        }),
+      ),
     ),
   });
 }
 
-function metering(turns: readonly NormalizedUsage[]): RepositoryAgentMetering {
-  if (turns.length === 0) return Object.freeze({ mode: "aggregate" as const });
+function metering(
+  turns: readonly NormalizedUsage[],
+): Extract<RepositoryAgentMetering, { readonly mode: "observableTurns" }> {
+  if (turns.length === 0) {
+    throw new AiProviderError("Copilot SDK did not report metered usage.", {
+      provider: "copilot-sdk-agent",
+    });
+  }
   return Object.freeze({
     mode: "observableTurns" as const,
     turns: Object.freeze(
@@ -449,7 +471,7 @@ export class CopilotSdkByokRuntimeClient implements CopilotSdkByokClient {
         return Object.freeze({
           ...parseModelOutput(result.data.content, input.maximumOutputBytes),
           metering: metering(turns),
-          ...(turns.length === 0 ? {} : { usage: aggregateUsage(turns) }),
+          usage: aggregateUsage(turns),
           ...(requestId === undefined ? {} : { requestId }),
           ...(effectiveModel === undefined ? {} : { effectiveModel }),
         });

@@ -2,10 +2,46 @@
 
 **PBI:** 007
 
-Reference Jitbit adapter for `KnowledgeSource`, `CaseSource`, and
+Reference Jitbit adapter for `KnowledgeSource`, `CaseSource`, `AttachmentSource`, and
 `AnalysisDestination`. It uses an injected authenticated HTTP client, secret references
 resolved at runtime, and connector-owned Zod response schemas. It does not implement
-attachment byte access, webhooks, scheduling, database access, analysis, or AI calls.
+webhooks, scheduling, database access, attachment persistence/processing, analysis, or
+AI calls.
+
+## Attachment capability
+
+`JitbitAttachmentSource` opens `GET /api/attachment?id=<fileId>` with the configured
+server-side credential and returns an abort-aware `AsyncIterable<Uint8Array>`. It never
+buffers response bytes, persists content, calls AI, or trusts a declared content type;
+the attachment pipeline owns byte limits, hashing, MIME detection, storage, cache use,
+and derivative processing. Remote failures are generic typed connector errors and never
+include a response body, URL, credential, external-secret locator, or attachment path.
+
+Normalized cases and historical resolved-case documents emit attachment occurrences at
+their real owner. Declared Jitbit attachments use `declaredAttachment`; `<img
+src="/File/Get/<id>">` references in the ticket body and eligible comments use
+`inlineImage`. System comments and CaseWeaver publication-marker comments are excluded
+before attachment extraction. Each occurrence keeps its owner and ordinal even when it
+references the same Jitbit binary; legacy aggregate metadata deduplicates that binary
+reference only.
+
+The occurrence reopen locator is an internal URL-safe opaque token containing no URL,
+local path, or credential. It is supplied only to trusted runtime attachment reopening,
+never to public DTOs, browser state, audit payloads, logs, traces, or diagnostics.
+
+## Resolved-case source filter
+
+`JitbitResolvedKnowledgeFilter` is the connector-owned source-filter shape. Its
+`resolvedOrClosedOnly` setting defaults to `true` and accepts every Jitbit terminal
+status recognized by this adapter (`closed`, `resolved`, `done`, `completed`, `solved`,
+or `cancelled`), rather than only literal `Closed`. It is intentionally not a
+connector-instance setting: separate immutable knowledge sources can require different
+eligibility policies.
+
+`JitbitKnowledgeSource` accepts this filter as an optional injected source-version
+projection. Parent administration/persistence/runtime composition must persist and pass
+that immutable source filter; this connector does not own its Admin form or database
+projection. Until that projection is composed, the safe terminal-only default applies.
 
 Resolved knowledge discovery emits **delta** pages only. Jitbit has no scan epoch, so
 absence never emits a tombstone. Summary `LastUpdated` is the preferred opaque
@@ -49,10 +85,8 @@ analysis-destination ports sharing one `JitbitClient`. It resolves no secret whi
 is constructed; the client resolves the opaque reference only for a cancellable outbound
 request.
 
-The current descriptor revision is `3`, whose `requestTimeoutMs` field matches the
-authoritative settings schema. Revision `1` is retained only so durable historical
-configuration versions can be read by trusted runtime composition through
-`createJitbitRuntimeContributions`; revision `2` remains retained in installations
-that registered it, and new API drafts use revision `3`. Neither revision exposes a
-secret value, locator, client, or runtime exception through
-descriptor metadata.
+The current descriptor revision is `4`, whose `requestTimeoutMs` field matches the
+authoritative settings schema and declares `attachmentSource`. Revisions `1`, `2`, and
+`3` remain executable through `createJitbitRuntimeContributions` for durable historical
+work; only revision `4` is used for new drafts. Neither revision exposes a secret value,
+attachment locator, client, or runtime exception through descriptor metadata.

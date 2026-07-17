@@ -1,10 +1,18 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import type {
+  AcceptedAttachment,
   AttachmentDerivativeEvidenceRecord,
   AttachmentDerivativeEvidenceRecordStore,
+  AttachmentPreparationSubject,
+  AttachmentOccurrenceDescriptor,
 } from "@caseweaver/attachments";
 import { Pool, type PoolClient, type QueryResultRow } from "pg";
+
+import { PostgresAttachmentPreparationAttemptStore } from "./preparation-attempt-store.js";
+
+export * from "./preparation-store.js";
+export * from "./preparation-attempt-store.js";
 
 export interface AttachmentDerivativeIdentity {
   readonly workspaceId: string;
@@ -89,6 +97,22 @@ export interface PersistedAttachmentReference {
   readonly detectedMimeType: string;
   readonly declaredMimeType?: string;
   readonly sanitizedFilename?: string;
+}
+
+/**
+ * A stable attachment row is reserved before a fenced preparation attempt can
+ * reference it. It contains no blob, byte, MIME, or opening material until
+ * the normal streaming intake has succeeded.
+ */
+export interface AttachmentReservationInput {
+  readonly id: string;
+  readonly workspaceId: string;
+  readonly reference: Readonly<{
+    readonly connectorInstanceId: string;
+    readonly resourceType: string;
+    readonly externalId: string;
+  }>;
+  readonly observedAt: string;
 }
 
 export interface AttachmentDerivativeFailure {
@@ -199,6 +223,20 @@ function derivativeId(identity: AttachmentDerivativeIdentity): string {
 
 function blobId(input: AttachmentReferenceInput): string {
   return `attachment-blob:${digest(`${input.workspaceId}:${input.id}`)}`;
+}
+
+function attachmentExternalReferenceId(input: {
+  readonly workspaceId: string;
+  readonly reference: AttachmentReservationInput["reference"];
+}): string {
+  return `attachment-external-reference:${digest(
+    [
+      input.workspaceId,
+      input.reference.connectorInstanceId,
+      input.reference.resourceType,
+      input.reference.externalId,
+    ].join("\u0000"),
+  )}`;
 }
 
 function assertOpaque(
@@ -396,6 +434,119 @@ export class PostgresAttachmentRepository
     }
   }
 
+  /**
+   * Creates the minimal attachment identity required by the fenced stable
+   * attempt. The placeholder is not accepted evidence and cannot be read as a
+   * blob; `recordReservedAttachment` upgrades it only after bounded intake.
+   */
+  public async reserveAttachment(
+    input: AttachmentReservationInput,
+  ): Promise<void> {
+    this.assertReservationInput(input);
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      const referenceId = attachmentExternalReferenceId(input);
+      const references = await client.query<IdRow>(
+        `INSERT INTO external_references (
+           id, workspace_id, connector_registration_id, kind, external_id
+         ) VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (workspace_id, connector_registration_id, kind, external_id)
+         DO UPDATE SET updated_at = NOW()
+         RETURNING id`,
+        [
+          referenceId,
+          input.workspaceId,
+          input.reference.connectorInstanceId,
+          input.reference.resourceType,
+          input.reference.externalId,
+        ],
+      );
+      const reference = references.rows[0];
+      if (reference === undefined) {
+        throw new Error("Attachment source reference is unavailable.");
+      }
+      const attachments = await client.query<IdRow>(
+        `INSERT INTO attachments (
+           id, workspace_id, external_reference_id, lifecycle, observed_at
+         ) VALUES ($1, $2, $3, 'discovered', $4)
+         ON CONFLICT (workspace_id, id) DO UPDATE
+           SET observed_at = EXCLUDED.observed_at
+         WHERE attachments.external_reference_id = EXCLUDED.external_reference_id
+           AND attachments.lifecycle IN ('discovered', 'accepted')
+           AND attachments.retention_state = 'active'
+         RETURNING id`,
+        [input.id, input.workspaceId, reference.id, input.observedAt],
+      );
+      if (attachments.rows.length !== 1) {
+        throw new Error("Attachment reservation conflicts with immutable data.");
+      }
+      await client.query("COMMIT");
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /** Upgrades only a previously reserved attachment after streaming intake. */
+  public async recordReservedAttachment(input: {
+    readonly attachmentId: string;
+    readonly attachment: AcceptedAttachment;
+    readonly observedAt: string;
+  }): Promise<PersistedAttachmentReference> {
+    assertOpaque("attachment ID", input.attachmentId);
+    const reference = await this.pool.query<IdRow>(
+      `SELECT id
+       FROM external_references
+       WHERE workspace_id = $1
+         AND connector_registration_id = $2
+         AND kind = $3
+         AND external_id = $4
+       LIMIT 1`,
+      [
+        input.attachment.workspaceId,
+        input.attachment.sourceReference.connectorInstanceId,
+        input.attachment.sourceReference.resourceType,
+        input.attachment.sourceReference.externalId,
+      ],
+    );
+    const source = reference.rows[0];
+    if (source === undefined) {
+      throw new Error("Reserved attachment source is unavailable.");
+    }
+    return this.recordAttachment({
+      id: input.attachmentId,
+      workspaceId: input.attachment.workspaceId,
+      sourceReferenceId: source.id,
+      storage: input.attachment.blob,
+      sha256: input.attachment.sha256,
+      byteLength: input.attachment.byteLength,
+      detectedMimeType: input.attachment.detectedMimeType,
+      ...(input.attachment.declaredMimeType === undefined
+        ? {}
+        : { declaredMimeType: input.attachment.declaredMimeType }),
+      observedAt: input.observedAt,
+    });
+  }
+
+  /** Associates a retained derivative with the exact stable subject occurrence. */
+  public async recordReservedDerivativeSource(input: {
+    readonly subject: AttachmentPreparationSubject;
+    readonly occurrence: AttachmentOccurrenceDescriptor;
+    readonly derivativeId: string;
+  }): Promise<void> {
+    await this.recordDerivativeSource({
+      workspaceId: input.subject.workspaceId,
+      derivativeId: input.derivativeId,
+      attachmentId: input.occurrence.attachmentId,
+      sourceJobId: `attachment-preparation:${digest(
+        `${input.subject.kind}\u0000${input.subject.id}`,
+      )}`,
+    });
+  }
+
   public async recordAttachment(
     input: AttachmentReferenceInput,
   ): Promise<PersistedAttachmentReference> {
@@ -442,21 +593,35 @@ export class PostgresAttachmentRepository
          ) VALUES (
            $1, $2, $3, 'accepted', $4, $5, $6, $7, $8, $9, $10, $11
          )
-         ON CONFLICT (workspace_id, id) DO UPDATE
-           SET observed_at = EXCLUDED.observed_at
+        ON CONFLICT (workspace_id, id) DO UPDATE
+           SET lifecycle = 'accepted',
+               content_hash = EXCLUDED.content_hash,
+               blob_id = EXCLUDED.blob_id,
+               byte_length = EXCLUDED.byte_length,
+               declared_mime_type = EXCLUDED.declared_mime_type,
+               detected_mime_type = EXCLUDED.detected_mime_type,
+               sanitized_filename = EXCLUDED.sanitized_filename,
+               observed_at = EXCLUDED.observed_at,
+               retention_expires_at = EXCLUDED.retention_expires_at
          WHERE attachments.external_reference_id = EXCLUDED.external_reference_id
-           AND attachments.lifecycle = 'accepted'
-           AND attachments.content_hash = EXCLUDED.content_hash
-           AND attachments.blob_id = EXCLUDED.blob_id
-           AND attachments.byte_length = EXCLUDED.byte_length
-           AND attachments.declared_mime_type
-             IS NOT DISTINCT FROM EXCLUDED.declared_mime_type
-           AND attachments.detected_mime_type = EXCLUDED.detected_mime_type
-           AND attachments.sanitized_filename
-             IS NOT DISTINCT FROM EXCLUDED.sanitized_filename
-           AND attachments.retention_expires_at
-             IS NOT DISTINCT FROM EXCLUDED.retention_expires_at
            AND attachments.retention_state = 'active'
+           AND (
+             (attachments.lifecycle = 'discovered'
+              AND attachments.content_hash IS NULL
+              AND attachments.blob_id IS NULL)
+             OR
+             (attachments.lifecycle = 'accepted'
+              AND attachments.content_hash = EXCLUDED.content_hash
+              AND attachments.blob_id = EXCLUDED.blob_id
+              AND attachments.byte_length = EXCLUDED.byte_length
+              AND attachments.declared_mime_type
+                IS NOT DISTINCT FROM EXCLUDED.declared_mime_type
+              AND attachments.detected_mime_type = EXCLUDED.detected_mime_type
+              AND attachments.sanitized_filename
+                IS NOT DISTINCT FROM EXCLUDED.sanitized_filename
+              AND attachments.retention_expires_at
+                IS NOT DISTINCT FROM EXCLUDED.retention_expires_at)
+           )
          RETURNING
            attachments.id,
            attachments.workspace_id,
@@ -1024,10 +1189,25 @@ export class PostgresAttachmentRepository
       assertTimestamp("retention expiry", input.retentionExpiresAt);
     }
   }
+
+  private assertReservationInput(input: AttachmentReservationInput): void {
+    assertOpaque("attachment ID", input.id);
+    assertOpaque("workspaceId", input.workspaceId);
+    assertOpaque(
+      "connector registration",
+      input.reference.connectorInstanceId,
+      200,
+    );
+    assertOpaque("external resource type", input.reference.resourceType, 100);
+    assertOpaque("external attachment reference", input.reference.externalId);
+    assertTimestamp("observedAt", input.observedAt);
+  }
 }
 
 export interface PostgresAttachmentPersistence {
   readonly repository: PostgresAttachmentRepository;
+  /** Stable fenced attempts for live source/case attachment preparation. */
+  readonly attempts: PostgresAttachmentPreparationAttemptStore;
   close(): Promise<void>;
 }
 
@@ -1049,6 +1229,7 @@ export function createPostgresAttachmentPersistence(
       pool,
       configuration.claimLeaseMs,
     ),
+    attempts: new PostgresAttachmentPreparationAttemptStore(pool),
     close: async () => pool.end(),
   });
 }

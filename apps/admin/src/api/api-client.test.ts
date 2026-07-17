@@ -402,6 +402,7 @@ describe("CaseWeaverApiClient", () => {
       chunkingProfileVersion: "chunking-v1",
       embeddingBatchSize: 16,
       embeddingBudgetPolicyId: "budget-1",
+      attachmentStage: { mode: "disabled" },
       synchronizationPolicy: { trigger: "manual" },
       deletionBehavior: "tombstone",
     });

@@ -156,3 +156,65 @@ export interface CaseAnalysisSchedulerDependencies {
   readonly clock: SchedulerClock;
   readonly leaseMs: number;
 }
+
+/**
+ * PBI-020 intake schedules discover many case targets.  Unlike the historical
+ * PBI-012 schedule, the scheduler does not retain or emit a mutable target;
+ * it emits one immutable discovery occurrence and a worker performs the
+ * connector call using these exact source/trigger pins.
+ */
+export interface CaseDiscoverySchedule {
+  readonly id: string;
+  readonly workspaceId: string;
+  readonly configurationVersionId: string;
+  readonly triggerId: string;
+  readonly triggerVersionId: string;
+  readonly automatedPrincipalId: string;
+  readonly connectorRegistrationId: string;
+  readonly connectorConfigurationVersionId: string;
+  readonly cadence: ScheduleCadence;
+  readonly enabled: boolean;
+  readonly nextRunAt: string;
+}
+
+export interface CaseDiscoveryCommand {
+  readonly type: "analysis.discover.v1";
+  readonly workspaceId: string;
+  readonly scheduleId: string;
+  readonly scheduleConfigurationVersionId: string;
+  readonly triggerId: string;
+  readonly triggerVersionId: string;
+  readonly connectorRegistrationId: string;
+  readonly connectorConfigurationVersionId: string;
+  readonly occurrenceKey: string;
+}
+
+export interface CaseDiscoveryScheduleStore {
+  findDue(input: {
+    readonly now: string;
+    readonly limit: number;
+  }): Promise<readonly CaseDiscoverySchedule[]>;
+  acquireLease(input: {
+    readonly schedule: CaseDiscoverySchedule;
+    readonly now: string;
+    readonly leaseMs: number;
+  }): Promise<ScheduleLease | undefined>;
+  /**
+   * Persists the occurrence, discovery outbox command, authoritative schedule
+   * audit event, next run, and lease release atomically.
+   */
+  enqueueOccurrence(input: {
+    readonly schedule: CaseDiscoverySchedule;
+    readonly lease: ScheduleLease;
+    readonly occurrenceKey: string;
+    readonly command: CaseDiscoveryCommand;
+    readonly nextRunAt: string;
+    readonly now: string;
+  }): Promise<"enqueued" | "duplicate">;
+}
+
+export interface CaseDiscoverySchedulerDependencies {
+  readonly store: CaseDiscoveryScheduleStore;
+  readonly clock: SchedulerClock;
+  readonly leaseMs: number;
+}

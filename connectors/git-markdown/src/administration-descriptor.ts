@@ -7,14 +7,14 @@ export const gitMarkdownAdministrationDescriptor: ConfigurationDescriptor =
   Object.freeze({
     kind: "connector",
     type: "git-markdown",
-    // Descriptor revisions are immutable in PostgreSQL. Version 1 is retained
-    // for historical configurations; version 2 replaces operator-facing JSON
-    // implementation wording with clear authoring guidance.
-    version: "2",
+    // Descriptor revisions are immutable in PostgreSQL. Versions 1 and 2 are
+    // retained for historical configurations. Version 3 adds the explicit
+    // attachment-source capability and exact-commit authoring guidance.
+    version: "3",
     displayName: "Git / Markdown",
     description:
       "Indexes Markdown and Docusaurus content from a pinned local or remote Git repository.",
-    connectorCapabilities: ["knowledgeSource"],
+    connectorCapabilities: ["knowledgeSource", "attachmentSource"],
     aiCapabilities: [],
     supportedWireApis: [],
     supportedWebhookEventTypes: [],
@@ -43,11 +43,12 @@ export const gitMarkdownAdministrationDescriptor: ConfigurationDescriptor =
           type: "object",
           title: "Git reference",
           description:
-            "The branch or tag to pin when CaseWeaver reads the repository. A branch can move later; each synchronization records the resulting immutable commit.",
+            "Choose a branch or tag for a moving source, or an exact commit for a reproducible pinned source. Every synchronization records the immutable commit it actually read.",
           inputKind: "git_reference",
           examples: [
             '{"kind":"branch","name":"main"}',
             '{"kind":"tag","name":"v2.4.0"}',
+            '{"kind":"commit","sha":"0123456789abcdef0123456789abcdef01234567"}',
           ],
         },
         browserUrl: {

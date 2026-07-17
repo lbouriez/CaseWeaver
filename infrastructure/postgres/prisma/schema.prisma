@@ -34,6 +34,9 @@ model Workspace {
   attachmentBlobs                           AttachmentBlob[]
   attachmentDerivatives                     AttachmentDerivative[]
   attachmentDerivativeSources               AttachmentDerivativeSource[]
+  attachmentOccurrences                     AttachmentOccurrence[]
+  attachmentPreparationRuns                 AttachmentPreparationRun[]
+  attachmentPreparationEvidence             AttachmentPreparationEvidence[]
   knowledgeCollections                      KnowledgeCollection[]
   knowledgeSources                          KnowledgeSource[]
   knowledgeSourceStates                     KnowledgeSourceState[]
@@ -54,10 +57,13 @@ model Workspace {
   analysisJobs                              AnalysisJob[]
   analysisAttempts                          AnalysisAttempt[]
   analysisResults                           AnalysisResult[]
+  analysisExecutionInputs                   AnalysisExecutionInput[]
+  analysisResultProtectedContents           AnalysisResultProtectedContent[]
   analysisTriggerRequestAnalyses            AnalysisTriggerRequestAnalysis[]
   evidence                                  Evidence[]
   publicationIntents                        PublicationIntent[]
   publicationAttempts                       PublicationAttempt[]
+  publicationReceipts                       PublicationReceipt[]
   publicationProfiles                       PublicationProfile[]
   publicationProfileVersions                PublicationProfileVersion[]
   webhookInboxes                            WebhookInbox[]
@@ -70,6 +76,15 @@ model Workspace {
   outboxEnvelopes                           OutboxEnvelope[]
   resourceLeases                            ResourceLease[]
   administrationConfigurations              AdministrationConfiguration[]
+  codeRepositoryVersions                    CodeRepositoryVersion[]
+  repositoryExecutionPolicyVersions         RepositoryExecutionPolicyVersion[]
+  attachmentPolicyVersions                  AttachmentPolicyVersion[]
+  analysisRecipeVersions                    AnalysisRecipeVersion[]
+  caseAnalysisTriggerRecipeVersions         CaseAnalysisTriggerRecipeVersion[]
+  caseAnalysisIntakeSchedules                CaseAnalysisIntakeSchedule[]
+  caseAnalysisIntakeScheduleLeases           CaseAnalysisIntakeScheduleLease[]
+  caseAnalysisIntakeScheduleOccurrences      CaseAnalysisIntakeScheduleOccurrence[]
+  caseAnalysisIntakeScheduleCursors          CaseAnalysisIntakeScheduleCursor[]
   administrationConfigurationChangeOutbox   AdministrationConfigurationChangeOutbox[]
   administrationAiConfigurationChangeOutbox AdministrationAiConfigurationChangeOutbox[]
   administrationActionPreviews              AdministrationActionPreview[]
@@ -355,6 +370,10 @@ model KnowledgeSourceRuntimeVersion {
   chunkingProfileVersion          String?                            @map("chunking_profile_version")
   synchronizationPolicy           Json?                              @map("synchronization_policy")
   embeddingBatchSize              Int?                               @map("embedding_batch_size")
+  /** Null only for legacy rows created before source-owned attachment stages. */
+  attachmentStageMode             String?                            @map("attachment_stage_mode")
+  attachmentPolicyConfigurationVersionId String?                     @map("attachment_policy_configuration_version_id")
+  attachmentAccessPolicyHash      String?                            @map("attachment_access_policy_hash") @db.Char(64)
   createdAt                       DateTime                           @default(now()) @map("created_at") @db.Timestamptz(6)
   collectionRuntimeVersion        KnowledgeCollectionRuntimeVersion? @relation(fields: [workspaceId, collectionRuntimeVersionId], references: [workspaceId, id], onDelete: Restrict)
 
@@ -733,6 +752,7 @@ model CaseSnapshotAttachmentReference {
   workspaceId            String               @map("workspace_id")
   caseSnapshotId         String               @map("case_snapshot_id")
   ordinal                Int
+  occurrenceIdentity     String?              @map("occurrence_identity")
   attachmentId           String               @map("attachment_id")
   attachmentDerivativeId String               @map("attachment_derivative_id")
   processorVersion       String               @map("processor_version")
@@ -744,8 +764,96 @@ model CaseSnapshotAttachmentReference {
   derivative             AttachmentDerivative @relation(fields: [workspaceId, attachmentDerivativeId], references: [workspaceId, id], onDelete: Restrict, map: "case_snapshot_attachment_references_derivative_fk")
 
   @@id([workspaceId, caseSnapshotId, ordinal])
-  @@unique([workspaceId, caseSnapshotId, attachmentDerivativeId])
+  @@unique([workspaceId, caseSnapshotId, occurrenceIdentity])
   @@map("case_snapshot_attachment_references")
+}
+
+/**
+ * Immutable, safe attachment occurrence metadata. Its encrypted reopen locator is
+ * deliberately modelled separately so generic data readers cannot select it.
+ */
+model AttachmentOccurrence {
+  id                               String    @id
+  workspaceId                      String    @map("workspace_id")
+  ownerKind                        String    @map("owner_kind")
+  ownerId                          String    @map("owner_id")
+  connectorRegistrationId          String    @map("connector_registration_id")
+  connectorConfigurationVersionId  String?   @map("connector_configuration_version_id")
+  relation                         String
+  ordinal                          Int
+  attachmentReferenceId            String    @map("attachment_reference_id")
+  declaredMetadata                 Json      @default("{}") @map("declared_metadata")
+  identityHash                     String    @map("identity_hash")
+  required                         Boolean   @default(false)
+  createdAt                        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace                        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  privateIdentity                  AttachmentOccurrencePrivate?
+  preparationEvidence              AttachmentPreparationEvidence[]
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, ownerKind, ownerId, ordinal])
+  @@index([workspaceId, ownerKind, ownerId, ordinal])
+  @@map("attachment_occurrences")
+}
+
+/** Server-private encrypted locator. Do not expose through a generic Prisma read. */
+model AttachmentOccurrencePrivate {
+  workspaceId             String               @map("workspace_id")
+  attachmentOccurrenceId  String               @map("attachment_occurrence_id")
+  locatorCiphertext       String               @map("locator_ciphertext")
+  cipherVersion           String               @map("cipher_version")
+  createdAt               DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  occurrence              AttachmentOccurrence @relation(fields: [workspaceId, attachmentOccurrenceId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@id([workspaceId, attachmentOccurrenceId])
+  @@map("attachment_occurrence_private")
+}
+
+/** Mutable lease state around an otherwise immutable preparation attempt. */
+model AttachmentPreparationRun {
+  id                        String    @id
+  workspaceId               String    @map("workspace_id")
+  ownerKind                 String    @map("owner_kind")
+  ownerId                   String    @map("owner_id")
+  attachmentPolicyVersionId String?   @map("attachment_policy_version_id")
+  policyIdentityHash        String    @map("policy_identity_hash")
+  preparationIdentityHash   String    @map("preparation_identity_hash")
+  state                     String
+  leaseToken                String?   @map("lease_token")
+  leaseExpiresAt            DateTime? @map("lease_expires_at") @db.Timestamptz(6)
+  fencingToken              BigInt    @default(0) @map("fencing_token")
+  retryRequired             Boolean   @default(false) @map("retry_required")
+  createdAt                 DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt               DateTime? @map("completed_at") @db.Timestamptz(6)
+  workspace                 Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  evidence                  AttachmentPreparationEvidence[]
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, ownerKind, ownerId, preparationIdentityHash])
+  @@index([state, leaseExpiresAt, createdAt])
+  @@map("attachment_preparation_runs")
+}
+
+/** Terminal safe outcome for one occurrence within one preparation run. */
+model AttachmentPreparationEvidence {
+  workspaceId                 String                   @map("workspace_id")
+  attachmentPreparationRunId  String                   @map("attachment_preparation_run_id")
+  attachmentOccurrenceId      String                   @map("attachment_occurrence_id")
+  outcome                     String
+  required                    Boolean
+  attachmentId                String?                  @map("attachment_id")
+  attachmentDerivativeId      String?                  @map("attachment_derivative_id")
+  processorVersion            String?                  @map("processor_version")
+  outputContentHash           String?                  @map("output_content_hash")
+  warningCode                 String?                  @map("warning_code")
+  retryable                   Boolean                  @default(false)
+  createdAt                   DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace                   Workspace                @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  run                         AttachmentPreparationRun @relation(fields: [workspaceId, attachmentPreparationRunId], references: [workspaceId, id], onDelete: Restrict)
+  occurrence                  AttachmentOccurrence     @relation(fields: [workspaceId, attachmentOccurrenceId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@id([workspaceId, attachmentPreparationRunId, attachmentOccurrenceId])
+  @@map("attachment_preparation_evidence")
 }
 
 model AttachmentDerivativeSource {
@@ -804,6 +912,180 @@ model AnalysisProfileVersion {
   @@unique([workspaceId, id])
   @@unique([workspaceId, analysisProfileId, version])
   @@map("analysis_profile_versions")
+}
+
+/**
+ * Safe projection of an immutable administration version. Private checkout
+ * settings remain only in the administration version's server-private settings.
+ */
+model CodeRepositoryVersion {
+  id                         String    @id
+  workspaceId                String    @map("workspace_id")
+  configurationVersionId     String    @map("configuration_version_id")
+  mode                       String
+  allowedRefKinds            Json      @map("allowed_ref_kinds")
+  checkoutCredentialRequired Boolean   @map("checkout_credential_required")
+  createdAt                  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace                  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, configurationVersionId])
+  @@map("code_repository_versions")
+}
+
+/** Provider-neutral, networkless repository-agent execution limits. */
+model RepositoryExecutionPolicyVersion {
+  id                              String    @id
+  workspaceId                     String    @map("workspace_id")
+  configurationVersionId          String    @map("configuration_version_id")
+  repositoryAgentBindingVersionId String    @map("repository_agent_binding_version_id")
+  sandboxPolicyVersionId           String    @map("sandbox_policy_version_id")
+  readOnlyToolAllowlist           Json      @map("read_only_tool_allowlist")
+  networkDisabled                 Boolean   @map("network_disabled")
+  maximumDurationMilliseconds     Int       @map("maximum_duration_milliseconds")
+  maximumTurns                    Int       @map("maximum_turns")
+  maximumToolCalls                Int       @map("maximum_tool_calls")
+  maximumOutputTokens             Int       @map("maximum_output_tokens")
+  maximumCpuMilliseconds          Int       @map("maximum_cpu_milliseconds")
+  maximumMemoryBytes              BigInt    @map("maximum_memory_bytes")
+  maximumOutputBytes              BigInt    @map("maximum_output_bytes")
+  createdAt                       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace                       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, configurationVersionId])
+  @@map("repository_execution_policy_versions")
+}
+
+/** Safe policy projection; runtime-only processor settings remain private. */
+model AttachmentPolicyVersion {
+  id                 String    @id
+  workspaceId        String    @map("workspace_id")
+  configurationVersionId String @map("configuration_version_id")
+  processorSecurityPolicyVersionId String @map("processor_security_policy_version_id")
+  visionBindingVersionId           String @map("vision_binding_version_id")
+  maximumAttachmentCount           Int    @map("maximum_attachment_count")
+  maximumAttachmentBytes           BigInt @map("maximum_attachment_bytes")
+  maximumArchiveEntries            Int    @map("maximum_archive_entries")
+  maximumExpandedArchiveBytes      BigInt @map("maximum_expanded_archive_bytes")
+  maximumArchiveDepth              Int    @map("maximum_archive_depth")
+  createdAt          DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace          Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, configurationVersionId])
+  @@map("attachment_policy_versions")
+}
+
+/** Operator-facing immutable recipe selecting one repository at most. */
+model AnalysisRecipeVersion {
+  id                                  String    @id
+  workspaceId                         String    @map("workspace_id")
+  configurationVersionId              String    @map("configuration_version_id")
+  analysisProfileVersionId            String    @map("analysis_profile_version_id")
+  analysisBindingVersionId            String    @map("analysis_binding_version_id")
+  retrievalProfileVersionId           String?   @map("retrieval_profile_version_id")
+  promptProfileVersionId              String?   @map("prompt_profile_version_id")
+  publicationProfileVersionId         String?   @map("publication_profile_version_id")
+  attachmentPolicyVersionId           String?   @map("attachment_policy_version_id")
+  attachmentStageMode                 String    @map("attachment_stage_mode")
+  codeRepositoryVersionId             String?   @map("code_repository_version_id")
+  repositoryExecutionPolicyVersionId  String?   @map("repository_execution_policy_version_id")
+  repositoryStageMode                 String    @map("repository_stage_mode")
+  createdAt                           DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace                           Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, configurationVersionId])
+  @@map("analysis_recipe_versions")
+}
+
+model CaseAnalysisTriggerRecipeVersion {
+  id                       String    @id
+  workspaceId              String    @map("workspace_id")
+  analysisTriggerVersionId String    @map("analysis_trigger_version_id")
+  analysisRecipeVersionId  String    @map("analysis_recipe_version_id")
+  automatedPrincipalId     String    @map("automated_principal_id")
+  createdAt                DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace                Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, analysisTriggerVersionId])
+  @@map("case_analysis_trigger_recipe_versions")
+}
+
+model CaseAnalysisIntakeSchedule {
+  id                                    String    @id
+  workspaceId                           String    @map("workspace_id")
+  scheduleId                            String    @map("schedule_id")
+  configurationVersionId                String    @map("configuration_version_id")
+  analysisTriggerConfigurationVersionId String    @map("analysis_trigger_configuration_version_id")
+  automatedPrincipalId                  String?   @map("automated_principal_id")
+  cadence                               Json
+  nextRunAt                             DateTime  @map("next_run_at") @db.Timestamptz(6)
+  enabled                               Boolean   @default(false)
+  createdAt                             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace                             Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  leases                                CaseAnalysisIntakeScheduleLease[]
+  occurrences                           CaseAnalysisIntakeScheduleOccurrence[]
+  cursor                                CaseAnalysisIntakeScheduleCursor?
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, configurationVersionId])
+  @@unique([workspaceId, scheduleId, configurationVersionId])
+  @@index([enabled, nextRunAt])
+  @@map("case_analysis_intake_schedules")
+}
+
+model CaseAnalysisIntakeScheduleLease {
+  workspaceId                   String                    @map("workspace_id")
+  caseAnalysisIntakeScheduleId  String                    @map("case_analysis_intake_schedule_id")
+  fencingToken                  BigInt                    @map("fencing_token")
+  expiresAt                     DateTime                  @map("expires_at") @db.Timestamptz(6)
+  updatedAt                     DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace                     Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  schedule                      CaseAnalysisIntakeSchedule @relation(fields: [workspaceId, caseAnalysisIntakeScheduleId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@id([workspaceId, caseAnalysisIntakeScheduleId])
+  @@map("case_analysis_intake_schedule_leases")
+}
+
+model CaseAnalysisIntakeScheduleOccurrence {
+  id                               String                    @id
+  workspaceId                      String                    @map("workspace_id")
+  caseAnalysisIntakeScheduleId     String                    @map("case_analysis_intake_schedule_id")
+  occurrenceKey                    String                    @map("occurrence_key")
+  scheduledFor                     DateTime                  @map("scheduled_for") @db.Timestamptz(6)
+  configurationVersionId           String                    @map("configuration_version_id")
+  triggerVersionId                 String                    @map("trigger_version_id")
+  connectorConfigurationVersionId  String                    @map("connector_configuration_version_id")
+  createdAt                        DateTime                  @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace                        Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  schedule                         CaseAnalysisIntakeSchedule @relation(fields: [workspaceId, caseAnalysisIntakeScheduleId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, caseAnalysisIntakeScheduleId, occurrenceKey])
+  @@index([workspaceId, createdAt])
+  @@map("case_analysis_intake_schedule_occurrences")
+}
+
+/** Server-private opaque connector scan cursor for one immutable schedule version. */
+model CaseAnalysisIntakeScheduleCursor {
+  workspaceId                   String                    @map("workspace_id")
+  caseAnalysisIntakeScheduleId  String                    @map("case_analysis_intake_schedule_id")
+  cursorVersion                 String?                   @map("cursor_version")
+  cursorValue                   String?                   @map("cursor_value")
+  executionFence                BigInt                    @default(0) @map("execution_fence")
+  leaseExpiresAt                DateTime?                 @map("lease_expires_at") @db.Timestamptz(6)
+  state                         String                    @default("idle")
+  errorCode                     String?                   @map("error_code")
+  errorRetryable                Boolean?                  @map("error_retryable")
+  updatedAt                     DateTime                  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace                     Workspace                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  schedule                      CaseAnalysisIntakeSchedule @relation(fields: [workspaceId, caseAnalysisIntakeScheduleId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@id([workspaceId, caseAnalysisIntakeScheduleId])
+  @@map("case_analysis_intake_schedule_cursors")
 }
 
 /**
@@ -932,6 +1214,44 @@ model AnalysisJob {
   @@map("analysis_jobs")
 }
 
+/**
+ * Finalized, immutable PBI-020 execution input. Network/AI work occurs before
+ * this record is finalized; retries use this pin instead of resolving a branch again.
+ */
+model AnalysisExecutionInput {
+  id                               String    @id
+  workspaceId                      String    @map("workspace_id")
+  analysisTriggerRequestId         String    @map("analysis_trigger_request_id")
+  caseSnapshotId                   String    @map("case_snapshot_id")
+  analysisRecipeVersionId          String    @map("analysis_recipe_version_id")
+  /** PBI-020 stable attempt pin; legacy preparation-run metadata remains separate. */
+  attachmentPreparationAttemptId   String?   @map("attachment_preparation_attempt_id")
+  attachmentPreparationRunId       String?   @map("attachment_preparation_run_id")
+  attachmentEvidenceHash           String    @map("attachment_evidence_hash")
+  codeRepositoryVersionId          String?   @map("code_repository_version_id")
+  repositoryExecutionPolicyVersionId String? @map("repository_execution_policy_version_id")
+  repositoryAgentBindingVersionId  String?   @map("repository_agent_binding_version_id")
+  resolvedCommitSha                String?   @map("resolved_commit_sha")
+  repositoryResolvedAt             DateTime? @map("repository_resolved_at") @db.Timestamptz(6)
+  inputHash                        String    @map("input_hash")
+  state                            String
+  leaseToken                       String?   @map("lease_token")
+  leaseExpiresAt                   DateTime? @map("lease_expires_at") @db.Timestamptz(6)
+  fencingToken                     BigInt    @default(0) @map("fencing_token")
+  analysisJobId                    String?   @map("analysis_job_id")
+  errorCode                        String?   @map("error_code")
+  errorRetryable                   Boolean?  @map("error_retryable")
+  createdAt                        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  finalizedAt                      DateTime? @map("finalized_at") @db.Timestamptz(6)
+  workspace                        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, analysisTriggerRequestId])
+  @@unique([workspaceId, analysisJobId])
+  @@index([state, leaseExpiresAt, createdAt])
+  @@map("analysis_execution_inputs")
+}
+
 model AnalysisAttempt {
   id                   String      @id
   workspaceId          String      @map("workspace_id")
@@ -962,10 +1282,28 @@ model AnalysisResult {
   workspace     Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   job           AnalysisJob @relation(fields: [workspaceId, analysisJobId], references: [workspaceId, id], onDelete: Restrict)
   evidence      Evidence[]
+  protectedContent AnalysisResultProtectedContent?
 
   @@unique([workspaceId, analysisJobId])
   @@unique([workspaceId, id])
   @@map("analysis_results")
+}
+
+/** Encrypted governed prompt/context/output content, never a generic read model. */
+model AnalysisResultProtectedContent {
+  workspaceId       String         @map("workspace_id")
+  analysisResultId  String         @map("analysis_result_id")
+  contentCiphertext String         @map("content_ciphertext")
+  cipherVersion     String         @map("cipher_version")
+  contentHash       String         @map("content_hash")
+  retentionState    String         @default("active") @map("retention_state")
+  tombstonedAt      DateTime?      @map("tombstoned_at") @db.Timestamptz(6)
+  createdAt         DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace         Workspace      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  analysisResult    AnalysisResult @relation(fields: [workspaceId, analysisResultId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@id([workspaceId, analysisResultId])
+  @@map("analysis_result_protected_content")
 }
 
 model Evidence {
@@ -1031,9 +1369,32 @@ model PublicationAttempt {
   finishedAt                                 DateTime?         @map("finished_at") @db.Timestamptz(6)
   workspace                                  Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
   intent                                     PublicationIntent @relation(fields: [workspaceId, publicationIntentId], references: [workspaceId, id], onDelete: Restrict)
+  publicationReceipt                         PublicationReceipt?
 
   @@unique([publicationIntentId, attemptOrdinal])
+  @@unique([workspaceId, id])
   @@map("publication_attempts")
+}
+
+/** Connector-neutral durable acknowledgement of one external publication. */
+model PublicationReceipt {
+  id                             String             @id
+  workspaceId                    String             @map("workspace_id")
+  publicationAttemptId           String             @map("publication_attempt_id")
+  destinationConnectorInstanceId String             @map("destination_connector_instance_id")
+  targetResourceType             String             @map("target_resource_type")
+  targetExternalId               String             @map("target_external_id")
+  externalPublicationId          String             @map("external_publication_id")
+  markerDigest                   String             @map("marker_digest")
+  publishedAt                    DateTime           @map("published_at") @db.Timestamptz(6)
+  createdAt                      DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace                      Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  attempt                        PublicationAttempt @relation(fields: [workspaceId, publicationAttemptId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, publicationAttemptId])
+  @@unique([workspaceId, destinationConnectorInstanceId, targetResourceType, targetExternalId, externalPublicationId])
+  @@map("publication_receipts")
 }
 
 model PublicationProfile {

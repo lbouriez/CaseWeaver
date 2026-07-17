@@ -1,20 +1,19 @@
 import {
+  type CaseSource,
   ConnectorCancelledError,
   ConnectorProtocolError,
-  type CaseSource,
-  type DiscoveryPage,
   type DiscoveredCase,
+  type DiscoveryPage,
   type LoadCaseRequest,
   type NormalizedCase,
   type VersionedOpaqueValue,
   versionedOpaqueValue,
 } from "@caseweaver/connector-sdk";
-
+import type { JitbitClient } from "./client.js";
 import {
   type JitbitConfiguration,
   jitbitConfigurationSchema,
 } from "./config.js";
-import type { JitbitClient } from "./client.js";
 import {
   isResolvedSummary,
   mapNormalizedCase,

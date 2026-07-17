@@ -3,8 +3,9 @@ import type { ConfigurationDescriptor } from "@caseweaver/administration";
 import { jitbitSettingsSchema } from "./config.js";
 
 function descriptor(
-  version: "1" | "2" | "3",
+  version: "1" | "2" | "3" | "4",
   timeoutField: "timeoutMs" | "requestTimeoutMs",
+  attachmentSource: boolean,
 ): ConfigurationDescriptor {
   return Object.freeze({
     kind: "connector",
@@ -16,6 +17,7 @@ function descriptor(
     connectorCapabilities: [
       "knowledgeSource",
       "caseSource",
+      ...(attachmentSource ? (["attachmentSource"] as const) : []),
       "analysisDestination",
     ],
     aiCapabilities: [],
@@ -111,21 +113,34 @@ function descriptor(
  * registered for new drafts.
  */
 export const legacyJitbitAdministrationDescriptor: ConfigurationDescriptor =
-  descriptor("1", "timeoutMs");
+  descriptor("1", "timeoutMs", false);
+
+/** Immutable descriptor retained for installations with revision-two history. */
+export const versionTwoJitbitAdministrationDescriptor: ConfigurationDescriptor =
+  descriptor("2", "requestTimeoutMs", false);
+
+/**
+ * Immutable descriptor retained because durable configuration versions created by
+ * the original console use this shape. It did not declare byte streaming.
+ */
+export const previousJitbitAdministrationDescriptor: ConfigurationDescriptor =
+  descriptor("3", "requestTimeoutMs", false);
 
 /**
  * Safe discovery metadata for new drafts. `jitbitSettingsSchema` remains the
  * authoritative runtime validator.
  */
 export const jitbitAdministrationDescriptor: ConfigurationDescriptor =
-  // Version 2 remains immutable in existing installations. Version 3 adds
-  // operator-facing guidance without altering the runtime settings shape.
-  descriptor("3", "requestTimeoutMs");
+  // Version 4 adds the attachment-source capability. Historic descriptor revisions
+  // remain executable for exact durable work but are never used for new drafts.
+  descriptor("4", "requestTimeoutMs", true);
 
 /** Descriptor revisions this adapter can execute for immutable durable work. */
 export const jitbitAdministrationDescriptorRevisions: readonly ConfigurationDescriptor[] =
   Object.freeze([
     legacyJitbitAdministrationDescriptor,
+    versionTwoJitbitAdministrationDescriptor,
+    previousJitbitAdministrationDescriptor,
     jitbitAdministrationDescriptor,
   ]);
 

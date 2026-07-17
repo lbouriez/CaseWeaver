@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+export * from "./case-discovery-state-store.js";
+export * from "./repository-analysis-execution-input-store.js";
 import {
   createAnalysisRequestIdentity,
   identityInputFor,
@@ -24,6 +26,12 @@ import {
 import type { Prisma } from "@prisma/client";
 
 import type { PostgresTransactionLookup } from "../index.js";
+import {
+  effectiveProfileForRepositoryAnalysisRecipe,
+  preparedAttachmentsForCaseSnapshot,
+  repositoryRunForRepositoryAnalysisRecipe,
+  type RepositoryAnalysisRecipeExecutionRow,
+} from "./repository-analysis-execution-input-store.js";
 
 interface RequestRow {
   readonly id: string;
@@ -53,11 +61,24 @@ interface CapturedSubmissionRow {
   readonly definition: Prisma.JsonValue;
 }
 
+interface RecipeCapturedSubmissionRow
+  extends RepositoryAnalysisRecipeExecutionRow {
+  readonly snapshot: Prisma.JsonValue;
+  readonly resolved_commit_sha: string | null;
+  readonly repository_resolved_at: Date | null;
+  readonly attachment_evidence_hash: string;
+}
+
 interface SnapshotAttachmentReferenceRow {
   readonly attachment_id: string;
   readonly attachment_derivative_id: string;
   readonly processor_version: string;
   readonly output_content_hash: string;
+}
+
+interface PersistedSnapshotAttachmentReference
+  extends SnapshotAttachmentReferenceRow {
+  readonly occurrenceIdentity?: string;
 }
 
 type TriggerUnitOfWork = PostgresTransactionLookup;
@@ -195,6 +216,7 @@ function capturedAttachmentReferences(
   readonly connectorRegistrationId: string;
   readonly resourceType: string;
   readonly externalId: string;
+  readonly occurrenceIdentity?: string;
 }>[] {
   const values = snapshot.attachmentReferences ?? [];
   if (values.length > 1_000) {
@@ -210,6 +232,7 @@ function capturedAttachmentReferences(
       readonly connectorRegistrationId: string;
       readonly resourceType: string;
       readonly externalId: string;
+      readonly occurrenceIdentity?: string;
     }>
   >();
   for (const value of values) {
@@ -225,14 +248,15 @@ function capturedAttachmentReferences(
       );
     }
     unique.set(
-      `${value.resourceType}\u0000${value.externalId}`,
+      value.occurrenceIdentity ??
+        `${value.resourceType}\u0000${value.externalId}`,
       Object.freeze({ ...value }),
     );
   }
   return Object.freeze(
     [...unique.values()].toSorted((left, right) =>
-      `${left.resourceType}\u0000${left.externalId}`.localeCompare(
-        `${right.resourceType}\u0000${right.externalId}`,
+      `${left.occurrenceIdentity ?? ""}\u0000${left.resourceType}\u0000${left.externalId}`.localeCompare(
+        `${right.occurrenceIdentity ?? ""}\u0000${right.resourceType}\u0000${right.externalId}`,
       ),
     ),
   );
@@ -251,7 +275,7 @@ async function persistSnapshotAttachmentReferences(
     input.request,
     input.snapshot,
   );
-  const evidence = new Map<string, SnapshotAttachmentReferenceRow>();
+  const evidence: PersistedSnapshotAttachmentReference[] = [];
   for (const reference of attachmentReferences) {
     const rows = await database.$queryRaw<
       readonly SnapshotAttachmentReferenceRow[]
@@ -286,27 +310,45 @@ async function persistSnapshotAttachmentReferences(
       ORDER BY attachment.id, derivative.id
     `;
     for (const row of rows) {
-      evidence.set(
-        `${row.attachment_id}\u0000${row.attachment_derivative_id}`,
-        row,
+      evidence.push(
+        Object.freeze({
+          ...row,
+          ...(reference.occurrenceIdentity === undefined
+            ? {}
+            : { occurrenceIdentity: reference.occurrenceIdentity }),
+        }),
       );
     }
   }
-  for (const [ordinal, row] of [...evidence.values()]
+  const identities = new Set<string>();
+  for (const [ordinal, row] of evidence
     .toSorted((left, right) =>
-      `${left.attachment_id}\u0000${left.attachment_derivative_id}`.localeCompare(
-        `${right.attachment_id}\u0000${right.attachment_derivative_id}`,
+      `${left.occurrenceIdentity ?? ""}\u0000${left.attachment_id}\u0000${left.attachment_derivative_id}`.localeCompare(
+        `${right.occurrenceIdentity ?? ""}\u0000${right.attachment_id}\u0000${right.attachment_derivative_id}`,
       ),
     )
     .entries()) {
+    const identity =
+      row.occurrenceIdentity ??
+      `${row.attachment_id}\u0000${row.attachment_derivative_id}`;
+    if (identities.has(identity)) {
+      throw new PostgresAnalysisTriggerStoreError(
+        "Case snapshot attachment occurrence has ambiguous derivative evidence.",
+        "analysis.trigger.captureLost",
+        false,
+      );
+    }
+    identities.add(identity);
     await database.$executeRaw`
       INSERT INTO case_snapshot_attachment_references (
         workspace_id, case_snapshot_id, ordinal, attachment_id,
-        attachment_derivative_id, processor_version, output_content_hash
+        attachment_derivative_id, processor_version, output_content_hash,
+        occurrence_identity
       ) VALUES (
         ${input.workspaceId}, ${input.caseSnapshotId}, ${ordinal},
         ${row.attachment_id}, ${row.attachment_derivative_id},
-        ${row.processor_version}, ${row.output_content_hash.toLowerCase()}
+        ${row.processor_version}, ${row.output_content_hash.toLowerCase()},
+        ${row.occurrenceIdentity ?? null}
       )
     `;
   }
@@ -326,6 +368,53 @@ function analysisCommandForCapturedRequest(
   return Object.freeze({
     idempotencyKeyDigest: sha256Digest(
       sha256(`analysis.trigger.analysis.v1\u0000${request.id}`),
+    ),
+    requestDigest: sha256Digest(identity.requestHash),
+    identityHash: sha256Digest(identity.identityHash),
+    analysisProfileVersionId: request.analysisProfileVersionId,
+    caseSnapshotId: caseSnapshotId(snapshot.id),
+  });
+}
+
+async function analysisCommandForPreparedRecipeRequest(
+  database: Prisma.TransactionClient,
+  request: import("@caseweaver/application").AnalysisTriggerRequest,
+  row: RecipeCapturedSubmissionRow,
+): Promise<import("@caseweaver/application").RequestAnalysisCommand> {
+  const snapshot = immutableCaseSnapshotSchema.parse(row.snapshot);
+  const profile = effectiveProfileForRepositoryAnalysisRecipe(row);
+  const preparedAttachments =
+    profile.attachments.policy === "disabled"
+      ? undefined
+      : await preparedAttachmentsForCaseSnapshot(database, {
+          workspaceId: request.workspaceId,
+          caseSnapshotId: snapshot.id,
+        });
+  if (
+    preparedAttachments !== undefined &&
+    row.attachment_evidence_hash.toLowerCase() !==
+      preparedAttachments.identityHash
+  ) {
+    throw new PostgresAnalysisTriggerStoreError(
+      "Retained attachment evidence identity is unavailable.",
+    );
+  }
+  const repositoryRun = repositoryRunForRepositoryAnalysisRecipe(
+    row,
+    row.resolved_commit_sha ?? undefined,
+    row.repository_resolved_at?.toISOString(),
+  );
+  const identity = createAnalysisRequestIdentity(
+    identityInputFor(
+      { id: snapshot.id, revision: snapshot.revision },
+      profile,
+      repositoryRun,
+      preparedAttachments,
+    ),
+  );
+  return Object.freeze({
+    idempotencyKeyDigest: sha256Digest(
+      sha256(`analysis.trigger.analysis.v2\u0000${request.id}`),
     ),
     requestDigest: sha256Digest(identity.requestHash),
     identityHash: sha256Digest(identity.identityHash),
@@ -733,6 +822,28 @@ export class PostgresAnalysisTriggerRequestStore
         request: input.claim.request,
         snapshot: input.snapshot,
       });
+      if (input.snapshot.attachmentPreparationAttemptId !== undefined) {
+        const pinned = await database.$queryRaw<
+          readonly { readonly case_snapshot_id: string }[]
+        >`
+          INSERT INTO case_snapshot_attachment_preparation_attempts (
+            workspace_id, case_snapshot_id, attachment_preparation_attempt_id
+          )
+          SELECT ${input.claim.request.workspaceId}, ${created.id}, attempt.id
+          FROM attachment_preparation_attempts AS attempt
+          WHERE attempt.workspace_id = ${input.claim.request.workspaceId}
+            AND attempt.id = ${input.snapshot.attachmentPreparationAttemptId}
+            AND attempt.state = 'completed'
+          RETURNING case_snapshot_id
+        `;
+        if (pinned.length !== 1) {
+          throw new PostgresAnalysisTriggerStoreError(
+            "Case attachment preparation is unavailable.",
+            "analysis.trigger.captureLost",
+            true,
+          );
+        }
+      }
     }
     const updated = await database.$executeRaw`
       UPDATE analysis_trigger_requests
@@ -842,6 +953,98 @@ export class PostgresAnalysisTriggerRequestStore
       return {
         kind: "submitted",
         analysisJobId: analysisJobId(submitted.analysis_job_id),
+      };
+    }
+
+    const recipeMappings = await database.$queryRaw<
+      readonly { readonly analysis_recipe_version_id: string }[]
+    >`
+      SELECT analysis_recipe_version_id
+      FROM case_analysis_trigger_recipe_versions
+      WHERE workspace_id = ${input.command.workspaceId}
+        AND analysis_trigger_version_id = ${requestRow.analysis_trigger_version_id}
+    `;
+    const recipeMapping = recipeMappings[0];
+    if (recipeMapping !== undefined) {
+      const prepared = await database.$queryRaw<
+        readonly RecipeCapturedSubmissionRow[]
+      >`
+        SELECT
+          snapshot.snapshot,
+          request.id AS request_id, request.workspace_id,
+          request.case_snapshot_id, request.analysis_profile_version_id,
+          request.analysis_trigger_version_id,
+          trigger_version.analysis_trigger_id AS trigger_id,
+          request.connector_registration_id, request.connector_configuration_version_id,
+          profile.definition AS profile_definition,
+          recipe.id AS recipe_version_id,
+          recipe.analysis_profile_version_id AS recipe_profile_version_id,
+          recipe.analysis_binding_version_id,
+          recipe.retrieval_profile_version_id,
+          recipe.attachment_policy_version_id,
+          recipe.attachment_stage_mode,
+          recipe.code_repository_version_id,
+          recipe.repository_execution_policy_version_id,
+          recipe.repository_stage_mode,
+          repository_configuration.id AS repository_id,
+          policy_configuration.id AS execution_policy_id,
+          policy.repository_agent_binding_version_id,
+          input.resolved_commit_sha,
+          input.repository_resolved_at,
+          input.attachment_evidence_hash
+        FROM analysis_trigger_requests AS request
+        JOIN analysis_trigger_versions AS trigger_version
+          ON trigger_version.workspace_id = request.workspace_id
+         AND trigger_version.id = request.analysis_trigger_version_id
+        JOIN analysis_recipe_versions AS recipe
+          ON recipe.workspace_id = request.workspace_id
+         AND recipe.id = ${recipeMapping.analysis_recipe_version_id}
+        JOIN analysis_profile_versions AS profile
+          ON profile.workspace_id = request.workspace_id
+         AND profile.id = request.analysis_profile_version_id
+        JOIN case_snapshots AS snapshot
+          ON snapshot.workspace_id = request.workspace_id
+         AND snapshot.id = request.case_snapshot_id
+         AND snapshot.lifecycle = 'active'
+        JOIN analysis_execution_inputs AS input
+          ON input.workspace_id = request.workspace_id
+         AND input.analysis_trigger_request_id = request.id
+         AND input.analysis_recipe_version_id = recipe.id
+         AND input.case_snapshot_id = snapshot.id
+         AND input.state = 'finalized'
+        LEFT JOIN administration_configuration_versions AS repository_version
+          ON repository_version.workspace_id = recipe.workspace_id
+         AND repository_version.id = recipe.code_repository_version_id
+        LEFT JOIN administration_configurations AS repository_configuration
+          ON repository_configuration.workspace_id = repository_version.workspace_id
+         AND repository_configuration.id = repository_version.configuration_id
+         AND repository_configuration.resource_type = 'code-repositories'
+        LEFT JOIN repository_execution_policy_versions AS policy
+          ON policy.workspace_id = recipe.workspace_id
+         AND policy.id = recipe.repository_execution_policy_version_id
+        LEFT JOIN administration_configuration_versions AS policy_version
+          ON policy_version.workspace_id = policy.workspace_id
+         AND policy_version.id = policy.configuration_version_id
+        LEFT JOIN administration_configurations AS policy_configuration
+          ON policy_configuration.workspace_id = policy_version.workspace_id
+         AND policy_configuration.id = policy_version.configuration_id
+         AND policy_configuration.resource_type = 'repository-execution-policies'
+        WHERE request.workspace_id = ${input.command.workspaceId}
+          AND request.id = ${requestRow.id}
+      `;
+      const row = prepared[0];
+      if (row === undefined) return { kind: "notCaptured" };
+      const request = requestFromRow(requestRow);
+      return {
+        kind: "ready",
+        submission: Object.freeze({
+          request,
+          command: await analysisCommandForPreparedRecipeRequest(
+            database,
+            request,
+            row,
+          ),
+        }),
       };
     }
 

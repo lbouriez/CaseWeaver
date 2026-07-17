@@ -10,6 +10,12 @@ import type {
 } from "@caseweaver/connector-sdk";
 
 import {
+  activatedAttachmentPreparation,
+  attachmentPreparationPolicyIdentityHash,
+  unavailableAttachmentPreparation,
+  validateAttachmentPreparationResult,
+} from "./attachment-preparation.js";
+import {
   chunkContentHash,
   deterministicChunkId,
   embeddingCacheIdentityKey,
@@ -21,6 +27,9 @@ import { requireKnowledgeTextProfiles } from "./profiles.js";
 import type {
   ActivatedRevision,
   ActiveEmbeddingSpace,
+  AttachmentPreparationPolicy,
+  AttachmentPreparationResult,
+  ChunkCandidate,
   EmbeddingCacheIdentity,
   FailedRevisionDiagnostic,
   KnowledgeChunkDraft,
@@ -128,6 +137,43 @@ function validateConfiguration(request: KnowledgeSynchronizationRequest): void {
   ) {
     throw new KnowledgeIngestionError(
       "Hard knowledge embedding budgets cannot allow unknown pricing.",
+      "knowledge.invalidConfiguration",
+      false,
+    );
+  }
+  const attachmentPolicy = request.configuration.attachmentPreparation;
+  if (
+    attachmentPolicy !== undefined &&
+    ((attachmentPolicy.mode !== "disabled" &&
+      attachmentPolicy.mode !== "optional" &&
+      attachmentPolicy.mode !== "required") ||
+      attachmentPolicy.policyVersion.length === 0 ||
+      attachmentPolicy.accessPolicyHash.length === 0)
+  ) {
+    throw new KnowledgeIngestionError(
+      "Knowledge attachment preparation policy is invalid.",
+      "knowledge.invalidConfiguration",
+      false,
+    );
+  }
+  if (attachmentPolicy !== undefined) {
+    try {
+      attachmentPreparationPolicyIdentityHash(attachmentPolicy);
+    } catch {
+      throw new KnowledgeIngestionError(
+        "Knowledge attachment preparation policy is invalid.",
+        "knowledge.invalidConfiguration",
+        false,
+      );
+    }
+  }
+  if (
+    attachmentPolicy !== undefined &&
+    attachmentPolicy.mode !== "disabled" &&
+    request.configuration.attachmentPreparationPins === undefined
+  ) {
+    throw new KnowledgeIngestionError(
+      "Knowledge attachment preparation pins are unavailable.",
       "knowledge.invalidConfiguration",
       false,
     );
@@ -262,6 +308,48 @@ function sameEmbeddingSpace(
     left.embeddingProfileVersion === right.embeddingProfileVersion &&
     left.dimensions === right.dimensions &&
     left.normalizationProfileVersion === right.normalizationProfileVersion
+  );
+}
+
+function attachmentPolicy(
+  request: KnowledgeSynchronizationRequest,
+): AttachmentPreparationPolicy | undefined {
+  return request.configuration.attachmentPreparation;
+}
+
+function attachmentPolicyIdentity(
+  request: KnowledgeSynchronizationRequest,
+): string | undefined {
+  const policy = attachmentPolicy(request);
+  return policy === undefined
+    ? undefined
+    : attachmentPreparationPolicyIdentityHash(policy);
+}
+
+function sameAttachmentPolicyIdentity(
+  left: string | undefined,
+  right: string | undefined,
+): boolean {
+  return left === right;
+}
+
+function attachmentEvidenceCandidates(
+  preparation: AttachmentPreparationResult | undefined,
+): readonly ChunkCandidate[] {
+  if (preparation === undefined) return [];
+  return preparation.derivatives.map((derivative) =>
+    Object.freeze({
+      kind: "attachmentEvidence" as const,
+      attachmentEvidence: Object.freeze({
+        occurrenceIdentity: derivative.occurrenceIdentity,
+        derivativeIdentity: derivative.derivativeIdentity,
+        derivativeContentHash: derivative.derivativeContentHash,
+      }),
+      content:
+        `[CaseWeaver attachment evidence: occurrence=${derivative.occurrenceIdentity}; ` +
+        `derivative=${derivative.derivativeIdentity}; hash=${derivative.derivativeContentHash}]\n` +
+        derivative.searchableText,
+    }),
   );
 }
 
@@ -478,9 +566,18 @@ export class KnowledgeIngestionService {
       reference,
     });
     state.result.processed += 1;
+    const pinnedAttachmentPolicyIdentity = attachmentPolicyIdentity(request);
     if (
       sameOpaqueValue(stored?.lastSuccessfulFingerprint, fingerprint) &&
-      sameEmbeddingSpace(stored?.activeEmbeddingSpace, embeddingSpace(request))
+      sameEmbeddingSpace(
+        stored?.activeEmbeddingSpace,
+        embeddingSpace(request),
+      ) &&
+      sameAttachmentPolicyIdentity(
+        stored?.activeAttachmentPreparationPolicyIdentity,
+        pinnedAttachmentPolicyIdentity,
+      ) &&
+      stored?.activeAttachmentPreparationRetryRequired !== true
     ) {
       state.mutations.push({
         kind: "observe",
@@ -521,7 +618,7 @@ export class KnowledgeIngestionService {
         );
       }
       stage = "normalize";
-      const normalized = preserveSourceMetadata(
+      const sourceNormalized = preserveSourceMetadata(
         loaded,
         await profiles.normalizer.normalize({
           document: loaded,
@@ -530,6 +627,22 @@ export class KnowledgeIngestionService {
           signal: request.signal,
         }),
       );
+      stage = "attachments";
+      const preparation = await this.prepareAttachments(request, loaded);
+      if (preparation?.outcome.status === "terminal") {
+        throw new KnowledgeIngestionError(
+          "Required attachment preparation did not complete.",
+          "knowledge.attachmentPreparationRequired",
+          preparation.outcome.retryRequired,
+        );
+      }
+      const normalized =
+        preparation === undefined
+          ? sourceNormalized
+          : Object.freeze({
+              ...sourceNormalized,
+              attachmentIdentity: preparation.outcome.identityHash,
+            });
       validateNormalizedDocument(normalized);
       contentHash = normalizedContentHash(
         request.configuration.normalizationProfileVersion,
@@ -537,7 +650,15 @@ export class KnowledgeIngestionService {
       );
       if (
         stored?.activeContentHash === contentHash &&
-        sameEmbeddingSpace(stored.activeEmbeddingSpace, embeddingSpace(request))
+        sameEmbeddingSpace(
+          stored.activeEmbeddingSpace,
+          embeddingSpace(request),
+        ) &&
+        sameAttachmentPolicyIdentity(
+          stored.activeAttachmentPreparationPolicyIdentity,
+          pinnedAttachmentPolicyIdentity,
+        ) &&
+        preparation?.outcome.retryRequired !== true
       ) {
         state.mutations.push({
           kind: "observe",
@@ -552,22 +673,16 @@ export class KnowledgeIngestionService {
 
       revisionId = this.dependencies.ids.next("knowledgeRevision");
       requireNonEmpty(revisionId, "revision ID");
-      stage = "attachments";
-      const attachments =
-        this.dependencies.attachments === undefined
-          ? []
-          : await this.dependencies.attachments.prepare({
-              sourceId: request.configuration.id,
-              workspaceId: request.configuration.workspaceId,
-              document: loaded,
-              signal: request.signal,
-            });
       stage = "chunk";
-      const candidates = await profiles.chunker.chunk({
+      const sourceCandidates = await profiles.chunker.chunk({
         document: normalized,
-        attachments,
+        attachments: [],
         chunkingProfileVersion: request.configuration.chunkingProfileVersion,
       });
+      const candidates = [
+        ...sourceCandidates,
+        ...attachmentEvidenceCandidates(preparation),
+      ];
       const chunks = this.createChunks(request, revisionId, candidates);
       stage = "embedding";
       const embeddings = await this.resolveEmbeddings(request, state, chunks);
@@ -580,6 +695,19 @@ export class KnowledgeIngestionService {
         revisionId,
         contentHash,
         normalized,
+        attachmentPreparationPolicyIdentity: pinnedAttachmentPolicyIdentity,
+        ...(preparation === undefined
+          ? {}
+          : {
+              attachmentPreparation: activatedAttachmentPreparation(
+                preparation.outcome,
+              ),
+              ...(preparation.attemptId === undefined
+                ? {}
+                : {
+                    attachmentPreparationAttemptId: preparation.attemptId,
+                  }),
+            }),
         normalizationProfileVersion:
           request.configuration.normalizationProfileVersion,
         chunkingProfileVersion: request.configuration.chunkingProfileVersion,
@@ -604,13 +732,54 @@ export class KnowledgeIngestionService {
     }
   }
 
+  private async prepareAttachments(
+    request: KnowledgeSynchronizationRequest,
+    document: KnowledgeDocument,
+  ): Promise<AttachmentPreparationResult | undefined> {
+    const policy = attachmentPolicy(request);
+    if (policy === undefined) return undefined;
+    if (this.dependencies.attachments === undefined) {
+      return unavailableAttachmentPreparation(policy);
+    }
+    if (policy.mode === "disabled") {
+      return unavailableAttachmentPreparation(policy);
+    }
+    const pins = request.configuration.attachmentPreparationPins;
+    if (pins === undefined) {
+      return unavailableAttachmentPreparation(policy);
+    }
+    let result: AttachmentPreparationResult;
+    try {
+      result = await this.dependencies.attachments.prepare({
+        sourceId: request.configuration.id,
+        workspaceId: request.configuration.workspaceId,
+        sourceConfigurationVersionId: pins.sourceConfigurationVersionId,
+        connectorRegistrationId: pins.connectorRegistrationId,
+        connectorConfigurationVersionId: pins.connectorConfigurationVersionId,
+        document,
+        policy,
+        signal: request.signal,
+      });
+    } catch {
+      // Connector/runtime failures can contain vendor URLs, file names, or source
+      // details. Reduce them to the fixed safe warning before durable diagnostics.
+      return unavailableAttachmentPreparation(policy);
+    }
+    try {
+      return validateAttachmentPreparationResult({ result, policy });
+    } catch {
+      throw new KnowledgeIngestionError(
+        "Attachment preparation returned an invalid safe outcome.",
+        "knowledge.invalidAttachmentPreparation",
+        false,
+      );
+    }
+  }
+
   private createChunks(
     request: KnowledgeSynchronizationRequest,
     revisionId: string,
-    candidates: readonly {
-      readonly content: string;
-      readonly sourceAnchor?: string;
-    }[],
+    candidates: readonly ChunkCandidate[],
   ): readonly KnowledgeChunkDraft[] {
     return candidates.map((candidate, position) => {
       if (candidate.content.length === 0) {
@@ -630,7 +799,11 @@ export class KnowledgeIngestionService {
         position,
         contentHash,
         content: candidate.content,
+        kind: candidate.kind ?? "source",
         sourceAnchor: candidate.sourceAnchor,
+        ...(candidate.attachmentEvidence === undefined
+          ? {}
+          : { attachmentEvidence: candidate.attachmentEvidence }),
         embedding: cacheIdentity(contentHash, request),
       };
     });

@@ -5,21 +5,20 @@ import type {
   MeteredAiResult,
 } from "@caseweaver/ai-execution";
 import type { EnvelopeFor } from "@caseweaver/domain";
-
+import type { AnalysisPromptBuilder } from "@caseweaver/prompts";
 import type {
   AnalysisClock,
   AnalysisEvidence,
   AnalysisExecution,
   AnalysisExecutionStore,
   AnalysisIdGenerator,
+  AnalysisPromptBuilderResolver,
   AnalysisResultRecord,
   AnalysisStageStatus,
-  AnalysisPromptBuilderResolver,
   AttachmentEvidencePort,
   RepositoryInvestigationPort,
   RetrievalEvidencePort,
 } from "./contracts.js";
-import type { AnalysisPromptBuilder } from "@caseweaver/prompts";
 
 export class FixedAnalysisClock implements AnalysisClock {
   public constructor(private readonly instant = "2026-07-14T15:00:00.000Z") {}
@@ -163,14 +162,16 @@ export class DeterministicRepositoryInvestigationPort
     private readonly result: {
       readonly summary: string;
       readonly evidence: readonly AnalysisEvidence[];
+      readonly findings: readonly import("./contracts.js").RepositoryFinding[];
       readonly operationIds: readonly string[];
-    } = { summary: "", evidence: [], operationIds: [] },
+    } = { summary: "", evidence: [], findings: [], operationIds: [] },
     private readonly failure?: Error,
   ) {}
 
   public async investigate(): Promise<{
     readonly summary: string;
     readonly evidence: readonly AnalysisEvidence[];
+    readonly findings: readonly import("./contracts.js").RepositoryFinding[];
     readonly operationIds: readonly string[];
   }> {
     if (this.failure !== undefined) throw this.failure;

@@ -14,7 +14,14 @@ describe("permission-aware navigation", () => {
       visibleNavigation(["configuration.read", "identity.manage"]).map(
         (section) => section.label,
       ),
-    ).toEqual(["Overview", "Integrations", "AI", "Access", "Platform"]);
+    ).toEqual([
+      "Overview",
+      "Integrations",
+      "AI",
+      "Repository analysis",
+      "Access",
+      "Platform",
+    ]);
   });
 
   it("uses only permissions present in the server policy for publication and operations", () => {

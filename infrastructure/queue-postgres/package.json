@@ -13,7 +13,7 @@
     "build": "tsc --project tsconfig.json",
     "typecheck": "tsc --noEmit --project tsconfig.json",
     "test": "vitest run --exclude \"src/**/*.integration.test.ts\"",
-    "test:integration": "node --input-type=module -e \"if (process.env.PG_BOSS_INTEGRATION !== '1') throw new Error('Set PG_BOSS_INTEGRATION=1 to run pg-boss integration tests.'); if (!process.env.DATABASE_URL) throw new Error('pg-boss integration tests require DATABASE_URL.');\" && vitest run src/pg-boss.integration.test.ts"
+    "test:integration": "node --input-type=module -e \"if (!process.env.DATABASE_URL) throw new Error('pg-boss integration tests require DATABASE_URL.');\" && vitest run src/pg-boss.integration.test.ts"
   },
   "dependencies": {
     "@caseweaver/application": "workspace:*",

@@ -1,7 +1,12 @@
 import type {
+  AttachmentOpenIdentity,
   AttachmentSource,
   ExternalReference,
 } from "@caseweaver/connector-sdk";
+import type {
+  AttachmentPreparationPolicy,
+  AttachmentPreparationResult,
+} from "./preparation.js";
 
 export interface BlobHandle {
   readonly workspaceId: string;
@@ -61,6 +66,8 @@ export interface AttachmentRuntimeAttestation {
 export interface AttachmentRuntimeQuotas {
   readonly timeoutMs: number;
   readonly maximumMemoryBytes: number;
+  /** Runtime independently bounds a reopened opaque input blob before staging. */
+  readonly maximumInputBytes: number;
   readonly maximumOutputBytes: number;
   readonly maximumFiles: number;
   readonly maximumExpandedBytes: number;
@@ -223,4 +230,145 @@ export interface VisionPolicy {
     readonly hard: boolean;
     readonly allowUnknownPricing?: boolean;
   };
+}
+
+/**
+ * The durable logical item whose attachments are being prepared. This is
+ * deliberately earlier than a knowledge revision or final case snapshot: both
+ * are allowed to pin the completed evidence later, but neither can exist as a
+ * prerequisite for preparation.
+ */
+export type AttachmentPreparationSubjectKind = "sourceDocument" | "caseCapture";
+
+export interface AttachmentPreparationSubject {
+  readonly workspaceId: string;
+  readonly kind: AttachmentPreparationSubjectKind;
+  /** A stable CaseWeaver-owned identifier, never an external locator or URL. */
+  readonly id: string;
+}
+
+/**
+ * Public-safe, immutable information about one attachment appearance. Multiple
+ * occurrences may safely point at the same binary and derivative cache entry.
+ */
+export interface AttachmentOccurrenceDescriptor {
+  readonly identity: string;
+  /**
+   * Opaque hash of the normalized owner. It keeps case/document/message
+   * provenance distinct without retaining an external ID or locator.
+   */
+  readonly ownerIdentity?: string;
+  /**
+   * The connector-normalized ordinal within that owner. `ordinal` below is a
+   * preparation-local sequence because a case description and each comment
+   * legitimately all start at zero.
+   */
+  readonly sourceOrdinal?: number;
+  readonly ordinal: number;
+  /**
+   * Opaque server-private attachment identity. It pins ready derivative
+   * evidence to this occurrence without carrying a locator, URL, path,
+   * filename, byte content, or browser/API-readable metadata.
+   */
+  readonly attachmentId: string;
+  readonly relation: string;
+  readonly required: boolean;
+}
+
+/**
+ * Server-only reopening material. `openIdentity.locator` is opaque connector
+ * data and must never be serialized to API responses, audit records, logs,
+ * traces, diagnostics, or browser state.
+ */
+export interface ServerPrivateAttachmentOccurrence {
+  readonly occurrence: AttachmentOccurrenceDescriptor;
+  readonly source: AttachmentSource;
+  readonly reference: ExternalReference;
+  readonly openIdentity?: AttachmentOpenIdentity;
+  readonly declaredMimeType?: string;
+}
+
+/**
+ * A derivative linked to its distinct occurrence for durable evidence. This is
+ * a server persistence contract: its storage handle is not an API DTO.
+ */
+export interface ServerPrivateAttachmentOccurrenceEvidence {
+  readonly occurrence: AttachmentOccurrenceDescriptor;
+  readonly derivative: AttachmentDerivative;
+}
+
+/**
+ * Trusted persistence hook for live occurrence preparation. It records only
+ * the accepted blob metadata and its immutable derivative association; the
+ * locator, source bytes, output text, and storage handle remain private to
+ * the surrounding worker composition.
+ */
+export interface AttachmentOccurrencePersistence {
+  recordAccepted(input: {
+    readonly subject: AttachmentPreparationSubject;
+    readonly occurrence: AttachmentOccurrenceDescriptor;
+    readonly attachment: AcceptedAttachment;
+    readonly signal: AbortSignal;
+  }): Promise<void>;
+  recordDerivativeSource(input: {
+    readonly subject: AttachmentPreparationSubject;
+    readonly occurrence: AttachmentOccurrenceDescriptor;
+    readonly derivative: AttachmentDerivative;
+    readonly signal: AbortSignal;
+  }): Promise<void>;
+}
+
+/**
+ * A fence-bearing attempt created for one stable subject and exact preparation
+ * plan. Implementations must reject finalization after lease expiry or reclaim
+ * and must create a new immutable attempt when retrying a terminal outcome.
+ */
+export interface AttachmentPreparationAttempt {
+  readonly id: string;
+  readonly fence: string;
+  readonly planIdentity: string;
+  readonly retryOfAttemptId?: string;
+}
+
+/**
+ * A completed attempt's immutable identity. It intentionally omits the
+ * short-lived fence, so downstream revision/snapshot persistence can pin the
+ * terminal work without gaining authority to finalize or reclaim it.
+ */
+export interface AttachmentPreparationAttemptReference {
+  readonly id: string;
+  readonly planIdentity: string;
+}
+
+export type AttachmentPreparationAttemptClaim =
+  | Readonly<{
+      readonly kind: "claimed";
+      readonly attempt: AttachmentPreparationAttempt;
+    }>
+  | Readonly<{
+      readonly kind: "completed";
+      readonly attempt: AttachmentPreparationAttemptReference;
+      readonly result: AttachmentPreparationResult;
+    }>;
+
+/**
+ * Durable boundary for immutable attachment evidence. Its `finalize` operation
+ * persists every occurrence evidence record and its safe preparation result in
+ * one transaction under the supplied fence. It intentionally exposes no SQL,
+ * ORM, connector vendor, or storage implementation detail.
+ */
+export interface AttachmentPreparationAttemptStore {
+  claim(input: {
+    readonly subject: AttachmentPreparationSubject;
+    readonly policy: AttachmentPreparationPolicy;
+    readonly planIdentity: string;
+    readonly occurrences: readonly AttachmentOccurrenceDescriptor[];
+    readonly signal: AbortSignal;
+  }): Promise<AttachmentPreparationAttemptClaim>;
+  finalize(input: {
+    readonly attempt: AttachmentPreparationAttempt;
+    readonly result: AttachmentPreparationResult;
+    readonly evidence: readonly ServerPrivateAttachmentOccurrenceEvidence[];
+    readonly signal: AbortSignal;
+  }): Promise<void>;
 }

@@ -52,7 +52,7 @@ files are not alternatives to it.
 
 ## Images and local topology
 
-`Dockerfile` produces seven non-root final targets:
+`Dockerfile` produces eight non-root final targets:
 
 - `migration`: versioned Prisma migration runner, separate from the API image.
 - `api`: cookie-session administration/control-plane API.
@@ -61,6 +61,8 @@ files are not alternatives to it.
 - `scheduler`: durable knowledge and analysis schedule producer.
 - `webhook`: verified public webhook ingress.
 - `standalone`: the same API, worker, scheduler, and webhook semantics in one process.
+- `attachment-processor`: the no-network Unix-socket sidecar that performs bounded
+  archive and text preparation for enabled attachment policies.
 
 All runtime images use digest-pinned base images and OCI source/version/revision labels.
 The Admin image contains neither Node, database libraries, connector/provider code,
@@ -78,7 +80,7 @@ returns only a safe status through the API.
 
 ## Published-image production topology
 
-The `v*` release workflow publishes all seven targets to:
+The `v*` release workflow publishes all eight targets to:
 
 ```text
 ${CASEWEAVER_CONTAINER_REGISTRY:-ghcr.io}/${owner}/caseweaver-{target}
@@ -97,7 +99,8 @@ tag-gated publishing job pushes the release image with both attestations enabled
 `compose.production.yml` expects explicit pinned values for
 `CASEWEAVER_MIGRATION_IMAGE`, `CASEWEAVER_API_IMAGE`,
 `CASEWEAVER_WORKER_IMAGE`, `CASEWEAVER_SCHEDULER_IMAGE`,
-`CASEWEAVER_WEBHOOK_IMAGE`, and `CASEWEAVER_STANDALONE_IMAGE`. It also requires Docker
+`CASEWEAVER_WEBHOOK_IMAGE`, `CASEWEAVER_STANDALONE_IMAGE`, and
+`CASEWEAVER_ATTACHMENT_PROCESSOR_IMAGE`. It also requires Docker
 secret files for the database URL and PostgreSQL password, and production API
 configuration such as `API_WORKSPACE_ID`, `API_PRINCIPAL_ID`, and the HTTPS
 `ADMIN_ALLOWED_ORIGINS` value.
@@ -110,6 +113,14 @@ docker compose -f deploy\docker\compose.production.yml --profile migrate run --r
 docker compose -f deploy\docker\compose.production.yml --profile distributed up -d
 # or: docker compose -f deploy\docker\compose.production.yml --profile standalone up -d
 ```
+
+The `distributed` profile also starts the separate no-network `attachment-processor`
+image. It shares an ephemeral Unix-socket jobs volume only with the worker; the volume
+is created with the same unprivileged identity as both processes, so no privileged
+initializer is needed. Neither process receives database, object-storage, Git,
+provider, or connector credentials through that sidecar boundary. The `standalone`
+profile deliberately does not claim that isolated processor boundary yet, so an enabled
+attachment policy fails closed there.
 
 Production password login is off by default. Configure OIDC, or explicitly set
 `ADMIN_ENABLE_PASSWORD_AUTHENTICATION=true` with non-default deployment credentials.

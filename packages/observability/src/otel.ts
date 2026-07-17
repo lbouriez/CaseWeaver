@@ -6,7 +6,11 @@ import {
   MeterProvider,
   PeriodicExportingMetricReader,
 } from "@opentelemetry/sdk-metrics";
-import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
+import {
+  BatchSpanProcessor,
+  ParentBasedSampler,
+  TraceIdRatioBasedSampler,
+} from "@opentelemetry/sdk-trace-base";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import {
   ATTR_SERVICE_NAME,
@@ -18,7 +22,11 @@ export interface OpenTelemetryConfig {
   readonly serviceVersion?: string;
   readonly tracesEndpoint: string;
   readonly metricsEndpoint: string;
+  /** Deployment-only transport headers; values are never telemetry attributes. */
+  readonly headers?: Readonly<Record<string, string>>;
   readonly metricExportIntervalMs: number;
+  /** Conservative root-span sampling; a sampled parent remains sampled. */
+  readonly traceSampleRatio: number;
 }
 
 export interface OpenTelemetrySdk {
@@ -76,6 +84,48 @@ function parseMetricExportInterval(value: string | undefined): number {
   return interval;
 }
 
+const headerNamePattern = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u;
+
+function parseHeaders(
+  value: string | undefined,
+): Readonly<Record<string, string>> | undefined {
+  if (value === undefined || value.trim().length === 0) return undefined;
+  if (value.length > 8_000) throw new OpenTelemetryConfigurationError();
+
+  const headers: Record<string, string> = {};
+  const normalizedNames = new Set<string>();
+  const entries = value.split(",");
+  if (entries.length > 50) throw new OpenTelemetryConfigurationError();
+  for (const entry of entries) {
+    const delimiter = entry.indexOf("=");
+    if (delimiter < 1) throw new OpenTelemetryConfigurationError();
+    const name = entry.slice(0, delimiter).trim();
+    const headerValue = entry.slice(delimiter + 1).trim();
+    const normalized = name.toLocaleLowerCase("en-US");
+    if (
+      !headerNamePattern.test(name) ||
+      headerValue.length === 0 ||
+      headerValue.length > 4_000 ||
+      /[\r\n\0]/u.test(headerValue) ||
+      normalizedNames.has(normalized)
+    ) {
+      throw new OpenTelemetryConfigurationError();
+    }
+    normalizedNames.add(normalized);
+    headers[name] = headerValue;
+  }
+  return Object.freeze(headers);
+}
+
+function parseTraceSampleRatio(value: string | undefined): number {
+  if (value === undefined || value.length === 0) return 0.05;
+  const ratio = Number(value);
+  if (!Number.isFinite(ratio) || ratio < 0 || ratio > 1) {
+    throw new OpenTelemetryConfigurationError();
+  }
+  return ratio;
+}
+
 /**
  * Returns no SDK when OpenTelemetry is disabled or no collector endpoint is
  * configured. This does not substitute an in-memory or no-op telemetry SDK.
@@ -99,6 +149,7 @@ export function resolveOpenTelemetryConfig(
     throw new OpenTelemetryConfigurationError();
   }
   const endpoint = parseEndpoint(endpointValue);
+  const headers = parseHeaders(env.OTEL_EXPORTER_OTLP_HEADERS);
   return Object.freeze({
     serviceName,
     ...(serviceVersion === undefined || serviceVersion.length === 0
@@ -106,9 +157,11 @@ export function resolveOpenTelemetryConfig(
       : { serviceVersion }),
     tracesEndpoint: exportEndpoint(endpoint, "traces"),
     metricsEndpoint: exportEndpoint(endpoint, "metrics"),
+    ...(headers === undefined ? {} : { headers }),
     metricExportIntervalMs: parseMetricExportInterval(
       env.OTEL_METRIC_EXPORT_INTERVAL_MS,
     ),
+    traceSampleRatio: parseTraceSampleRatio(env.OTEL_TRACE_SAMPLE_RATIO),
   });
 }
 
@@ -125,9 +178,15 @@ export function createOpenTelemetrySdk(
   const resource = resourceFromAttributes(attributes);
   const tracerProvider = new NodeTracerProvider({
     resource,
+    sampler: new ParentBasedSampler({
+      root: new TraceIdRatioBasedSampler(config.traceSampleRatio),
+    }),
     spanProcessors: [
       new BatchSpanProcessor(
-        new OTLPTraceExporter({ url: config.tracesEndpoint }),
+        new OTLPTraceExporter({
+          url: config.tracesEndpoint,
+          ...(config.headers === undefined ? {} : { headers: config.headers }),
+        }),
       ),
     ],
   });
@@ -135,7 +194,10 @@ export function createOpenTelemetrySdk(
     resource,
     readers: [
       new PeriodicExportingMetricReader({
-        exporter: new OTLPMetricExporter({ url: config.metricsEndpoint }),
+        exporter: new OTLPMetricExporter({
+          url: config.metricsEndpoint,
+          ...(config.headers === undefined ? {} : { headers: config.headers }),
+        }),
         exportIntervalMillis: config.metricExportIntervalMs,
       }),
     ],

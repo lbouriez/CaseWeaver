@@ -1,19 +1,18 @@
 import {
+  type AnalysisDestination,
   ConnectorCancelledError,
   ConnectorProtocolError,
   ConnectorRemoteError,
-  type AnalysisDestination,
   type ExistingPublication,
   type FindPublicationRequest,
   type PublishRequest,
   type PublishResult,
 } from "@caseweaver/connector-sdk";
-
+import type { JitbitClient } from "./client.js";
 import {
   type JitbitConfiguration,
   jitbitConfigurationSchema,
 } from "./config.js";
-import type { JitbitClient } from "./client.js";
 import { publicationMarker } from "./mapping.js";
 
 const caseResourceType = "case";

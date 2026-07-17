@@ -49,10 +49,16 @@ function input() {
       analysisJobId: "analysis-job-a",
       analysisIdentityId: "analysis-identity-a",
     },
-    runtimeVersionId: pin.runtimeVersionId,
-    bindingVersionId: "repository-agent-binding-v1",
-    repositoryId: pin.repositoryId,
-    pinnedCommit: pin.pinnedCommit,
+    repository: {
+      repositoryId: pin.repositoryId,
+      repositoryVersionId: "support-service-v2",
+      runtimePinId: pin.runtimeVersionId,
+      executionPolicyId: "sandbox-policy",
+      executionPolicyVersionId: "sandbox-policy-v1",
+      repositoryAgentBindingVersionId: "repository-agent-binding-v1",
+      pinnedCommit: pin.pinnedCommit,
+      resolvedAt: "2026-07-16T00:00:00.000Z",
+    },
     caseSummary: "The support workflow reports an unavailable dependency.",
     evidence: [],
     signal: new AbortController().signal,
@@ -64,8 +70,23 @@ describe("PinnedRepositoryInvestigationPort", () => {
     const execute = vi.fn(async () => ({
       operationId: "ai-operation-a",
       value: {
-        summary: "A source excerpt that must never become analysis evidence.",
-        evidence: [{ path: "src/service.ts", startLine: 2, endLine: 5 }],
+        summary: "The retry path handles the unavailable dependency.",
+        evidence: [
+          {
+            id: `repository-evidence-${"b".repeat(64)}`,
+            path: "src/service.ts",
+            startLine: 2,
+            endLine: 5,
+            excerptHash: "c".repeat(64),
+          },
+        ],
+        findings: [
+          {
+            id: `repository-finding-${"d".repeat(64)}`,
+            summary: "The retry path handles the unavailable dependency.",
+            evidenceIds: [`repository-evidence-${"b".repeat(64)}`],
+          },
+        ],
         metering: { mode: "aggregate" as const },
       },
       calculatedCost: {
@@ -103,7 +124,7 @@ describe("PinnedRepositoryInvestigationPort", () => {
       "vault:checkout/support-service",
     );
     expect(result).toMatchObject({
-      summary: "Pinned repository investigation completed.",
+      summary: "The retry path handles the unavailable dependency.",
       operationIds: ["ai-operation-a"],
       evidence: [
         {
@@ -116,7 +137,11 @@ describe("PinnedRepositoryInvestigationPort", () => {
         },
       ],
     });
-    expect(JSON.stringify(result)).not.toContain("source excerpt");
+    expect(result.findings).toEqual([
+      expect.objectContaining({
+        id: `repository-finding-${"d".repeat(64)}`,
+      }),
+    ]);
   });
 
   it("fails before provider dispatch when the retained runtime binding differs", async () => {
@@ -129,6 +154,25 @@ describe("PinnedRepositoryInvestigationPort", () => {
     await expect(port.investigate(input() as never)).rejects.toBeInstanceOf(
       RepositoryInvestigationRuntimeError,
     );
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before provider dispatch when an immutable runtime pin is absent", async () => {
+    const execute = vi.fn();
+    const port = new PinnedRepositoryInvestigationPort(
+      { execute } as unknown as AiExecutionGateway,
+      resolver(),
+    );
+    const missingRuntimePin = input();
+    await expect(
+      port.investigate({
+        ...missingRuntimePin,
+        repository: {
+          ...missingRuntimePin.repository,
+          runtimePinId: undefined,
+        },
+      } as never),
+    ).rejects.toBeInstanceOf(RepositoryInvestigationRuntimeError);
     expect(execute).not.toHaveBeenCalled();
   });
 });

@@ -104,3 +104,51 @@ consumption), completed claims, and results append-only. Preview issuance and
 terminal result writes each share a transaction with their authoritative audit;
 candidate settings, secret registrations/locators, URL values, remote response
 data, and exceptions are never stored.
+
+`PostgresRepositoryAnalysisConfigurationStore` is the transaction-bound
+projection adapter for code repositories, repository execution policies,
+attachment policies, analysis recipes, case-analysis triggers, and polling
+intake schedules. It delegates draft/version/OCC/idempotency/audit/change-outbox
+work to `PostgresConfigurationLifecycleStore`; it writes only the safe immutable
+cross-feature pins that PostgreSQL runtime composition needs. Repository URLs,
+deployment mount aliases, settings, secret locators, source trees, test output,
+and credentials remain solely in the generic server-private configuration
+version and are never selected by summary reads. Recipe IDs remain distinct from
+analysis-profile IDs. Active trigger and intake-schedule projections require a
+server-owned principal and exact configuration-version references; draft intake
+schedules are inert and carry no principal.
+
+`PostgresRepositoryDraftTestStore` resolves a code-repository candidate only from
+the current immutable version of an inert (`draft`) aggregate. It reads private
+settings and locator values solely to calculate a server-private digest, resolving
+stored locator values back to opaque credential-registration IDs before that digest
+is calculated. Its result, confirmation, claim, audit, and activation boundaries
+never return those values. The claim protocol is explicitly `claimed`,
+`inProgress`, `terminal`, or `conflict`: a live duplicate returns only a safe
+`accepted`/`inProgress` response, does not run or finalize another test, and cannot
+activate a repository. PostgreSQL `statement_timestamp()` controls confirmation and
+claim lease decisions. An expired claim is reclaimed as a new immutable claim attempt;
+a superseded/expired worker cannot finalize because completion locks and verifies the
+latest still-live attempt before inserting its result and audit atomically.
+
+`PostgresRepositoryAnalysisOptionsStore` and
+`PostgresRepositoryAnalysisResourceReadStore` are dedicated safe projections for
+repository-analysis authoring/read screens. They select only lifecycle, display name,
+opaque IDs/version IDs, and explicit bounded policy columns. Neither reads generic
+configuration settings/secret-reference data nor exposes a URL, Git ref, mounted path,
+secret registration locator, checkout error, source tree, candidate digest, or test
+output. The generic reader composes these stores; it must not add a settings fallback
+for these resources. Repository-agent options are limited to the active aggregate's
+current immutable version with the `repositoryAgent` and `tools` capabilities; policy
+and recipe activation re-verify that same workspace-scoped binding server-side. The
+configuration projection reads the generated secret-reference count only when deriving
+the safe checkout-credential boolean; private candidate-test resolution is the separate
+intentional exception that may read opaque locator data.
+
+Analysis-binding, analysis-recipe, and case-trigger authoring options are separate
+bounded (200) active/current projections. Analysis bindings verify an active aggregate
+and its workspace-owned active version. Recipes additionally require their immutable
+recipe projection, while triggers require the generic configuration pointer plus the
+active trigger aggregate and matching trigger-version projection. Their queries select
+only opaque IDs, lifecycle/pointer state, and display names; they never read settings,
+provider/model metadata, URLs, paths, source data, or secret material.

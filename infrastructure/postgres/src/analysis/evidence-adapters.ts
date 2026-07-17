@@ -20,6 +20,7 @@ import type {
 import type { PrismaClient } from "@prisma/client";
 
 interface AttachmentReferenceRow {
+  readonly occurrence_identity: string | null;
   readonly attachment_id: string;
   readonly attachment_derivative_id: string;
   readonly processor_version: string;
@@ -141,6 +142,7 @@ export class PostgresSnapshotAttachmentReferenceStore
     const rows = await this.client.$queryRaw<readonly AttachmentReferenceRow[]>`
       SELECT
         reference.attachment_id,
+        reference.occurrence_identity,
         reference.attachment_derivative_id,
         reference.processor_version,
         reference.output_content_hash,
@@ -176,6 +178,9 @@ export class PostgresSnapshotAttachmentReferenceStore
           );
         }
         return snapshotAttachmentReferenceSchema.parse({
+          ...(row.occurrence_identity === null
+            ? {}
+            : { occurrenceIdentity: row.occurrence_identity }),
           attachmentId: row.attachment_id,
           derivativeId: row.attachment_derivative_id,
           processorVersion: row.processor_version,

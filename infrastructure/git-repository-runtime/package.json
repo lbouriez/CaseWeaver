@@ -16,7 +16,8 @@
   },
   "dependencies": {
     "@caseweaver/connector-git-markdown": "workspace:*",
-    "@caseweaver/connector-sdk": "workspace:*"
+    "@caseweaver/connector-sdk": "workspace:*",
+    "@caseweaver/repository-runtime": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "22.19.7",

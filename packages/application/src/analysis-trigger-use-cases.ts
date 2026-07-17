@@ -91,6 +91,21 @@ export interface RequestAnalysisTriggerResult {
 }
 
 /**
+ * Optional outer preparation seam for a trigger that has a retained
+ * repository-analysis recipe. It runs only after the case snapshot is durable
+ * and before the existing PBI-011 request transaction derives its immutable
+ * identity. The implementation is responsible for its own fenced durable
+ * state; this application package never receives checkout material, connector
+ * settings, attachment bytes, or provider clients.
+ */
+export interface AnalysisTriggerSubmissionPreparation {
+  prepare(
+    command: EnvelopeFor<"analysis.trigger.v2">,
+    signal: AbortSignal,
+  ): Promise<void>;
+}
+
+/**
  * Creates the durable, immutable trigger request and its v2 command in one
  * transaction. The caller supplies only a trigger id and opaque case target;
  * the store owns active-version, profile, and connector-configuration lookup.
@@ -283,6 +298,7 @@ export class SubmitCapturedAnalysisTrigger {
     private readonly unitOfWork: UnitOfWork,
     private readonly triggers: AnalysisTriggerRequestStore,
     private readonly analyses: AnalysisRequestTransactionDependencies,
+    private readonly preparation?: AnalysisTriggerSubmissionPreparation,
   ) {}
 
   public async execute(
@@ -295,6 +311,8 @@ export class SubmitCapturedAnalysisTrigger {
         readonly analysisJobId?: import("@caseweaver/domain").AnalysisJobId;
       }>
   > {
+    throwIfAborted(signal);
+    await this.preparation?.prepare(command, signal);
     throwIfAborted(signal);
     return this.unitOfWork.transaction(async (transaction) => {
       const prepared = await this.triggers.prepareAnalysisSubmission(

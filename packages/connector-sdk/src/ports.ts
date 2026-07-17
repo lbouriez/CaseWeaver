@@ -2,13 +2,14 @@ import type { Sha256Digest } from "@caseweaver/domain";
 
 import type {
   ConnectorCursor,
-  ExternalRevision,
   ExternalFingerprint,
   ExternalReference,
+  ExternalRevision,
   OperationContext,
   VersionedOpaqueValue,
 } from "./primitives.js";
 import type {
+  AttachmentOpenIdentity,
   DiscoveredCase,
   DiscoveredKnowledgeItem,
   DiscoveryPage,
@@ -60,6 +61,15 @@ export interface CaseSource {
 
 export interface OpenAttachmentRequest extends OperationContext {
   readonly reference: ExternalReference;
+  /**
+   * Required when reopening a normalized attachment occurrence that has an opaque
+   * locator. It is server-private and must be supplied only from a validated
+   * occurrence; it must never be exposed to an API client, browser, log, or trace.
+   *
+   * `reference` remains required for compatibility with sources that can reopen an
+   * attachment from its connector-scoped external reference alone.
+   */
+  readonly identity?: AttachmentOpenIdentity;
 }
 
 export interface OpenedAttachment {

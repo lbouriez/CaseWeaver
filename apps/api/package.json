@@ -32,6 +32,7 @@
     "@caseweaver/openai-compatible": "workspace:*",
     "@caseweaver/postgres": "workspace:*",
     "@caseweaver/security": "workspace:*",
+    "@caseweaver/scheduling": "workspace:*",
     "fastify": "^5.0.0",
     "pg": "^8.0.0",
     "pino": "^9.0.0",

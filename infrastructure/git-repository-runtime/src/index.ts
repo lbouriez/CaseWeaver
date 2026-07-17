@@ -19,12 +19,14 @@ import {
   type DiffGitRepositoryRequest,
   type GitRepository,
   type GitRepositoryAuthentication,
+  type GitRepositoryBinaryFile,
   type GitRepositoryDelta,
   type GitRepositoryFile,
   type GitRepositoryReference,
   type GitRepositorySnapshot,
   type GitRepositoryTarget,
   type InspectGitRepositoryRequest,
+  type ReadGitRepositoryBinaryRequest,
   type ReadGitRepositoryFileRequest,
   requireGitObjectId,
   requireRepositoryPath,
@@ -35,6 +37,8 @@ import {
   ConnectorProtocolError,
   ConnectorRemoteError,
 } from "@caseweaver/connector-sdk";
+
+export * from "./pinned-remote-checkout.js";
 
 const defaultLimits = Object.freeze({
   commandTimeoutMs: 15_000,
@@ -79,11 +83,22 @@ export interface GitProcessResult {
 /** Shell-free, bounded, cancellable Git process boundary. */
 export interface GitProcessRunner {
   run(input: GitProcessRequest): Promise<GitProcessResult>;
+  /**
+   * Optional bounded stdout stream used for binary blobs. Implementations that do
+   * not provide it remain compatible during rollout; `GitCliRepository` falls
+   * back to the existing bounded result path for those test/legacy runners.
+   */
+  stream?(input: GitProcessRequest): AsyncIterable<Uint8Array>;
 }
 
 export class GitProcessFailure extends Error {
   public constructor(
-    public readonly reason: "cancelled" | "timeout" | "outputLimit" | "startup",
+    public readonly reason:
+      | "cancelled"
+      | "timeout"
+      | "outputLimit"
+      | "startup"
+      | "exit",
   ) {
     super("Git process execution failed.");
     this.name = "GitProcessFailure";
@@ -217,6 +232,93 @@ export class NodeGitProcessRunner implements GitProcessRunner {
       if (input.signal.aborted) cancelled();
     });
   }
+
+  /**
+   * Runs one Git command without accumulating stdout. The yielded bytes remain
+   * bounded by the caller's limit and a non-zero process exit is surfaced while
+   * the consumer reads the stream. Stderr is intentionally never yielded.
+   */
+  public async *stream(input: GitProcessRequest): AsyncIterable<Uint8Array> {
+    if (input.signal.aborted) throw new GitProcessFailure("cancelled");
+    assertPositiveLimit(input.timeoutMs);
+    assertPositiveLimit(input.maximumStdoutBytes);
+    assertPositiveLimit(input.maximumStderrBytes);
+
+    let child: ChildProcessWithoutNullStreams;
+    try {
+      child = this.spawn(input.executable, [...input.arguments], {
+        ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+        env: { ...input.environment },
+        shell: false,
+        windowsHide: true,
+      });
+    } catch {
+      throw new GitProcessFailure("startup");
+    }
+
+    let stdoutBytes = 0;
+    let stderrBytes = 0;
+    let failure: GitProcessFailure["reason"] | undefined;
+    let closed = false;
+    let exitCode: number | null = null;
+    let startupFailure = false;
+    const kill = () => {
+      if (!child.killed) child.kill("SIGTERM");
+      const hardStop = setTimeout(() => {
+        if (!child.killed) child.kill("SIGKILL");
+      }, 1_000);
+      hardStop.unref();
+    };
+    const cancelled = () => {
+      failure = "cancelled";
+      kill();
+    };
+    const timeout = setTimeout(() => {
+      failure = "timeout";
+      kill();
+    }, input.timeoutMs);
+    const completed = new Promise<void>((resolveCompleted) => {
+      child.once("close", (code) => {
+        closed = true;
+        exitCode = code;
+        resolveCompleted();
+      });
+    });
+    child.once("error", () => {
+      startupFailure = true;
+      kill();
+    });
+    child.stderr.on("data", (chunk: Uint8Array) => {
+      stderrBytes += chunk.byteLength;
+      if (stderrBytes > input.maximumStderrBytes) {
+        failure = "outputLimit";
+        kill();
+      }
+    });
+    input.signal.addEventListener("abort", cancelled, { once: true });
+    if (input.signal.aborted) cancelled();
+
+    try {
+      for await (const chunk of child.stdout) {
+        if (failure !== undefined) break;
+        stdoutBytes += chunk.byteLength;
+        if (stdoutBytes > input.maximumStdoutBytes) {
+          failure = "outputLimit";
+          kill();
+          break;
+        }
+        yield new Uint8Array(chunk);
+      }
+      await completed;
+      if (startupFailure) throw new GitProcessFailure("startup");
+      if (failure !== undefined) throw new GitProcessFailure(failure);
+      if (exitCode !== 0) throw new GitProcessFailure("exit");
+    } finally {
+      clearTimeout(timeout);
+      input.signal.removeEventListener("abort", cancelled);
+      if (!closed) kill();
+    }
+  }
 }
 
 export interface GitCliRepositoryOptions {
@@ -348,6 +450,22 @@ export class GitCliRepository implements GitRepository {
     );
   }
 
+  public async readBinary(
+    request: ReadGitRepositoryBinaryRequest,
+  ): Promise<GitRepositoryBinaryFile> {
+    assertActive(request.signal);
+    const commitSha = requireGitObjectId(request.commitSha);
+    const path = requireRepositoryPath(request.path);
+    return Object.freeze({
+      path,
+      commitSha,
+      // The session is created lazily by the iterator and remains alive until its
+      // consumer completes or cancels. This retains the private AskPass/config
+      // boundary for the actual Git process rather than deleting it before reads.
+      content: this.readBinaryContent(request, commitSha, path),
+    });
+  }
+
   public async diff(
     request: DiffGitRepositoryRequest,
   ): Promise<GitRepositoryDelta> {
@@ -416,6 +534,21 @@ export class GitCliRepository implements GitRepository {
     operation: (session: GitCommandSession) => Promise<T>,
   ): Promise<T> {
     assertActive(signal);
+    let session: GitCommandSession | undefined;
+    try {
+      session = await this.createSession(authentication, signal);
+      return await operation(session);
+    } catch (error) {
+      return this.throwSessionFailure(error, signal);
+    } finally {
+      if (session !== undefined) await this.disposeSession(session);
+    }
+  }
+
+  private async createSession(
+    authentication: GitRepositoryAuthentication,
+    signal: AbortSignal,
+  ): Promise<GitCommandSession> {
     let directory: string | undefined;
     try {
       await mkdir(this.temporaryDirectory, { recursive: true, mode: 0o700 });
@@ -444,31 +577,36 @@ export class GitCliRepository implements GitRepository {
           authentication.token,
         );
       }
-      return await operation(
-        Object.freeze({
-          directory,
-          environment: Object.freeze(environment),
-          hooksDirectory,
-        }),
-      );
+      return Object.freeze({
+        directory,
+        environment: Object.freeze(environment),
+        hooksDirectory,
+      });
     } catch (error) {
-      if (
-        error instanceof ConnectorCancelledError ||
-        error instanceof ConnectorProtocolError ||
-        error instanceof ConnectorConfigurationError ||
-        error instanceof ConnectorRemoteError
-      ) {
-        throw error;
-      }
-      if (signal.aborted) throw new ConnectorCancelledError();
-      throw new ConnectorConfigurationError(
-        "Git repository runtime configuration is unavailable.",
-      );
-    } finally {
       if (directory !== undefined) {
         await rm(directory, { recursive: true, force: true });
       }
+      throw error;
     }
+  }
+
+  private async disposeSession(session: GitCommandSession): Promise<void> {
+    await rm(session.directory, { recursive: true, force: true });
+  }
+
+  private throwSessionFailure(error: unknown, signal: AbortSignal): never {
+    if (
+      error instanceof ConnectorCancelledError ||
+      error instanceof ConnectorProtocolError ||
+      error instanceof ConnectorConfigurationError ||
+      error instanceof ConnectorRemoteError
+    ) {
+      throw error;
+    }
+    if (signal.aborted) throw new ConnectorCancelledError();
+    throw new ConnectorConfigurationError(
+      "Git repository runtime configuration is unavailable.",
+    );
   }
 
   private async configureAskPass(
@@ -798,22 +936,7 @@ export class GitCliRepository implements GitRepository {
     try {
       return await this.runner.run({
         executable: this.executable,
-        arguments: [
-          "--no-pager",
-          "-c",
-          "credential.helper=",
-          "-c",
-          "credential.useHttpPath=true",
-          "-c",
-          `core.hooksPath=${session.hooksDirectory}`,
-          "-c",
-          "protocol.file.allow=never",
-          "-c",
-          "protocol.ext.allow=never",
-          "-C",
-          directory,
-          ...command,
-        ],
+        arguments: this.gitArguments(directory, command, session),
         environment: session.environment,
         signal,
         timeoutMs: this.limits.commandTimeoutMs,
@@ -846,6 +969,144 @@ export class GitCliRepository implements GitRepository {
       }
       throw remoteUnavailable(operation);
     }
+  }
+
+  private async *readBinaryContent(
+    request: ReadGitRepositoryBinaryRequest,
+    commitSha: string,
+    path: string,
+  ): AsyncIterable<Uint8Array> {
+    let session: GitCommandSession | undefined;
+    try {
+      session = await this.createSession(
+        request.authentication,
+        request.signal,
+      );
+      const repository = await this.resolveRepository(request, session);
+      await this.verifyPinnedCommit(
+        repository.directory,
+        commitSha,
+        session,
+        request.signal,
+      );
+      const entry = await this.readTreePath(
+        repository.directory,
+        commitSha,
+        path,
+        session,
+        request.signal,
+      );
+      if (entry === undefined || entry.path !== path) {
+        throw new ConnectorProtocolError(
+          "The configured Git attachment is unavailable at its pinned commit.",
+        );
+      }
+      yield* this.readPinnedBinary(
+        repository.directory,
+        commitSha,
+        path,
+        session,
+        request.signal,
+      );
+    } catch (error) {
+      this.throwSessionFailure(error, request.signal);
+    } finally {
+      if (session !== undefined) await this.disposeSession(session);
+    }
+  }
+
+  private async *readPinnedBinary(
+    directory: string,
+    commitSha: string,
+    path: string,
+    session: GitCommandSession,
+    signal: AbortSignal,
+  ): AsyncIterable<Uint8Array> {
+    assertActive(signal);
+    const command = [
+      "show",
+      "--no-textconv",
+      "--format=",
+      `${commitSha}:${path}`,
+    ];
+    const stream = this.runner.stream;
+    if (stream === undefined) {
+      const buffered = await this.runGit(
+        directory,
+        command,
+        session,
+        signal,
+        this.limits.maximumFileBytes,
+        "read-binary",
+      );
+      if (buffered.exitCode !== 0) throw remoteUnavailable("read-binary");
+      assertActive(signal);
+      yield buffered.stdout;
+      return;
+    }
+
+    try {
+      for await (const chunk of stream.call(this.runner, {
+        executable: this.executable,
+        arguments: this.gitArguments(directory, command, session),
+        environment: session.environment,
+        signal,
+        timeoutMs: this.limits.commandTimeoutMs,
+        maximumStdoutBytes: this.limits.maximumFileBytes,
+        maximumStderrBytes: this.limits.maximumStderrBytes,
+      })) {
+        assertActive(signal);
+        yield new Uint8Array(chunk);
+      }
+    } catch (error) {
+      if (error instanceof ConnectorCancelledError) throw error;
+      if (
+        signal.aborted ||
+        (error instanceof GitProcessFailure && error.reason === "cancelled")
+      ) {
+        throw new ConnectorCancelledError();
+      }
+      if (error instanceof GitProcessFailure && error.reason === "timeout") {
+        throw new ConnectorRemoteError("Git repository operation timed out.", {
+          category: "timeout",
+          operation: "read-binary",
+          retryable: true,
+        });
+      }
+      if (
+        error instanceof GitProcessFailure &&
+        error.reason === "outputLimit"
+      ) {
+        throw new ConnectorProtocolError(
+          "Git repository output exceeded its configured limit.",
+          { operation: "read-binary" },
+        );
+      }
+      throw remoteUnavailable("read-binary");
+    }
+  }
+
+  private gitArguments(
+    directory: string,
+    command: readonly string[],
+    session: GitCommandSession,
+  ): readonly string[] {
+    return [
+      "--no-pager",
+      "-c",
+      "credential.helper=",
+      "-c",
+      "credential.useHttpPath=true",
+      "-c",
+      `core.hooksPath=${session.hooksDirectory}`,
+      "-c",
+      "protocol.file.allow=never",
+      "-c",
+      "protocol.ext.allow=never",
+      "-C",
+      directory,
+      ...command,
+    ];
   }
 }
 
@@ -887,6 +1148,9 @@ function safeBaseEnvironment(
 }
 
 function qualifiedReference(reference: GitRepositoryReference): string {
+  if (reference.kind === "commit") {
+    return requireGitObjectId(reference.sha);
+  }
   assertSafeReferenceName(reference.name);
   return reference.kind === "branch"
     ? `refs/heads/${reference.name}`
@@ -894,6 +1158,9 @@ function qualifiedReference(reference: GitRepositoryReference): string {
 }
 
 function cacheReference(reference: GitRepositoryReference): string {
+  if (reference.kind === "commit") {
+    return `refs/caseweaver/commits/${requireGitObjectId(reference.sha)}`;
+  }
   assertSafeReferenceName(reference.name);
   return `refs/caseweaver/${reference.kind}s/${reference.name}`;
 }
@@ -1061,3 +1328,5 @@ const windowsAskPassProgram = `@echo off
 setlocal DisableDelayedExpansion
 "%${"CASEWEAVER_GIT_NODE_EXECUTABLE"}%" "%~dp0askpass.mjs" "%~1"
 `;
+
+export * from "./git-markdown-attachments.js";

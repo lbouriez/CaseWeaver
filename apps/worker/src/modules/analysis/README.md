@@ -11,8 +11,9 @@ frozen evidence adapters, retained-binding tokenizer resolver, exclusive AI
 gateway, and exact immutable repository-runtime execution projection before it
 registers this handler. That projection contains no checkout locator.
 `repository-investigation.ts` validates the retained runtime and binding pin
-before dispatching only through `ai-execution`, retaining no model summary or
-source excerpt. `pinned-repository-runtime.ts` is the optional
+before dispatching only through `ai-execution`; it accepts only runtime-verified
+evidence IDs/excerpt hashes and bounded evidence-linked findings, never checkout
+material or source excerpts. `pinned-repository-runtime.ts` is the optional
 Linux local-Git/digest-pinned-OCI composition for a provider adapter; it binds
 the existing attested checkout/sandbox implementation to that exact pin and
 has no direct provider call. Tests may use deterministic ports outside that

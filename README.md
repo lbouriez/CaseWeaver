@@ -88,13 +88,14 @@ orchestrator prompt for beginning implementation with independent subagents.
 
 ## Status
 
-PBI-013 production operations and PBI-016’s operator console are accepted. The current
-local Docker topology runs the real control plane, Admin UI, webhook ingress, scheduler,
-durable worker, migrations, and PostgreSQL; it is the supported way to evaluate the
-integrated system. PBI-017 release hardening is still in progress: production TLS,
-release-profile runtime exercise, backup/restore, image-vulnerability policy, and
-provenance/attestation verification are not yet claimed complete. Detailed contracts in
-`.features` remain authoritative.
+PBI-013 production operations, PBI-016’s operator console, and PBI-020’s repository-
+assisted analysis and attachment-intelligence workflow are accepted. The current local
+Docker topology runs the real control plane, Admin UI, webhook ingress, scheduler,
+durable worker, isolated attachment processor, migrations, and PostgreSQL; it is the
+supported way to evaluate the integrated system. PBI-017 release hardening is still in
+progress: production TLS, release-profile runtime exercise, backup/restore,
+image-vulnerability policy, and provenance/attestation verification are not yet claimed
+complete. Detailed contracts in `.features` remain authoritative.
 
 ## Quick Docker evaluation
 

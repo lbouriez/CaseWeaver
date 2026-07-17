@@ -136,6 +136,17 @@ audit writes, and outcome reconciliation.
   external-secret reference form explains the bundled `env:UPPERCASE_NAME`
   resolver and examples such as `env:GITHUB_TOKEN`; it never offers a
   secret-value input.
+- Repository-assisted case analysis: `GET /v1/admin/repository-analysis/options`,
+  draft/revision/lifecycle commands under `/v1/admin/repository-analysis/*`, and
+  the guarded repository draft-test preview/execution routes. The **Repository
+  analysis** navigation area creates code-repository and execution-policy
+  versions; **Knowledge & Analysis** creates attachment policies and analysis
+  recipes; **Integrations** creates pinned case triggers and intake schedules.
+  All selects come from safe, workspace-scoped option DTOs. A remote HTTPS URL
+  is transient authoring input and is cleared after submission; paths, remote
+  URLs, refs, locators, credentials, prompt content, evidence, and provider
+  responses are never rendered by this console. Attachment policy authoring
+  receives only active `vision` bindings, never an analysis binding.
 - Workspace selection is derived from the API session's memberships and sent through
   the CSRF-protected session-switch endpoint. The browser cannot submit a role,
   permission, or arbitrary workspace grant.

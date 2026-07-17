@@ -8,6 +8,13 @@ administrator-selected pinned tree and evidence, and provides the agent only an 
 read-only tool gateway. Sandboxes must attest network, credential, filesystem, tool, and
 quota isolation; timeout/cancellation terminates and cleans up the session.
 
+Checkout material is bound into a runtime capability before a provider receives it.
+Provider-visible calls contain only repository ID and exact commit, never a locator,
+remote URL, local directory, or credential reference. The runtime resolves model
+citations from the private prepared tree and derives exact excerpt hashes and evidence
+IDs before returning at most 100 evidence-linked findings. Conventional credential files
+and high-confidence literal credentials are omitted during tree preparation.
+
 Agent prompting and model calls remain in provider/application layers.
 
 `src/contracts.ts` is the inward-facing repository-runtime contract boundary. It keeps
@@ -29,6 +36,11 @@ This is not a remote/private-repository checkout solution. It intentionally has 
 network or credential implementation and must not be used as a substitute for a
 future server-private remote checkout broker.
 
+That separate broker is now `GitCliPinnedRepositoryCheckoutBroker` in
+`@caseweaver/git-repository-runtime`. It reuses hardened Git cache/AskPass mechanics,
+then materializes only sanitized text into this private tree store and returns the same
+opaque tree contract.
+
 `DockerOciRepositorySandbox.create` is available only on a Linux worker with a local
 Docker Engine Unix socket. It requires an immutable image digest and verifies that the
 server reports Linux before returning an attesting sandbox. Each tool call runs a
@@ -38,6 +50,16 @@ and only the bundled `listFiles`, `readFile`, and `searchFiles` JSON protocol. T
 adapter fails closed when that host/runtime/image prerequisite is unavailable. An
 operator must still supply a trusted, credential-free image; image provenance and
 attestation verification belong to deployment delivery work, not this adapter.
+
+Prepared files are written only in a private staging tree, then atomically published
+as a read-only child tree (`0555` directories and `0444` regular files). Its random
+parent remains `0700`; Docker mounts only the final child, so its fixed UID `65532`
+can list/read the sanitized files without gaining host-tree traversal outside that
+mount.
+
+Every tool container receives a private name and is force-removed after completion or
+cancellation. Creation verifies the local Linux Docker daemon and configured digest-pinned
+image before attesting the enforced no-network, read-only, and unprivileged command shape.
 
 The local broker and OCI sandbox share `LocalPreparedRepositoryTreeStore` only in
 server composition. No browser, model tool, audit record, or `SanitizedPinnedTree`

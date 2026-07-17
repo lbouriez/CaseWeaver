@@ -16,6 +16,7 @@ export interface KnowledgeCommandHandlers {
 }
 
 export type AnalysisExecuteCommand = EnvelopeFor<"analysis.execute.v1">;
+export type AnalysisDiscoveryCommand = EnvelopeFor<"analysis.discover.v1">;
 export type AnalysisTriggerCommand = EnvelopeFor<"analysis.trigger.v2">;
 export type PublicationExecuteCommand = EnvelopeFor<"publication.execute.v1">;
 export type PublicationReconcileCommand =
@@ -28,6 +29,7 @@ export type DiagnosticsExportGenerateCommand =
 
 export interface AnalysisCommandHandlers {
   readonly execute: WorkerCommandHandler<AnalysisExecuteCommand>;
+  readonly discover?: WorkerCommandHandler<AnalysisDiscoveryCommand>;
 }
 
 export interface PublicationCommandHandlers {
@@ -149,6 +151,12 @@ export function createWorkerCommandDispatcher(
       switch (envelope.type) {
         case "analysis.execute.v1":
           await handlers.analysis.execute.handle(envelope, signal);
+          return;
+        case "analysis.discover.v1":
+          if (handlers.analysis.discover === undefined) {
+            throw new UnsupportedWorkerEnvelopeError(envelope.type);
+          }
+          await handlers.analysis.discover.handle(envelope, signal);
           return;
         case "analysis.trigger.v2":
           if (handlers.publication === undefined) {

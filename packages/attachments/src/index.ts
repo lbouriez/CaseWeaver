@@ -3,6 +3,8 @@ export * from "./errors.js";
 export * from "./identity.js";
 export * from "./intake.js";
 export * from "./mime.js";
+export * from "./occurrence-preparation.js";
+export * from "./preparation.js";
 export * from "./processing.js";
 export * from "./text.js";
 export * from "./verified-output.js";

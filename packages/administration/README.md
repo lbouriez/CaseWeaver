@@ -143,3 +143,96 @@ one-use; an execution idempotency claim and bounded terminal outcome are
 durable. Implementations must atomically append the preview/result audit with
 the corresponding safe state and must never accept or retain settings, secret
 registration IDs/locators, credential values, remote URLs, responses, or errors.
+
+## Repository analysis authoring
+
+`ManageRepositoryAnalysisConfiguration` composes the same immutable lifecycle for
+`code-repositories`, `repository-execution-policies`, `attachment-policies`,
+`analysis-recipes`, `case-analysis-triggers`, and `case-analysis-schedules`. It keeps
+repository URLs/refs, deployment paths/aliases, checkout locators, credentials, source
+trees, raw settings, and test output in feature/adapter-private write-only settings.
+Projections, audits, and public summaries retain only safe identities, bounded policy
+limits, lifecycle state, and booleans/counts. A remote repository can retain at most one
+secret-reference identity; a deployment-mounted repository retains none.
+
+`TrustedRepositoryAnalysisConfigurationContext` is constructed from server session and
+request state, separately from every browser command. The durable adapter must apply
+workspace ownership, authorization, optimistic concurrency, idempotency, immutable
+version insertion, feature projection, and `RepositoryAnalysisConfigurationAuditPort`
+in one transaction. Replays never rewrite projections. The manager supports both an
+initial inert draft and an inert successor draft revision. Each successor receives fresh
+write-only settings; generic inspection/history never returns the prior settings.
+
+An execution policy is provider-neutral and must declare `networkDisabled: true`, a
+non-empty `listFiles`/`readFile`/`searchFiles` read-only allowlist, and bounded time,
+turn, tool, CPU, memory, and output limits. A phase-one recipe has a repository and
+attachment stage. A non-disabled repository stage requires exactly one immutable code
+repository/version plus execution-policy/version pair; a disabled stage requires none.
+A non-disabled attachment stage likewise requires exactly one immutable attachment-policy
+version. An analysis recipe has its own `recipeId` aggregate and merely selects an
+`analysisProfileId`/version, so several recipes can safely reuse an analysis profile.
+Trigger and schedule projections pin that independent recipe identity/version alongside
+their source, connector, and publication inputs; existing trigger/scheduler use cases
+own verification, leases, occurrence identity, and durable enqueue.
+
+`RepositoryConfigurationTestPort` is the server-only seam for a bounded candidate
+connection/ref-resolution test. The HTTP/application layer retains the validated
+candidate privately and passes only an opaque candidate ID/digest, session-bound expiring
+confirmation, and idempotency digest. It accepts no raw candidate setting and returns
+only a safe accepted/in-progress or terminal state—never URLs, refs, paths, credentials,
+locators, remote output, or error text. An accepted/in-progress state is non-terminal
+and cannot satisfy repository activation.
+
+`PreviewRepositoryDraftTest` and `RunRepositoryDraftTest` are the replacement
+provider-neutral candidate-test contracts for code repositories. A trusted adapter
+selects an existing inert candidate version and computes its SHA-256 digest from
+canonical private settings, normalized secret-registration IDs, and the safe repository
+projection. The browser never sends that digest or any candidate value. Preview stores
+an expiring, session-bound confirmation and its audit record; execution atomically
+consumes that one-use confirmation with its idempotency claim before it invokes a
+server-private non-destructive runner. Replays return the durable redacted terminal
+state without another runner invocation. A duplicate while its claim lease remains live
+returns the distinct safe `accepted`/`inProgress` execution state and must never invoke
+the runner, finalize an outcome, or fabricate `outcome_unknown`. The durable store alone
+uses its database transaction time to decide a lease has expired and may then reclaim it
+under its configured policy. Store implementations must fail closed for a session,
+expiry, candidate-digest, or audit mismatch. They may retain only IDs, digests,
+confirmation state, `inProgress`, and `completed`/`failed`/`outcome_unknown`; they must
+never retain or return repository URLs/refs, mount paths, secret locators/values, output,
+or external errors.
+
+`RepositoryDraftTestExecutionCandidateResolver` is a second, server-private resolver
+used only after that confirmation/idempotency claim. It may recover an exact remote URL,
+deployment mount alias, authored full ref, and registered external secret locator, but
+must verify the same draft/version/digest identity. Its result is never an API DTO,
+browser value, audit payload, log field, or configuration-inspection response.
+
+Code-repository activation has an injected
+`RepositoryConfigurationActivationGuard`. On a new active successor only, the manager
+computes the private candidate digest and requires a completed exact candidate test
+after the lifecycle successor has been inserted but before its feature projection is
+written. The enclosing administration transaction must roll back on guard failure. A
+replayed mutation neither reconsumes a confirmation nor validates a prior candidate;
+non-repository transitions never use this guard. Production composition must inject the
+durable draft-test guard—there is deliberately no permissive production fallback.
+
+`ListRepositoryAnalysisOptions` is the safe authoring catalog for repository-analysis
+forms. It exposes only opaque IDs/version IDs, labels, lifecycle, and explicit draft or
+activation eligibility for repositories, policies, profiles, bindings, source/connector
+pin pairs, webhook endpoints, and checkout-secret registrations. Deployment registries
+provide only opaque mounted-repository, sandbox-policy, and attachment-processor-policy
+aliases. The presentation layer allowlists those fields, so a path, remote URL, image,
+locator, or other adapter-private field is not accidentally passed through to an API or
+browser. Webhook draft eligibility is intentionally separate from activation eligibility.
+
+`RepositoryAnalysisTransitionSnapshotStore` is a separate server-private read port.
+It reconstructs the exact current immutable settings, opaque credential-registration
+IDs, and feature projection needed to append an active/disabled successor. It is never
+a configuration-inspection DTO and cannot return an alternate/current-default version;
+the API must map a missing snapshot to a not-found result without exposing why it was
+missing.
+`analysisBindings`, `analysisRecipes`, and `caseAnalysisTriggers` are distinct
+active/current arrays for recipe, trigger, and schedule authoring. Each is limited to
+200 server-validated immutable choices and is explicitly copied through the same safe
+allowlist; it never contains AI provider/model metadata, configuration settings, source
+details, URLs, paths, or secret material.

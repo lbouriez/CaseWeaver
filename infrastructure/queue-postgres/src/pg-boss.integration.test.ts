@@ -22,11 +22,6 @@ const databaseUrl = process.env.DATABASE_URL;
 if (databaseUrl === undefined) {
   throw new Error("pg-boss integration tests require DATABASE_URL.");
 }
-if (process.env.PG_BOSS_INTEGRATION !== "1") {
-  throw new Error(
-    "Set PG_BOSS_INTEGRATION=1 to run pg-boss integration tests.",
-  );
-}
 if (!new URL(databaseUrl).pathname.toLowerCase().includes("test")) {
   throw new Error(
     "pg-boss integration DATABASE_URL must name a test database.",

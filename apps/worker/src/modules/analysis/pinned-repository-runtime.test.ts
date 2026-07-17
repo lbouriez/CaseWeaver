@@ -1,5 +1,5 @@
 import type {
-  RepositoryAgentRuntime,
+  RepositoryAgentRuntimeBinder,
   RepositoryAgentRuntimePin,
 } from "@caseweaver/ai-sdk";
 import type { RepositoryRuntimeConfigurationResolver } from "@caseweaver/postgres";
@@ -47,9 +47,12 @@ function configuration(
 
 describe("ComposedPinnedRepositoryAgentRuntimeResolver", () => {
   it("returns only the exact immutable configuration to the attested runtime", async () => {
+    const executor = {
+      run: async () => ({ summary: "", evidence: [], findings: [] }),
+    };
     const runtime = {
-      run: async () => ({ summary: "", evidence: [] }),
-    } as unknown as RepositoryAgentRuntime;
+      bind: () => executor,
+    } as unknown as RepositoryAgentRuntimeBinder;
     const resolver = new ComposedPinnedRepositoryAgentRuntimeResolver(
       configuration(),
       runtime,
@@ -58,19 +61,25 @@ describe("ComposedPinnedRepositoryAgentRuntimeResolver", () => {
     await expect(
       resolver.resolve(pin, new AbortController().signal),
     ).resolves.toMatchObject({
-      repository: {
+      runtime: {
         repositoryId: pin.repositoryId,
         pinnedCommit: pin.pinnedCommit,
       },
-      runtime,
+      executor,
       allowedTools: ["readFile"],
     });
+    const resolved = await resolver.resolve(pin, new AbortController().signal);
+    expect(JSON.stringify(resolved)).not.toContain(
+      "vault:checkout/support-service",
+    );
   });
 
   it("fails closed when private runtime configuration does not match the pin", async () => {
     const runtime = {
-      run: async () => ({ summary: "", evidence: [] }),
-    } as unknown as RepositoryAgentRuntime;
+      bind: () => ({
+        run: async () => ({ summary: "", evidence: [], findings: [] }),
+      }),
+    } as unknown as RepositoryAgentRuntimeBinder;
     const resolver = new ComposedPinnedRepositoryAgentRuntimeResolver(
       configuration("other-service"),
       runtime,

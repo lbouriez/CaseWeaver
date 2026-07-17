@@ -1,5 +1,6 @@
 import type { Clock } from "@caseweaver/application";
 import {
+  attachmentOccurrenceIdentity,
   normalizedCaseRevision,
   normalizedCaseSchema,
   sha256CanonicalJson,
@@ -90,12 +91,35 @@ export class NormalizedCaseSnapshotProjector implements CaseSnapshotProjector {
           readonly connectorRegistrationId: string;
           readonly resourceType: string;
           readonly externalId: string;
+          readonly occurrenceIdentity?: string;
         }>
       >();
-      for (const attachment of [
-        ...normalized.attachments,
-        ...normalized.messages.flatMap((message) => message.attachments),
-      ]) {
+      const occurrences = [
+        ...(normalized.attachmentOccurrences ?? []),
+        ...normalized.messages.flatMap(
+          (message) => message.attachmentOccurrences ?? [],
+        ),
+      ];
+      const attachments: readonly Readonly<{
+        readonly reference: {
+          readonly connectorInstanceId: string;
+          readonly resourceType: string;
+          readonly externalId: string;
+        };
+        readonly occurrenceIdentity?: string;
+      }>[] =
+        occurrences.length === 0
+          ? [
+              ...normalized.attachments,
+              ...normalized.messages.flatMap((message) => message.attachments),
+            ].map((attachment) => Object.freeze({ reference: attachment.reference }))
+          : occurrences.map((occurrence) =>
+              Object.freeze({
+                reference: occurrence.reference,
+                occurrenceIdentity: attachmentOccurrenceIdentity(occurrence),
+              }),
+            );
+      for (const attachment of attachments) {
         if (
           attachment.reference.connectorInstanceId !==
           input.request.connectorRegistrationId
@@ -103,11 +127,15 @@ export class NormalizedCaseSnapshotProjector implements CaseSnapshotProjector {
           throw new NormalizedCaseProjectionError();
         }
         attachmentReferences.set(
-          `${attachment.reference.resourceType}\u0000${attachment.reference.externalId}`,
+          attachment.occurrenceIdentity ??
+            `${attachment.reference.resourceType}\u0000${attachment.reference.externalId}`,
           Object.freeze({
             connectorRegistrationId: attachment.reference.connectorInstanceId,
             resourceType: attachment.reference.resourceType,
             externalId: attachment.reference.externalId,
+            ...(attachment.occurrenceIdentity === undefined
+              ? {}
+              : { occurrenceIdentity: attachment.occurrenceIdentity }),
           }),
         );
       }
@@ -141,8 +169,8 @@ export class NormalizedCaseSnapshotProjector implements CaseSnapshotProjector {
         messages: Object.freeze(messages),
         attachmentReferences: Object.freeze(
           [...attachmentReferences.values()].toSorted((left, right) =>
-            `${left.resourceType}\u0000${left.externalId}`.localeCompare(
-              `${right.resourceType}\u0000${right.externalId}`,
+            `${left.occurrenceIdentity ?? ""}\u0000${left.resourceType}\u0000${left.externalId}`.localeCompare(
+              `${right.occurrenceIdentity ?? ""}\u0000${right.resourceType}\u0000${right.externalId}`,
             ),
           ),
         ),

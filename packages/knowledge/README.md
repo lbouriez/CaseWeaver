@@ -42,3 +42,35 @@ profile ID/version pairs. There is no implicit profile default. The exported bas
 registry is source-neutral and deterministic; deployments may add profiles through
 trusted composition. Hard-budget embedding work rejects unknown pricing rather than
 turning it into zero cost.
+
+## Attachment preparation and derived evidence
+
+Knowledge source versions may pin an immutable attachment-preparation policy with a
+mode (`disabled`, `optional`, or `required`), policy version, and access-policy hash.
+The attachment runtime supplies a structurally compatible, safe result: selected
+derivative identities/content hashes, typed warnings, an order-independent identity
+hash, and a retry signal. It does not supply a blob key, URL, locator, local path, or
+secret through this port.
+
+The active knowledge-item read model retains only a deterministic hash of that pinned
+policy. Both fingerprint and normalized-content no-op checks compare this hash, so
+adding, removing, or changing a source's immutable attachment policy creates a new
+revision instead of silently retaining evidence prepared under a different policy.
+
+Activation/store mutations retain a separate policy-free attachment result projection:
+its status, identity hash, selected derivative identities, typed warning identities,
+and retry state. They never retain the policy object; that object exists only in the
+immutable source configuration selected for the run.
+
+Ingestion normalizes the source document first, then prepares attachments before it
+calculates the normalized-content hash. It never alters the normalizer's source text.
+Instead, each successful canonical derivative becomes a dedicated immutable evidence
+chunk, prefixed with its opaque occurrence/derivative identities and content hash. A
+later completed derivative therefore creates a new knowledge revision while unchanged
+source chunks can reuse their embeddings.
+
+Optional preparation warnings retain source knowledge, mark the active item retryable,
+and prevent an unchanged fingerprint from hiding future evidence. Required warnings
+fail the revision closed. The attachment package owns byte streaming, cache claims,
+processors, and vision metering; this package owns only the source-neutral consumer
+port and chunk/revision semantics.

@@ -54,6 +54,57 @@ afterAll(async () => {
 });
 
 describe("PostgreSQL source and schedule administration projections", () => {
+  it("pins an active attachment-policy version with the source runtime record", async () => {
+    await seedActiveAttachmentPolicy({ workspace: "workspace-a", suffix: "a" });
+    const persistence = createPostgresPersistence({ databaseUrl });
+    try {
+      await persistence.unitOfWork.transaction((transaction) =>
+        new ManageKnowledgeSourceConfiguration(
+          transactions,
+          store(persistence, transaction),
+          audit(
+            persistence.auditStore,
+            transaction,
+            "workspace-a",
+            "principal-a",
+          ),
+        ).create({
+          workspaceId: "workspace-a",
+          displayName: "Attachment-aware documentation",
+          settings: { schemaVersion: 1 },
+          source: sourceProjection({
+            mode: "optional",
+            attachmentPolicyId: "attachment-policy-a",
+            attachmentPolicyConfigurationVersionId: "attachment-policy-a-v1",
+          }),
+          mutation: mutation("knowledgeSource.attachment.create", "attachment"),
+        }),
+      );
+      await expect(
+        pool.query(
+          `SELECT attachment_stage_mode,
+                  attachment_policy_configuration_version_id,
+                  attachment_access_policy_hash
+             FROM knowledge_source_runtime_versions
+            WHERE workspace_id = 'workspace-a' AND knowledge_source_id = 'source-a'`,
+        ),
+      ).resolves.toMatchObject({
+        rows: [
+          {
+            attachment_stage_mode: "optional",
+            attachment_policy_configuration_version_id:
+              "attachment-policy-a-v1",
+            attachment_access_policy_hash: expect.stringMatching(
+              /^[a-f0-9]{64}$/u,
+            ),
+          },
+        ],
+      });
+    } finally {
+      await persistence.close();
+    }
+  });
+
   it("commits immutable source/schedule versions, projections, cache notices, and audits atomically", async () => {
     const persistence = createPostgresPersistence({ databaseUrl });
     try {
@@ -797,7 +848,15 @@ function audit(
   };
 }
 
-function sourceProjection() {
+function sourceProjection(
+  attachmentStage:
+    | Readonly<{ readonly mode: "disabled" }>
+    | Readonly<{
+        readonly mode: "optional" | "required";
+        readonly attachmentPolicyId: string;
+        readonly attachmentPolicyConfigurationVersionId: string;
+      }> = { mode: "disabled" },
+) {
   return {
     sourceId: "source-a",
     connectorRegistrationId: "connector-a",
@@ -808,9 +867,46 @@ function sourceProjection() {
     chunkingProfileVersion: "chunking-v1",
     embeddingBatchSize: 16,
     embeddingBudgetPolicyId: "budget-a",
+    attachmentStage,
     synchronizationPolicy: { triggers: [{ mode: "manual" }] },
     deletionBehavior: "tombstone" as const,
   };
+}
+
+async function seedActiveAttachmentPolicy(input: {
+  readonly workspace: string;
+  readonly suffix: string;
+}): Promise<void> {
+  const configurationId = `attachment-policy-${input.suffix}`;
+  const versionId = `${configurationId}-v1`;
+  await pool.query(
+    `INSERT INTO administration_configurations (
+       id, workspace_id, resource_type, lifecycle, current_version_id
+     ) VALUES ($1, $2, 'attachment-policies', 'active', NULL)`,
+    [configurationId, input.workspace],
+  );
+  await pool.query(
+    `INSERT INTO administration_configuration_versions (
+       id, workspace_id, configuration_id, version, settings, secret_references
+     ) VALUES ($1, $2, $3, 1, '{}'::jsonb, '[]'::jsonb)`,
+    [versionId, input.workspace, configurationId],
+  );
+  await pool.query(
+    `UPDATE administration_configurations
+        SET current_version_id = $1
+      WHERE workspace_id = $2 AND id = $3`,
+    [versionId, input.workspace, configurationId],
+  );
+  await pool.query(
+    `INSERT INTO attachment_policy_versions (
+       id, workspace_id, configuration_version_id,
+       processor_security_policy_version_id, vision_binding_version_id,
+       maximum_attachment_count, maximum_attachment_bytes,
+       maximum_archive_entries, maximum_expanded_archive_bytes,
+       maximum_archive_depth
+     ) VALUES ($1, $2, $1, 'attachment-security-v1', $3, 8, 4096, 20, 8192, 0)`,
+    [versionId, input.workspace, `binding-version-${input.suffix}`],
+  );
 }
 
 function scheduleProjection(sourceConfigurationVersionId: string) {

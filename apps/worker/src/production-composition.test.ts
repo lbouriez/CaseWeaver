@@ -30,6 +30,7 @@ describe("production worker command composition", () => {
     const captureAndSubmit = vi.fn(async () => ({ submitted: true }));
     const deliverPublication = vi.fn(async () => ({ published: true }));
     const schedulePublication = vi.fn(async () => ({ scheduled: 1 }));
+    const discover = vi.fn(async () => "completed" as const);
     const handlers = createProductionWorkerCommandHandlers({
       knowledge: {
         sourceConfigurations: {
@@ -46,6 +47,7 @@ describe("production worker command composition", () => {
         clock: { now: () => "2026-07-15T12:00:00.000Z" },
       },
       analysis: { create },
+      discovery: { execute: discover },
       publication: {
         trigger: { trigger: captureAndSubmit },
         executor: { execute: deliverPublication },
@@ -124,6 +126,7 @@ describe("production worker command composition", () => {
         clock: { now: () => "2026-07-15T12:00:00.000Z" },
       },
       analysis: { create: () => ({ execute: async () => undefined }) },
+      discovery: { execute: async () => "completed" },
       publication: {
         trigger: { trigger: async () => undefined },
         executor: { execute: deliverPublication },

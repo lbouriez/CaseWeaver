@@ -21,6 +21,10 @@ describe("diagnostic redaction", () => {
         analysisPrompt: "private analysis prompt",
         providerResponse: "private provider response",
         attachmentContent: "private attachment",
+        repositoryPath: "C:\\private\\checkout",
+        sourceUrl: "https://private.example/source",
+        externalSecretLocator: "vault://private/secret",
+        modelOutput: "private model result",
         failureMessage: "private error detail",
         request: {
           headers: { authorization: "Bearer private-token" },
@@ -41,6 +45,10 @@ describe("diagnostic redaction", () => {
       analysisPrompt: REDACTED_DIAGNOSTIC_VALUE,
       providerResponse: REDACTED_DIAGNOSTIC_VALUE,
       attachmentContent: REDACTED_DIAGNOSTIC_VALUE,
+      repositoryPath: REDACTED_DIAGNOSTIC_VALUE,
+      sourceUrl: REDACTED_DIAGNOSTIC_VALUE,
+      externalSecretLocator: REDACTED_DIAGNOSTIC_VALUE,
+      modelOutput: REDACTED_DIAGNOSTIC_VALUE,
       failureMessage: REDACTED_DIAGNOSTIC_VALUE,
       request: REDACTED_DIAGNOSTIC_VALUE,
       nested: {

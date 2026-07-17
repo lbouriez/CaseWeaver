@@ -14,6 +14,7 @@ import {
   jitbitConfigurationSchema,
   jitbitSettingsSchema,
 } from "./config.js";
+import { JitbitAttachmentSource } from "./jitbit-attachment-source.js";
 import { JitbitCaseSource } from "./jitbit-case-source.js";
 import { JitbitAnalysisDestination } from "./jitbit-destination.js";
 import { JitbitKnowledgeSource } from "./jitbit-knowledge-source.js";
@@ -21,7 +22,7 @@ import { JitbitKnowledgeSource } from "./jitbit-knowledge-source.js";
 type JitbitRuntimeDescriptor = Readonly<{
   readonly kind: "connector";
   readonly type: "jitbit";
-  readonly version: "1" | "2";
+  readonly version: "1" | "2" | "3" | "4";
 }>;
 
 const legacyDescriptorReference = Object.freeze({
@@ -30,10 +31,22 @@ const legacyDescriptorReference = Object.freeze({
   version: "1",
 } satisfies JitbitRuntimeDescriptor);
 
-const currentDescriptorReference = Object.freeze({
+const versionTwoDescriptorReference = Object.freeze({
   kind: "connector",
   type: "jitbit",
   version: "2",
+} satisfies JitbitRuntimeDescriptor);
+
+const versionThreeDescriptorReference = Object.freeze({
+  kind: "connector",
+  type: "jitbit",
+  version: "3",
+} satisfies JitbitRuntimeDescriptor);
+
+const currentDescriptorReference = Object.freeze({
+  kind: "connector",
+  type: "jitbit",
+  version: "4",
 } satisfies JitbitRuntimeDescriptor);
 
 export interface CreateJitbitRuntimeContributionOptions {
@@ -56,7 +69,6 @@ export function createJitbitRuntimeContribution(
 
 /**
  * Retains exact descriptor revision-one execution for already durable work.
- * New control-plane drafts use `createJitbitRuntimeContribution` (revision 2).
  */
 export function createLegacyJitbitRuntimeContribution(
   options: CreateJitbitRuntimeContributionOptions,
@@ -64,12 +76,28 @@ export function createLegacyJitbitRuntimeContribution(
   return contribution(options, legacyDescriptorReference);
 }
 
-/** Register both revisions when a deployment contains pre-revision-two history. */
+/** Retains descriptor version two execution for durable historical work. */
+export function createVersionTwoJitbitRuntimeContribution(
+  options: CreateJitbitRuntimeContributionOptions,
+): ConnectorRuntimeContribution {
+  return contribution(options, versionTwoDescriptorReference);
+}
+
+/** Retains descriptor version three execution for durable historical work. */
+export function createVersionThreeJitbitRuntimeContribution(
+  options: CreateJitbitRuntimeContributionOptions,
+): ConnectorRuntimeContribution {
+  return contribution(options, versionThreeDescriptorReference);
+}
+
+/** Register every retained immutable descriptor revision with trusted composition. */
 export function createJitbitRuntimeContributions(
   options: CreateJitbitRuntimeContributionOptions,
 ): readonly ConnectorRuntimeContribution[] {
   return Object.freeze([
     createLegacyJitbitRuntimeContribution(options),
+    createVersionTwoJitbitRuntimeContribution(options),
+    createVersionThreeJitbitRuntimeContribution(options),
     createJitbitRuntimeContribution(options),
   ]);
 }
@@ -102,6 +130,10 @@ function contribution(
           configuration: parsed,
           client,
           ...(options.now === undefined ? {} : { now: options.now }),
+        }),
+        attachmentSource: new JitbitAttachmentSource({
+          configuration: parsed,
+          client,
         }),
         analysisDestination: new JitbitAnalysisDestination({
           configuration: parsed,

@@ -2,12 +2,12 @@ import { sha256CanonicalJson } from "@caseweaver/connector-sdk";
 import { describe, expect, it } from "vitest";
 
 import { JitbitClient } from "./client.js";
-import { JitbitAnalysisDestination } from "./jitbit-destination.js";
 import {
   createJitbitConfiguration,
   createJitbitSecretResolver,
   jsonResponse,
 } from "./fakes.js";
+import { JitbitAnalysisDestination } from "./jitbit-destination.js";
 
 function destinationFor(
   responder: (url: URL, init: RequestInit) => Response | Promise<Response>,

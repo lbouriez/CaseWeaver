@@ -44,8 +44,9 @@ the project is evaluated.
 
 `Container images` has three kinds of jobs:
 
-- **Image matrix:** builds the migration, API, Admin, worker, scheduler, webhook, and
-  standalone final images. On pull requests and `main`, each image is loaded locally
+- **Image matrix:** builds the migration, API, Admin, worker, scheduler, webhook,
+  standalone, and no-network attachment-processor final images. On pull requests and
+  `main`, each image is loaded locally
   and inspected to verify its final process identity. These are smoke builds, not
   published artifacts.
 - **Disposable local Compose smoke:** builds the real local topology, waits for

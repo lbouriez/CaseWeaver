@@ -5,8 +5,8 @@ import type {
   MeteredAiResult,
 } from "@caseweaver/ai-execution";
 import {
-  type DiscoveryPage,
   type DiscoveredKnowledgeItem,
+  type DiscoveryPage,
   type ExternalReference,
   type KnowledgeDocument,
   type KnowledgeSource,
@@ -16,6 +16,11 @@ import {
 import { describe, expect, it } from "vitest";
 
 import {
+  type AttachmentPreparationPolicy,
+  type AttachmentPreparationPort,
+  type AttachmentPreparationResult,
+  attachmentPreparationIdentityHash,
+  attachmentPreparationPolicyIdentityHash,
   type CachedEmbedding,
   type EmbeddingCacheIdentity,
   embeddingCacheIdentityKey,
@@ -122,6 +127,10 @@ class Store implements KnowledgeIngestionStore {
           activeRevisionId: mutation.revisionId,
           activeContentHash: mutation.contentHash,
           activeEmbeddingSpace: mutation.embeddingSpace,
+          activeAttachmentPreparationPolicyIdentity:
+            mutation.attachmentPreparationPolicyIdentity,
+          activeAttachmentPreparationRetryRequired:
+            mutation.attachmentPreparation?.retryRequired,
           lastSuccessfulFingerprint: mutation.fingerprint,
         });
       } else {
@@ -198,6 +207,11 @@ function request(
       chunkingProfileId: "chunking",
       chunkingProfileVersion: "chunking.v1",
       embeddingBatchSize: 10,
+      attachmentPreparationPins: {
+        sourceConfigurationVersionId: "source-config-v1",
+        connectorRegistrationId: reference.connectorInstanceId,
+        connectorConfigurationVersionId: "connector-config-v1",
+      },
       synchronization: { triggers: [{ mode: "manual" }] },
       collection: {
         id: "collection-1",
@@ -233,10 +247,58 @@ function snapshot(
   ];
 }
 
+function attachmentPreparationResult(input: {
+  readonly policy: AttachmentPreparationPolicy;
+  readonly derivatives?: AttachmentPreparationResult["derivatives"];
+  readonly warnings?: AttachmentPreparationResult["outcome"]["warnings"];
+}): AttachmentPreparationResult {
+  const derivatives = input.derivatives ?? [];
+  const warnings = input.warnings ?? [];
+  const selectedDerivatives = derivatives.map((derivative) => ({
+    occurrenceIdentity: derivative.occurrenceIdentity,
+    derivativeIdentity: derivative.derivativeIdentity,
+    derivativeContentHash: derivative.derivativeContentHash,
+  }));
+  const retryRequired = warnings.some((warning) => warning.retryable);
+  return {
+    outcome: {
+      status:
+        input.policy.mode === "required" && warnings.length > 0
+          ? "terminal"
+          : "prepared",
+      identityHash: attachmentPreparationIdentityHash({
+        policy: input.policy,
+        selectedDerivatives,
+        warnings,
+      }),
+      policy: input.policy,
+      selectedDerivatives,
+      warnings,
+      retryRequired,
+    },
+    derivatives,
+  };
+}
+
+class AttachmentPreparation implements AttachmentPreparationPort {
+  public calls = 0;
+
+  public constructor(private readonly results: AttachmentPreparationResult[]) {}
+
+  public async prepare(): Promise<AttachmentPreparationResult> {
+    this.calls += 1;
+    const result = this.results.shift();
+    if (result === undefined)
+      throw new Error("No attachment result configured.");
+    return result;
+  }
+}
+
 function service(
   store: Store,
   gateway: Gateway,
   onChunkDocument?: (document: NormalizedKnowledgeDocument) => void,
+  attachments?: AttachmentPreparationPort,
 ): KnowledgeIngestionService {
   let revision = 0;
   return new KnowledgeIngestionService({
@@ -244,6 +306,7 @@ function service(
     ai: gateway,
     ids: { next: () => `revision-${++revision}` },
     clock: { now: () => "2026-07-13T20:00:00.000Z" },
+    ...(attachments === undefined ? {} : { attachments }),
     profiles: new ImmutableKnowledgeTextProfileRegistry({
       normalization: [
         {
@@ -296,6 +359,129 @@ describe("KnowledgeIngestionService", () => {
     expect(source.loads).toBe(0);
     expect(gateway.inputs).toEqual([]);
     expect(store.commits[0]?.mutations[0]).toMatchObject({ kind: "observe" });
+  });
+
+  it("does not hide a newly pinned attachment policy behind an unchanged fingerprint", async () => {
+    const store = new Store();
+    const gateway = new Gateway();
+    const policy: AttachmentPreparationPolicy = {
+      mode: "required",
+      policyVersion: "attachment-policy.v1",
+      accessPolicyHash: "access.v1",
+    };
+    const attachments = new AttachmentPreparation([
+      attachmentPreparationResult({
+        policy,
+        derivatives: [
+          {
+            occurrenceIdentity: "occurrence-1",
+            derivativeIdentity: "derivative-1",
+            derivativeContentHash: "derivative-content-1",
+            searchableText: "attachment-derived evidence",
+          },
+        ],
+      }),
+    ]);
+    store.items.set(reference.externalId, {
+      documentId: "document-1",
+      activeRevisionId: "revision-legacy",
+      activeContentHash: normalizedContentHash("normalization.v1", {
+        normalizedText: "source text",
+      }),
+      activeEmbeddingSpace,
+      lastSuccessfulFingerprint: versionedOpaqueValue("etag.v1", "1"),
+    });
+    const source = new Source(snapshot(), document("source text"));
+    const input = request(source);
+
+    await service(store, gateway, undefined, attachments).synchronize({
+      ...input,
+      configuration: { ...input.configuration, attachmentPreparation: policy },
+    });
+
+    expect(source.loads).toBe(1);
+    expect(attachments.calls).toBe(1);
+    const activation = store.commits[0]?.mutations[0];
+    expect(activation).toMatchObject({
+      kind: "activate",
+      attachmentPreparationPolicyIdentity:
+        attachmentPreparationPolicyIdentityHash(policy),
+      attachmentPreparation: {
+        status: "prepared",
+        identityHash: attachmentPreparationIdentityHash({
+          policy,
+          selectedDerivatives: [
+            {
+              occurrenceIdentity: "occurrence-1",
+              derivativeIdentity: "derivative-1",
+              derivativeContentHash: "derivative-content-1",
+            },
+          ],
+          warnings: [],
+        }),
+        selectedDerivatives: [
+          {
+            occurrenceIdentity: "occurrence-1",
+            derivativeIdentity: "derivative-1",
+            derivativeContentHash: "derivative-content-1",
+          },
+        ],
+        warnings: [],
+        retryRequired: false,
+      },
+    });
+    expect(activation).not.toHaveProperty("attachmentPreparation.policy");
+    expect(JSON.stringify(activation)).not.toContain("attachment-policy.v1");
+    expect(JSON.stringify(activation)).not.toContain("access.v1");
+  });
+
+  it("re-prepares an unchanged fingerprint when the pinned attachment policy changes", async () => {
+    const store = new Store();
+    const gateway = new Gateway();
+    const firstPolicy: AttachmentPreparationPolicy = {
+      mode: "optional",
+      policyVersion: "attachment-policy.v1",
+      accessPolicyHash: "access.v1",
+    };
+    const changedPolicy: AttachmentPreparationPolicy = {
+      mode: "optional",
+      policyVersion: "attachment-policy.v2",
+      accessPolicyHash: "access.v2",
+    };
+    const attachments = new AttachmentPreparation([
+      attachmentPreparationResult({ policy: firstPolicy }),
+      attachmentPreparationResult({ policy: changedPolicy }),
+    ]);
+    const ingestion = service(store, gateway, undefined, attachments);
+    const firstSource = new Source(snapshot(), document("source text"));
+    const first = request(firstSource);
+
+    await ingestion.synchronize({
+      ...first,
+      configuration: {
+        ...first.configuration,
+        attachmentPreparation: firstPolicy,
+      },
+    });
+
+    const changedSource = new Source(snapshot(), document("source text"));
+    const changed = request(changedSource);
+    await ingestion.synchronize({
+      ...changed,
+      configuration: {
+        ...changed.configuration,
+        attachmentPreparation: changedPolicy,
+      },
+    });
+
+    expect(firstSource.loads).toBe(1);
+    expect(changedSource.loads).toBe(1);
+    expect(attachments.calls).toBe(2);
+    expect(store.commits[1]?.mutations[0]).toMatchObject({
+      kind: "activate",
+      attachmentPreparationPolicyIdentity:
+        attachmentPreparationPolicyIdentityHash(changedPolicy),
+    });
   });
 
   it("records a changed observation without chunks or embeddings when normalized content is unchanged", async () => {
@@ -552,6 +738,278 @@ describe("KnowledgeIngestionService", () => {
     ).rejects.toMatchObject({ code: "knowledge.invalidDiscovery" });
 
     expect(store.commits).toEqual([]);
+  });
+
+  it("keeps original normalized text untouched while retrying optional attachment evidence", async () => {
+    const store = new Store();
+    const gateway = new Gateway();
+    const policy: AttachmentPreparationPolicy = {
+      mode: "optional",
+      policyVersion: "attachment-policy.v1",
+      accessPolicyHash: "access.v1",
+    };
+    const attachments = new AttachmentPreparation([
+      attachmentPreparationResult({
+        policy,
+        warnings: [
+          {
+            kind: "attachmentPreparationWarning",
+            code: "attachment.in-progress",
+            retryable: true,
+            occurrenceIdentity: "occurrence-1",
+          },
+        ],
+      }),
+      attachmentPreparationResult({
+        policy,
+        derivatives: [
+          {
+            occurrenceIdentity: "occurrence-1",
+            derivativeIdentity: "derivative-1",
+            derivativeContentHash: "derivative-content-1",
+            searchableText: "translated screenshot text",
+          },
+        ],
+      }),
+    ]);
+    const seenDocuments: NormalizedKnowledgeDocument[] = [];
+    const ingestion = service(
+      store,
+      gateway,
+      (normalized) => seenDocuments.push(normalized),
+      attachments,
+    );
+    const firstSource = new Source(
+      snapshot(),
+      document("original source text"),
+    );
+    const firstRequest = request(firstSource);
+
+    await ingestion.synchronize({
+      ...firstRequest,
+      configuration: {
+        ...firstRequest.configuration,
+        attachmentPreparation: policy,
+      },
+    });
+
+    const firstActivation = store.commits[0]?.mutations[0];
+    expect(firstActivation).toMatchObject({
+      kind: "activate",
+      normalized: { normalizedText: "original source text" },
+      attachmentPreparation: {
+        status: "prepared",
+        retryRequired: true,
+      },
+      chunks: [
+        expect.objectContaining({
+          kind: "source",
+          content: "original source text",
+        }),
+      ],
+    });
+    expect(seenDocuments[0]?.normalizedText).toBe("original source text");
+    expect(seenDocuments[0]?.normalizedText).not.toContain("translated");
+
+    const retrySource = new Source(
+      snapshot(),
+      document("original source text"),
+    );
+    const retryRequest = request(retrySource);
+    await ingestion.synchronize({
+      ...retryRequest,
+      configuration: {
+        ...retryRequest.configuration,
+        attachmentPreparation: policy,
+      },
+    });
+
+    expect(attachments.calls).toBe(2);
+    expect(retrySource.loads).toBe(1);
+    const retryActivation = store.commits[1]?.mutations[0];
+    expect(retryActivation).toMatchObject({
+      kind: "activate",
+      normalized: { normalizedText: "original source text" },
+      attachmentPreparation: {
+        status: "prepared",
+        retryRequired: false,
+      },
+    });
+    expect(retryActivation).toMatchObject({
+      chunks: [
+        expect.objectContaining({
+          kind: "source",
+          content: "original source text",
+        }),
+        expect.objectContaining({
+          kind: "attachmentEvidence",
+          content:
+            "[CaseWeaver attachment evidence: occurrence=occurrence-1; derivative=derivative-1; hash=derivative-content-1]\ntranslated screenshot text",
+          attachmentEvidence: {
+            occurrenceIdentity: "occurrence-1",
+            derivativeIdentity: "derivative-1",
+            derivativeContentHash: "derivative-content-1",
+          },
+        }),
+      ],
+    });
+  });
+
+  it("fails closed for required attachment warnings and records retryability", async () => {
+    const store = new Store();
+    const gateway = new Gateway();
+    const policy: AttachmentPreparationPolicy = {
+      mode: "required",
+      policyVersion: "attachment-policy.v1",
+      accessPolicyHash: "access.v1",
+    };
+    const attachments = new AttachmentPreparation([
+      attachmentPreparationResult({
+        policy,
+        warnings: [
+          {
+            kind: "attachmentPreparationWarning",
+            code: "attachment.in-progress",
+            retryable: true,
+          },
+        ],
+      }),
+    ]);
+    const source = new Source(snapshot(), document("source text"));
+    const input = request(source);
+
+    await expect(
+      service(store, gateway, undefined, attachments).synchronize({
+        ...input,
+        configuration: {
+          ...input.configuration,
+          attachmentPreparation: policy,
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: "knowledge.attachmentPreparationRequired",
+      retryable: true,
+    });
+    expect(store.commits).toEqual([]);
+    expect(store.failures[0]).toMatchObject({
+      stage: "attachments",
+      code: "knowledge.attachmentPreparationRequired",
+      retryable: true,
+    });
+  });
+
+  it("reduces optional attachment adapter failures to a safe retryable warning", async () => {
+    const store = new Store();
+    const gateway = new Gateway();
+    const policy: AttachmentPreparationPolicy = {
+      mode: "optional",
+      policyVersion: "attachment-policy.v1",
+      accessPolicyHash: "access.v1",
+    };
+    const attachments: AttachmentPreparationPort = {
+      prepare: async () => {
+        throw new Error(
+          "https://connector.example.invalid/private/source.txt should not persist",
+        );
+      },
+    };
+    const source = new Source(snapshot(), document("source text"));
+    const input = request(source);
+
+    await service(store, gateway, undefined, attachments).synchronize({
+      ...input,
+      configuration: { ...input.configuration, attachmentPreparation: policy },
+    });
+
+    const activation = store.commits[0]?.mutations[0];
+    expect(activation).toMatchObject({
+      kind: "activate",
+      attachmentPreparation: {
+        status: "prepared",
+        retryRequired: true,
+        warnings: [
+          {
+            code: "attachment.preparation-unavailable",
+            retryable: true,
+          },
+        ],
+      },
+    });
+    expect(JSON.stringify(activation)).not.toContain(
+      "connector.example.invalid",
+    );
+  });
+
+  it("creates a new immutable revision when a completed derivative changes", async () => {
+    const store = new Store();
+    const gateway = new Gateway();
+    const policy: AttachmentPreparationPolicy = {
+      mode: "optional",
+      policyVersion: "attachment-policy.v1",
+      accessPolicyHash: "access.v1",
+    };
+    const attachments = new AttachmentPreparation([
+      attachmentPreparationResult({
+        policy,
+        derivatives: [
+          {
+            occurrenceIdentity: "occurrence-1",
+            derivativeIdentity: "derivative-1",
+            derivativeContentHash: "output-v1",
+            searchableText: "first derivative",
+          },
+        ],
+      }),
+      attachmentPreparationResult({
+        policy,
+        derivatives: [
+          {
+            occurrenceIdentity: "occurrence-1",
+            derivativeIdentity: "derivative-1",
+            derivativeContentHash: "output-v2",
+            searchableText: "second derivative",
+          },
+        ],
+      }),
+    ]);
+    const ingestion = service(store, gateway, undefined, attachments);
+    const first = request(new Source(snapshot(), document("stable source")));
+    await ingestion.synchronize({
+      ...first,
+      configuration: { ...first.configuration, attachmentPreparation: policy },
+    });
+    const firstActivation = store.commits[0]?.mutations[0];
+    const second = request(
+      new Source(
+        snapshot(versionedOpaqueValue("etag.v1", "2")),
+        document("stable source"),
+      ),
+      versionedOpaqueValue("etag.v1", "2"),
+    );
+    await ingestion.synchronize({
+      ...second,
+      configuration: { ...second.configuration, attachmentPreparation: policy },
+    });
+    const secondActivation = store.commits[1]?.mutations[0];
+
+    expect(firstActivation).toMatchObject({ kind: "activate" });
+    expect(secondActivation).toMatchObject({ kind: "activate" });
+    expect(
+      (secondActivation as Extract<KnowledgeMutation, { kind: "activate" }>)
+        .contentHash,
+    ).not.toBe(
+      (firstActivation as Extract<KnowledgeMutation, { kind: "activate" }>)
+        .contentHash,
+    );
+    expect(gateway.inputs).toEqual([
+      [
+        "stable source",
+        "[CaseWeaver attachment evidence: occurrence=occurrence-1; derivative=derivative-1; hash=output-v1]\nfirst derivative",
+      ],
+      [
+        "[CaseWeaver attachment evidence: occurrence=occurrence-1; derivative=derivative-1; hash=output-v2]\nsecond derivative",
+      ],
+    ]);
   });
 
   it("rejects unknown embedding pricing for a hard collection budget", async () => {

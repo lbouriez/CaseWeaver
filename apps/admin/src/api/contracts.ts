@@ -27,6 +27,12 @@ export const resourceNames = [
   "retrieval-profiles",
   "prompt-profiles",
   "analysis-profiles",
+  "analysis-recipes",
+  "code-repositories",
+  "repository-execution-policies",
+  "attachment-policies",
+  "case-analysis-triggers",
+  "case-analysis-schedules",
   "analyses",
   "publications",
   "operation-jobs",
@@ -109,6 +115,30 @@ export const resourceEndpoints: Readonly<
   "analysis-profiles": {
     list: "/v1/admin/analysis-profiles",
     detail: "/v1/admin/analysis-profiles",
+  },
+  "analysis-recipes": {
+    list: "/v1/admin/analysis-recipes",
+    detail: "/v1/admin/analysis-recipes",
+  },
+  "code-repositories": {
+    list: "/v1/admin/code-repositories",
+    detail: "/v1/admin/code-repositories",
+  },
+  "repository-execution-policies": {
+    list: "/v1/admin/repository-execution-policies",
+    detail: "/v1/admin/repository-execution-policies",
+  },
+  "attachment-policies": {
+    list: "/v1/admin/attachment-policies",
+    detail: "/v1/admin/attachment-policies",
+  },
+  "case-analysis-triggers": {
+    list: "/v1/admin/case-analysis-triggers",
+    detail: "/v1/admin/case-analysis-triggers",
+  },
+  "case-analysis-schedules": {
+    list: "/v1/admin/case-analysis-schedules",
+    detail: "/v1/admin/case-analysis-schedules",
   },
   analyses: { list: "/v1/admin/analyses", detail: "/v1/admin/analyses" },
   publications: {
@@ -234,6 +264,240 @@ export const adminDetailSchema: z.ZodType<AdminDetail> = z
     ),
   })
   .strict();
+
+/**
+ * Repository-analysis authoring is intentionally a dedicated typed boundary.
+ * These are safe opaque identifiers and limits only: no remote location,
+ * mount path, credential locator, prompt, attachment, or provider payload is
+ * present in an options response.
+ */
+export interface RepositoryAnalysisOption {
+  readonly id: string;
+  readonly versionId: string;
+  readonly label: string;
+  readonly lifecycle: "draft" | "active" | "disabled";
+  readonly eligibleForDraft: boolean;
+  readonly eligibleForActivation: boolean;
+}
+
+export interface RepositoryAnalysisCaseSourceOption {
+  readonly sourceId: string;
+  readonly sourceConfigurationVersionId: string;
+  readonly connectorRegistrationId: string;
+  readonly connectorConfigurationVersionId: string;
+  readonly label: string;
+  readonly lifecycle: "draft" | "active" | "disabled";
+  readonly eligibleForDraft: boolean;
+  readonly eligibleForActivation: boolean;
+}
+
+export interface RepositoryAnalysisSecretOption {
+  readonly secretReferenceId: string;
+  readonly label: string;
+  readonly lifecycle: "draft" | "active" | "disabled";
+  readonly eligibleForDraft: boolean;
+  readonly eligibleForActivation: boolean;
+}
+
+export interface RepositoryAnalysisDeploymentOption {
+  readonly id: string;
+  readonly label: string;
+  readonly eligibleForDraft: boolean;
+  readonly eligibleForActivation: boolean;
+}
+
+export interface RepositoryAnalysisOptions {
+  readonly codeRepositories: readonly RepositoryAnalysisOption[];
+  readonly repositoryExecutionPolicies: readonly RepositoryAnalysisOption[];
+  readonly attachmentPolicies: readonly RepositoryAnalysisOption[];
+  readonly analysisProfiles: readonly RepositoryAnalysisOption[];
+  readonly retrievalProfiles: readonly RepositoryAnalysisOption[];
+  readonly promptProfiles: readonly RepositoryAnalysisOption[];
+  readonly publicationProfiles: readonly RepositoryAnalysisOption[];
+  readonly repositoryAgentBindings: readonly RepositoryAnalysisOption[];
+  readonly analysisBindings: readonly RepositoryAnalysisOption[];
+  readonly visionBindings: readonly RepositoryAnalysisOption[];
+  readonly analysisRecipes: readonly RepositoryAnalysisOption[];
+  readonly caseAnalysisTriggers: readonly RepositoryAnalysisOption[];
+  readonly caseSources: readonly RepositoryAnalysisCaseSourceOption[];
+  readonly webhookEndpoints: readonly RepositoryAnalysisOption[];
+  readonly checkoutSecretReferences: readonly RepositoryAnalysisSecretOption[];
+  readonly mountedRepositories: readonly RepositoryAnalysisDeploymentOption[];
+  readonly sandboxPolicies: readonly RepositoryAnalysisDeploymentOption[];
+  readonly attachmentProcessorSecurityPolicies: readonly RepositoryAnalysisDeploymentOption[];
+}
+
+const repositoryAnalysisOptionSchema: z.ZodType<RepositoryAnalysisOption> = z
+  .object({
+    id: identifierSchema,
+    versionId: identifierSchema,
+    label: nonSensitiveTextSchema,
+    lifecycle: z.enum(["draft", "active", "disabled"]),
+    eligibleForDraft: z.boolean(),
+    eligibleForActivation: z.boolean(),
+  })
+  .strict();
+
+const repositoryAnalysisCaseSourceOptionSchema: z.ZodType<RepositoryAnalysisCaseSourceOption> =
+  z
+    .object({
+      sourceId: identifierSchema,
+      sourceConfigurationVersionId: identifierSchema,
+      connectorRegistrationId: identifierSchema,
+      connectorConfigurationVersionId: identifierSchema,
+      label: nonSensitiveTextSchema,
+      lifecycle: z.enum(["draft", "active", "disabled"]),
+      eligibleForDraft: z.boolean(),
+      eligibleForActivation: z.boolean(),
+    })
+    .strict();
+
+const repositoryAnalysisSecretOptionSchema: z.ZodType<RepositoryAnalysisSecretOption> =
+  z
+    .object({
+      secretReferenceId: identifierSchema,
+      label: nonSensitiveTextSchema,
+      lifecycle: z.enum(["draft", "active", "disabled"]),
+      eligibleForDraft: z.boolean(),
+      eligibleForActivation: z.boolean(),
+    })
+    .strict();
+
+const repositoryAnalysisDeploymentOptionSchema: z.ZodType<RepositoryAnalysisDeploymentOption> =
+  z
+    .object({
+      id: identifierSchema,
+      label: nonSensitiveTextSchema,
+      eligibleForDraft: z.boolean(),
+      eligibleForActivation: z.boolean(),
+    })
+    .strict();
+
+export const repositoryAnalysisOptionsSchema: z.ZodType<RepositoryAnalysisOptions> =
+  z
+    .object({
+      codeRepositories: z.array(repositoryAnalysisOptionSchema).max(200),
+      repositoryExecutionPolicies: z
+        .array(repositoryAnalysisOptionSchema)
+        .max(200),
+      attachmentPolicies: z.array(repositoryAnalysisOptionSchema).max(200),
+      analysisProfiles: z.array(repositoryAnalysisOptionSchema).max(200),
+      retrievalProfiles: z.array(repositoryAnalysisOptionSchema).max(200),
+      promptProfiles: z.array(repositoryAnalysisOptionSchema).max(200),
+      publicationProfiles: z.array(repositoryAnalysisOptionSchema).max(200),
+      repositoryAgentBindings: z.array(repositoryAnalysisOptionSchema).max(200),
+      analysisBindings: z.array(repositoryAnalysisOptionSchema).max(200),
+      visionBindings: z.array(repositoryAnalysisOptionSchema).max(200),
+      analysisRecipes: z.array(repositoryAnalysisOptionSchema).max(200),
+      caseAnalysisTriggers: z.array(repositoryAnalysisOptionSchema).max(200),
+      caseSources: z.array(repositoryAnalysisCaseSourceOptionSchema).max(200),
+      webhookEndpoints: z.array(repositoryAnalysisOptionSchema).max(200),
+      checkoutSecretReferences: z
+        .array(repositoryAnalysisSecretOptionSchema)
+        .max(200),
+      mountedRepositories: z
+        .array(repositoryAnalysisDeploymentOptionSchema)
+        .max(200),
+      sandboxPolicies: z
+        .array(repositoryAnalysisDeploymentOptionSchema)
+        .max(200),
+      attachmentProcessorSecurityPolicies: z
+        .array(repositoryAnalysisDeploymentOptionSchema)
+        .max(200),
+    })
+    .strict();
+
+export type RepositoryAnalysisResource =
+  | "code-repositories"
+  | "repository-execution-policies"
+  | "attachment-policies"
+  | "analysis-recipes"
+  | "case-analysis-triggers"
+  | "case-analysis-schedules";
+
+/** The command is validated again at the API boundary; callers never add authority fields. */
+export type RepositoryAnalysisDraftInput = Readonly<Record<string, unknown>> & {
+  readonly resource: RepositoryAnalysisResource;
+  readonly displayName: string;
+};
+
+export type RepositoryAnalysisDraftRevisionInput =
+  RepositoryAnalysisDraftInput & {
+    readonly configurationId: string;
+    readonly expectedRevision: number;
+  };
+
+export interface RepositoryAnalysisConfiguration {
+  readonly id: string;
+  readonly versionId: string;
+  readonly lifecycle: "draft" | "active" | "disabled" | "superseded";
+  readonly revision: number;
+  readonly idempotency: "created" | "replayed";
+}
+
+export const repositoryAnalysisConfigurationSchema: z.ZodType<RepositoryAnalysisConfiguration> =
+  z
+    .object({
+      id: identifierSchema,
+      versionId: identifierSchema,
+      lifecycle: z.enum(["draft", "active", "disabled", "superseded"]),
+      revision: z.number().int().positive(),
+      idempotency: z.enum(["created", "replayed"]),
+    })
+    .strict();
+
+export interface RepositoryDraftTestPreview {
+  readonly confirmationId: string;
+  readonly confirmation: string;
+  readonly impact: string;
+  readonly expiresAt: string;
+}
+
+export const repositoryDraftTestPreviewSchema: z.ZodType<RepositoryDraftTestPreview> =
+  z
+    .object({
+      confirmationId: identifierSchema,
+      confirmation: nonSensitiveTextSchema,
+      impact: nonSensitiveTextSchema,
+      expiresAt: z.string().datetime({ offset: true }),
+    })
+    .strict();
+
+export type RepositoryDraftTestExecution =
+  | Readonly<{
+      readonly kind: "inProgress";
+      readonly id: string;
+      readonly outcome: "accepted";
+      readonly status: "inProgress";
+      readonly acceptedAt: string;
+    }>
+  | Readonly<{
+      readonly kind: "terminal";
+      readonly id: string;
+      readonly outcome: "completed" | "failed" | "outcome_unknown";
+      readonly completedAt: string;
+    }>;
+
+export const repositoryDraftTestExecutionSchema: z.ZodType<RepositoryDraftTestExecution> =
+  z.discriminatedUnion("kind", [
+    z
+      .object({
+        kind: z.literal("inProgress"),
+        id: identifierSchema,
+        outcome: z.literal("accepted"),
+        status: z.literal("inProgress"),
+        acceptedAt: z.string().datetime({ offset: true }),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("terminal"),
+        id: identifierSchema,
+        outcome: z.enum(["completed", "failed", "outcome_unknown"]),
+        completedAt: z.string().datetime({ offset: true }),
+      })
+      .strict(),
+  ]);
 
 export interface ConfigurationVersionSummary {
   readonly id: string;

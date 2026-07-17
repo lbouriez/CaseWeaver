@@ -1,18 +1,18 @@
 import { randomUUID } from "node:crypto";
-
-import type { ApplicationTransaction } from "@caseweaver/application";
-import { canonicalizeConfiguration } from "@caseweaver/administration";
 import type {
   ClaimedConfigurationChange,
-  ConfigurationDescriptorReference,
-  ConfigurationLifecycleStore,
-  ConfigurationChangeOutbox,
   ConfigurationChangeNotice,
+  ConfigurationChangeOutbox,
+  ConfigurationDescriptorReference,
+  ConfigurationDraftRevisionStore,
+  ConfigurationLifecycleStore,
   ImmutableConfigurationVersion,
   MutationIdentity,
   StoredMutationResult,
   VersionedConfiguration,
 } from "@caseweaver/administration";
+import { canonicalizeConfiguration } from "@caseweaver/administration";
+import type { ApplicationTransaction } from "@caseweaver/application";
 import type { Prisma } from "@prisma/client";
 
 import type { PostgresTransactionLookup } from "../index.js";
@@ -141,7 +141,7 @@ function validRevision(value: number): boolean {
  * outside that active transaction through the shared transaction lookup.
  */
 export class PostgresConfigurationLifecycleStore
-  implements ConfigurationLifecycleStore
+  implements ConfigurationLifecycleStore, ConfigurationDraftRevisionStore
 {
   public constructor(
     private readonly transactions: PostgresTransactionLookup,
@@ -425,6 +425,133 @@ export class PostgresConfigurationLifecycleStore
       currentVersionId: version.id,
     });
 
+    return Object.freeze({
+      configuration: asConfiguration({
+        ...configuration,
+        current_version_id: version.id,
+      }),
+      version: asVersion({
+        id: version.id,
+        workspace_id: version.workspaceId,
+        configuration_id: version.configurationId,
+        version: version.version,
+        settings: version.settings,
+        secret_references: version.secretReferences,
+        display_name: version.displayName,
+        descriptor_kind: version.descriptorKind,
+        descriptor_type: version.descriptorType,
+        descriptor_version: version.descriptorVersion,
+      }),
+    });
+  }
+
+  /**
+   * Creates an inert immutable successor after optimistic-concurrency claiming
+   * the aggregate. It deliberately does not copy write-only settings or secret
+   * references from the prior version: callers must supply their new candidate.
+   */
+  public async createDraftRevision(
+    input: Readonly<{
+      readonly workspaceId: string;
+      readonly resourceType: string;
+      readonly configurationId: string;
+      readonly expectedRevision: number;
+      readonly canonicalSettings: string;
+      readonly secretReferenceIds: readonly string[];
+      readonly descriptor?: ConfigurationDescriptorReference;
+      readonly displayName?: string;
+    }>,
+  ): Promise<
+    | Readonly<{
+        readonly configuration: VersionedConfiguration;
+        readonly version: ImmutableConfigurationVersion;
+      }>
+    | undefined
+  > {
+    if (!validRevision(input.expectedRevision)) {
+      throw new RangeError(
+        "Expected administration configuration revision is invalid.",
+      );
+    }
+    const database = this.transactions.get(this.transaction);
+    const claimed = await database.$queryRaw<readonly ConfigurationRow[]>`
+      UPDATE administration_configurations
+      SET revision = revision + 1,
+          lifecycle = 'draft',
+          updated_at = now()
+      WHERE workspace_id = ${input.workspaceId}
+        AND id = ${input.configurationId}
+        AND resource_type = ${input.resourceType}
+        AND revision = ${input.expectedRevision}
+      RETURNING id, workspace_id, resource_type, lifecycle, revision, current_version_id
+    `;
+    const configuration = claimed[0];
+    if (configuration === undefined) return undefined;
+
+    const previousVersionId = configuration.current_version_id;
+    const previous =
+      previousVersionId === null
+        ? undefined
+        : await this.loadVersion({
+            workspaceId: input.workspaceId,
+            resourceType: input.resourceType,
+            configurationId: input.configurationId,
+            versionId: previousVersionId,
+          });
+    const versionId = this.nextId();
+    const version = await database.administrationConfigurationVersion.create({
+      data: {
+        id: versionId,
+        workspaceId: input.workspaceId,
+        configurationId: input.configurationId,
+        version: configuration.revision,
+        settings: validatedJsonObject(input.canonicalSettings),
+        secretReferences: [...new Set(input.secretReferenceIds)].sort(),
+        ...(input.displayName === undefined &&
+        previous?.displayName === undefined
+          ? {}
+          : { displayName: input.displayName ?? previous?.displayName }),
+        ...(input.descriptor === undefined && previous?.descriptor === undefined
+          ? {}
+          : {
+              descriptorKind: (input.descriptor ?? previous?.descriptor)?.kind,
+              descriptorType: (input.descriptor ?? previous?.descriptor)?.type,
+              descriptorVersion: (input.descriptor ?? previous?.descriptor)
+                ?.version,
+            }),
+      },
+      select: {
+        id: true,
+        workspaceId: true,
+        configurationId: true,
+        version: true,
+        settings: true,
+        secretReferences: true,
+        displayName: true,
+        descriptorKind: true,
+        descriptorType: true,
+        descriptorVersion: true,
+      },
+    });
+    const current = await database.administrationConfiguration.updateMany({
+      where: {
+        workspaceId: input.workspaceId,
+        id: input.configurationId,
+        resourceType: input.resourceType,
+        revision: configuration.revision,
+      },
+      data: { currentVersionId: version.id },
+    });
+    if (current.count !== 1) {
+      throw new Error("Administration draft revision was not retained.");
+    }
+    await this.appendChange({
+      workspaceId: input.workspaceId,
+      resourceType: input.resourceType,
+      configurationId: input.configurationId,
+      ...(previousVersionId === null ? {} : { previousVersionId }),
+      currentVersionId: version.id,
+    });
     return Object.freeze({
       configuration: asConfiguration({
         ...configuration,

@@ -23,7 +23,13 @@ an opaque checkout-secret reference, but it is for the checkout broker alone: br
 case, prompt, model-tool, and audit contracts must not receive a checkout endpoint,
 filesystem location, or secret value.
 
-`RepositoryAgentResult.evidence` contains only validated pinned-tree paths and line
-ranges. Provider adapters must not return source excerpts, checkout metadata, or
-credential material there; worker composition is responsible for deciding whether even
-the model summary is safe to retain downstream.
+Provider-visible repository calls use `OpaqueRepositoryRuntime` with only repository ID
+and pinned commit. Server composition binds private checkout material before returning
+the executable runtime capability. Provider citations/findings are unverified and bounded;
+only the isolated runtime can turn them into deterministic evidence IDs and exact excerpt
+hashes.
+
+`RepositoryAgentResult.evidence` contains runtime-validated pinned-tree locations,
+deterministic IDs, and excerpt hashes. Its findings reference that verified evidence and
+are capped at 100. Provider adapters must not return source excerpts, checkout metadata,
+or credential material; worker composition governs retained model text downstream.

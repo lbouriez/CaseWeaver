@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   type ConfigurationLifecycleStore,
   canonicalizeConfiguration,
@@ -5,10 +6,12 @@ import {
   type KnowledgeSourceConfigurationProjection,
   type SourceScheduleConfigurationProjectionStore,
 } from "@caseweaver/administration";
-import { createHash } from "node:crypto";
 import type { ApplicationTransaction } from "@caseweaver/application";
 import type { Prisma } from "@prisma/client";
-
+import {
+  type ResolvedAttachmentPreparationPolicy,
+  resolveEnabledAttachmentPolicy,
+} from "../attachments/policy-resolver.js";
 import type { PostgresTransactionLookup } from "../index.js";
 import { PostgresConfigurationLifecycleStore } from "./configuration-store.js";
 
@@ -85,6 +88,10 @@ export class PostgresSourceScheduleConfigurationStore
     if (collection === null) {
       throw new Error("Knowledge collection is unavailable in this workspace.");
     }
+    const attachmentPolicy = await this.resolveAttachmentPolicy({
+      workspaceId: input.workspaceId,
+      source: input.source,
+    });
 
     await database.knowledgeSource.upsert({
       where: {
@@ -126,6 +133,7 @@ export class PostgresSourceScheduleConfigurationStore
       connectorConfigurationVersionId,
       source: input.source,
       collection,
+      attachmentPolicy,
     });
   }
 
@@ -338,6 +346,9 @@ export class PostgresSourceScheduleConfigurationStore
         readonly embeddingProfileVersion: string;
         readonly dimensions: number;
       }>;
+      readonly attachmentPolicy:
+        | ResolvedAttachmentPreparationPolicy
+        | undefined;
     }>,
   ): Promise<void> {
     const database = this.transactions.get(this.transaction);
@@ -360,6 +371,9 @@ export class PostgresSourceScheduleConfigurationStore
         chunkingProfileVersion: true,
         synchronizationPolicy: true,
         embeddingBatchSize: true,
+        attachmentStageMode: true,
+        attachmentPolicyConfigurationVersionId: true,
+        attachmentAccessPolicyHash: true,
       },
     });
     if (existing !== null) {
@@ -376,6 +390,11 @@ export class PostgresSourceScheduleConfigurationStore
         existing.chunkingProfileVersion !==
           input.source.chunkingProfileVersion ||
         existing.embeddingBatchSize !== input.source.embeddingBatchSize ||
+        existing.attachmentStageMode !== input.source.attachmentStage.mode ||
+        existing.attachmentPolicyConfigurationVersionId !==
+          (input.attachmentPolicy?.policyVersion ?? null) ||
+        existing.attachmentAccessPolicyHash !==
+          (input.attachmentPolicy?.accessPolicyHash ?? null) ||
         existing.synchronizationPolicy === null ||
         canonicalizeConfiguration(existing.synchronizationPolicy) !==
           canonicalizeConfiguration(input.source.synchronizationPolicy)
@@ -457,8 +476,76 @@ export class PostgresSourceScheduleConfigurationStore
         chunkingProfileVersion: input.source.chunkingProfileVersion,
         synchronizationPolicy: jsonObject(input.source.synchronizationPolicy),
         embeddingBatchSize: input.source.embeddingBatchSize,
+        attachmentStageMode: input.source.attachmentStage.mode,
+        ...(input.attachmentPolicy === undefined
+          ? {}
+          : {
+              attachmentPolicyConfigurationVersionId:
+                input.attachmentPolicy.policyVersion,
+              attachmentAccessPolicyHash:
+                input.attachmentPolicy.accessPolicyHash,
+            }),
       },
     });
+  }
+
+  private async resolveAttachmentPolicy(input: {
+    readonly workspaceId: string;
+    readonly source: KnowledgeSourceConfigurationProjection;
+  }): Promise<ResolvedAttachmentPreparationPolicy | undefined> {
+    if (input.source.attachmentStage.mode === "disabled") return undefined;
+    const database = this.transactions.get(this.transaction);
+    const stage = input.source.attachmentStage;
+    const [configuration, version, policy] = await Promise.all([
+      database.administrationConfiguration.findUnique({
+        where: {
+          workspaceId_id: {
+            workspaceId: input.workspaceId,
+            id: stage.attachmentPolicyId,
+          },
+        },
+        select: { resourceType: true, lifecycle: true },
+      }),
+      database.administrationConfigurationVersion.findUnique({
+        where: {
+          workspaceId_id: {
+            workspaceId: input.workspaceId,
+            id: stage.attachmentPolicyConfigurationVersionId,
+          },
+        },
+        select: { configurationId: true },
+      }),
+      database.attachmentPolicyVersion.findUnique({
+        where: {
+          workspaceId_configurationVersionId: {
+            workspaceId: input.workspaceId,
+            configurationVersionId:
+              stage.attachmentPolicyConfigurationVersionId,
+          },
+        },
+        select: {
+          id: true,
+          configurationVersionId: true,
+          processorSecurityPolicyVersionId: true,
+          visionBindingVersionId: true,
+          maximumAttachmentCount: true,
+          maximumAttachmentBytes: true,
+          maximumArchiveEntries: true,
+          maximumExpandedArchiveBytes: true,
+          maximumArchiveDepth: true,
+        },
+      }),
+    ]);
+    if (
+      configuration === null ||
+      configuration.resourceType !== "attachment-policies" ||
+      configuration.lifecycle !== "active" ||
+      version === null ||
+      version.configurationId !== stage.attachmentPolicyId
+    ) {
+      throw new Error("Source attachment policy is unavailable.");
+    }
+    return resolveEnabledAttachmentPolicy({ mode: stage.mode, policy });
   }
 }
 

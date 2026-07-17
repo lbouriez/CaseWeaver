@@ -18,6 +18,13 @@ substitutes a current/default runtime version.
 `runRepositoryAgent` method resolves exactly that pin and no other value; it cannot
 infer a repository from a binding, case, prompt, or model-tool input.
 
+The resolver returns an opaque bound runtime capability, not checkout material. Copilot
+can use only its three injected read-only tools. Its bounded JSON findings carry untrusted
+citations; the isolated runtime derives evidence IDs and excerpt hashes from the prepared
+tree before returning the provider result. The SDK must report observable input and output
+token usage, so incomplete metering fails closed rather than treating hard-budget work as
+free.
+
 The package also exports safe administration discovery metadata for API composition. It
 does not expose BYOK values, runtime clients, repository paths, or provider calls to the
 browser.

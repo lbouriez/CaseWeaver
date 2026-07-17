@@ -1,6 +1,6 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -56,6 +56,23 @@ class ScriptedRunner implements GitProcessRunner {
   }
 }
 
+class StreamingScriptedRunner extends ScriptedRunner {
+  public configurationPath: string | undefined;
+
+  public override async *stream(
+    input: GitProcessRequest,
+  ): AsyncIterable<Uint8Array> {
+    this.calls.push(input);
+    const configurationPath = input.environment.GIT_CONFIG_GLOBAL;
+    if (configurationPath === undefined) {
+      throw new Error("The stream needs its private Git configuration.");
+    }
+    this.configurationPath = configurationPath;
+    await access(configurationPath);
+    yield new Uint8Array([0, 255]);
+  }
+}
+
 function commandName(input: GitProcessRequest): string | undefined {
   const directoryIndex = input.arguments.indexOf("-C");
   return input.arguments[directoryIndex + 2];
@@ -63,6 +80,24 @@ function commandName(input: GitProcessRequest): string | undefined {
 
 function result(exitCode: number, stdout = ""): GitProcessResult {
   return { exitCode, stdout: output(stdout), stderr: new Uint8Array() };
+}
+
+async function readBytes(
+  content: AsyncIterable<Uint8Array>,
+): Promise<Uint8Array> {
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
+  for await (const chunk of content) {
+    chunks.push(chunk);
+    byteLength += chunk.byteLength;
+  }
+  const value = new Uint8Array(byteLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    value.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return value;
 }
 
 function remoteRequest() {
@@ -123,6 +158,37 @@ describe("GitCliRepository", () => {
     }
   });
 
+  it("fetches and verifies a configured full commit without treating it as a ref name", async () => {
+    const temporaryDirectory = await mkdtemp(
+      join(tmpdir(), "caseweaver-git-test-"),
+    );
+    const runner = new ScriptedRunner();
+    try {
+      const repository = new GitCliRepository({
+        runner,
+        remoteCacheDirectory: join(temporaryDirectory, "cache"),
+        temporaryDirectory,
+      });
+
+      await expect(
+        repository.inspect({
+          ...remoteRequest(),
+          ref: { kind: "commit", sha: commit },
+        }),
+      ).resolves.toMatchObject({ commitSha: commit });
+
+      const fetch = runner.calls.find(
+        (call) => commandName(call) === "fetch",
+      );
+      expect(fetch?.arguments).toContain(
+        `+${commit}:refs/caseweaver/commits/${commit}`,
+      );
+      expect(fetch?.arguments).not.toContain(`refs/heads/${commit}`);
+    } finally {
+      await rm(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
   it("reads the exact discovered commit rather than resolving the branch again", async () => {
     const temporaryDirectory = await mkdtemp(
       join(tmpdir(), "caseweaver-git-test-"),
@@ -151,6 +217,67 @@ describe("GitCliRepository", () => {
       const show = runner.calls.find((call) => commandName(call) === "show");
       expect(show?.arguments).toContain(`${commit}:docs/pinned.md`);
       expect(show?.arguments).not.toContain("refs/heads/main");
+    } finally {
+      await rm(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("opens a binary stream from the exact verified commit without decoding it as text", async () => {
+    const temporaryDirectory = await mkdtemp(
+      join(tmpdir(), "caseweaver-git-test-"),
+    );
+    const runner = new ScriptedRunner();
+    try {
+      const repository = new GitCliRepository({
+        runner,
+        remoteCacheDirectory: join(temporaryDirectory, "cache"),
+        temporaryDirectory,
+      });
+
+      const opened = await repository.readBinary({
+        ...remoteRequest(),
+        path: "docs/pinned.md",
+        commitSha: commit,
+      });
+
+      expect(opened.path).toBe("docs/pinned.md");
+      expect(opened.commitSha).toBe(commit);
+      await expect(readBytes(opened.content)).resolves.toEqual(
+        output("# Pinned document\n"),
+      );
+      const show = runner.calls.find((call) => commandName(call) === "show");
+      expect(show?.arguments).toContain(`${commit}:docs/pinned.md`);
+      expect(show?.arguments).not.toContain("refs/heads/main");
+    } finally {
+      await rm(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("retains the private session for the lifetime of a streamed binary read then removes it", async () => {
+    const temporaryDirectory = await mkdtemp(
+      join(tmpdir(), "caseweaver-git-test-"),
+    );
+    const runner = new StreamingScriptedRunner();
+    try {
+      const repository = new GitCliRepository({
+        runner,
+        remoteCacheDirectory: join(temporaryDirectory, "cache"),
+        temporaryDirectory,
+      });
+      const opened = await repository.readBinary({
+        ...remoteRequest(),
+        path: "docs/pinned.md",
+        commitSha: commit,
+      });
+
+      await expect(readBytes(opened.content)).resolves.toEqual(
+        new Uint8Array([0, 255]),
+      );
+      const configurationPath = runner.configurationPath;
+      if (configurationPath === undefined) {
+        throw new Error("The streaming runner was not called.");
+      }
+      await expect(access(configurationPath)).rejects.toBeDefined();
     } finally {
       await rm(temporaryDirectory, { recursive: true, force: true });
     }

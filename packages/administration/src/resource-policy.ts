@@ -107,6 +107,36 @@ const resourcePolicies: Readonly<
     readAction: "admin.analysisProfile.list",
     sensitiveRead: false,
   },
+  "analysis-recipes": {
+    permission: "configuration.read",
+    readAction: "admin.analysisRecipe.list",
+    sensitiveRead: false,
+  },
+  "code-repositories": {
+    permission: "configuration.read",
+    readAction: "admin.codeRepository.list",
+    sensitiveRead: true,
+  },
+  "repository-execution-policies": {
+    permission: "configuration.read",
+    readAction: "admin.repositoryExecutionPolicy.list",
+    sensitiveRead: false,
+  },
+  "attachment-policies": {
+    permission: "configuration.read",
+    readAction: "admin.attachmentPolicy.list",
+    sensitiveRead: false,
+  },
+  "case-analysis-triggers": {
+    permission: "configuration.read",
+    readAction: "admin.caseAnalysisTrigger.list",
+    sensitiveRead: false,
+  },
+  "case-analysis-schedules": {
+    permission: "configuration.read",
+    readAction: "admin.caseAnalysisSchedule.list",
+    sensitiveRead: false,
+  },
   analyses: {
     permission: "analysis.read",
     readAction: "admin.analysis.list",
@@ -206,6 +236,71 @@ const actionPolicies: Readonly<
     permission: "configuration.manage",
     actionCode: "admin.provider.disable",
     target: "ai-provider-instances",
+  },
+  "repository.test": {
+    permission: "configuration.manage",
+    actionCode: "admin.codeRepository.test",
+    target: "code-repositories",
+  },
+  "repository.activate": {
+    permission: "configuration.manage",
+    actionCode: "admin.codeRepository.activate",
+    target: "code-repositories",
+  },
+  "repository.disable": {
+    permission: "configuration.manage",
+    actionCode: "admin.codeRepository.disable",
+    target: "code-repositories",
+  },
+  "repository-execution-policy.activate": {
+    permission: "configuration.manage",
+    actionCode: "admin.repositoryExecutionPolicy.activate",
+    target: "repository-execution-policies",
+  },
+  "repository-execution-policy.disable": {
+    permission: "configuration.manage",
+    actionCode: "admin.repositoryExecutionPolicy.disable",
+    target: "repository-execution-policies",
+  },
+  "attachment-policy.activate": {
+    permission: "configuration.manage",
+    actionCode: "admin.attachmentPolicy.activate",
+    target: "attachment-policies",
+  },
+  "attachment-policy.disable": {
+    permission: "configuration.manage",
+    actionCode: "admin.attachmentPolicy.disable",
+    target: "attachment-policies",
+  },
+  "analysis-recipe.activate": {
+    permission: "configuration.manage",
+    actionCode: "admin.analysisRecipe.activate",
+    target: "analysis-recipes",
+  },
+  "analysis-recipe.disable": {
+    permission: "configuration.manage",
+    actionCode: "admin.analysisRecipe.disable",
+    target: "analysis-recipes",
+  },
+  "case-analysis-trigger.activate": {
+    permission: "configuration.manage",
+    actionCode: "admin.caseAnalysisTrigger.activate",
+    target: "case-analysis-triggers",
+  },
+  "case-analysis-trigger.disable": {
+    permission: "configuration.manage",
+    actionCode: "admin.caseAnalysisTrigger.disable",
+    target: "case-analysis-triggers",
+  },
+  "case-analysis-schedule.activate": {
+    permission: "configuration.manage",
+    actionCode: "admin.caseAnalysisSchedule.activate",
+    target: "case-analysis-schedules",
+  },
+  "case-analysis-schedule.disable": {
+    permission: "configuration.manage",
+    actionCode: "admin.caseAnalysisSchedule.disable",
+    target: "case-analysis-schedules",
   },
   "source.synchronize": {
     permission: "connector.manage",

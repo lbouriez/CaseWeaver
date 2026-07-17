@@ -1,6 +1,8 @@
 import {
   CaseAnalysisScheduler,
   type CaseAnalysisScheduleStore,
+  CaseDiscoveryScheduler,
+  type CaseDiscoveryScheduleStore,
   KnowledgeScheduler,
   type KnowledgeScheduleStore,
   type SchedulerClock,
@@ -44,6 +46,25 @@ export function createCaseAnalysisSchedulerRuntime(
   dependencies: CaseAnalysisSchedulerRuntimeDependencies,
 ): SchedulerRuntime {
   const scheduler = new CaseAnalysisScheduler(dependencies);
+  return Object.freeze({
+    runOnce: (limit?: number) => scheduler.runOnce(limit),
+  });
+}
+
+export interface CaseDiscoverySchedulerRuntimeDependencies {
+  readonly store: CaseDiscoveryScheduleStore;
+  readonly clock: SchedulerClock;
+  readonly leaseMs: number;
+}
+
+/**
+ * PBI-020 polling schedules only enqueue immutable case-discovery work. The
+ * case source, attachment pipeline, and analysis execution remain worker-only.
+ */
+export function createCaseDiscoverySchedulerRuntime(
+  dependencies: CaseDiscoverySchedulerRuntimeDependencies,
+): SchedulerRuntime {
+  const scheduler = new CaseDiscoveryScheduler(dependencies);
   return Object.freeze({
     runOnce: (limit?: number) => scheduler.runOnce(limit),
   });

@@ -634,6 +634,29 @@ export class PostgresKnowledgeIngestionStore
         mutation.observedAt,
       ],
     );
+    if (mutation.attachmentPreparationAttemptId !== undefined) {
+      const pinned = await database.query(
+        `INSERT INTO knowledge_revision_attachment_preparation_attempts (
+           workspace_id, knowledge_revision_id, attachment_preparation_attempt_id
+         )
+         SELECT $1, $2, attempt.id
+         FROM attachment_preparation_attempts AS attempt
+         WHERE attempt.workspace_id = $1
+           AND attempt.id = $3
+           AND attempt.state = 'completed'
+         RETURNING knowledge_revision_id`,
+        [
+          workspaceId,
+          mutation.revisionId,
+          mutation.attachmentPreparationAttemptId,
+        ],
+      );
+      if (pinned.rows.length !== 1) {
+        throw new Error(
+          "Knowledge attachment preparation attempt is unavailable.",
+        );
+      }
+    }
     for (const chunk of mutation.chunks) {
       const inserted = await database.query(
         `INSERT INTO knowledge_chunks (

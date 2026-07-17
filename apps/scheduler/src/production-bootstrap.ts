@@ -1,9 +1,11 @@
 import {
   PostgresCaseAnalysisScheduleStore,
+  PostgresCaseDiscoveryScheduleStore,
   PostgresKnowledgeScheduleStore,
 } from "@caseweaver/postgres";
 import type {
   CaseAnalysisScheduleStore,
+  CaseDiscoveryScheduleStore,
   KnowledgeScheduleStore,
   SchedulerClock,
 } from "@caseweaver/scheduling";
@@ -16,6 +18,7 @@ import {
 } from "./process.js";
 import {
   createCaseAnalysisSchedulerRuntime,
+  createCaseDiscoverySchedulerRuntime,
   createSchedulerRuntime,
 } from "./runtime.js";
 
@@ -33,6 +36,9 @@ export interface SchedulerRuntimeBootstrapDependencies {
   readonly createCaseAnalysisScheduleStore: (
     pool: Pool,
   ) => CaseAnalysisScheduleStore;
+  readonly createCaseDiscoveryScheduleStore: (
+    pool: Pool,
+  ) => CaseDiscoveryScheduleStore;
   readonly clock: SchedulerClock;
   readonly createProcess: (
     dependencies: SchedulerProcessDependencies,
@@ -47,6 +53,8 @@ const productionDependencies: SchedulerRuntimeBootstrapDependencies =
       new PostgresKnowledgeScheduleStore(pool),
     createCaseAnalysisScheduleStore: (pool: Pool) =>
       new PostgresCaseAnalysisScheduleStore(pool),
+    createCaseDiscoveryScheduleStore: (pool: Pool) =>
+      new PostgresCaseDiscoveryScheduleStore(pool),
     clock: Object.freeze({ now: () => new Date().toISOString() }),
     createProcess: createSchedulerProcess,
   });
@@ -121,6 +129,11 @@ export async function createSchedulerRuntimeFromEnvironment(
       }),
       createCaseAnalysisSchedulerRuntime({
         store: dependencies.createCaseAnalysisScheduleStore(pool),
+        clock: dependencies.clock,
+        leaseMs: configuration.leaseMs,
+      }),
+      createCaseDiscoverySchedulerRuntime({
+        store: dependencies.createCaseDiscoveryScheduleStore(pool),
         clock: dependencies.clock,
         leaseMs: configuration.leaseMs,
       }),

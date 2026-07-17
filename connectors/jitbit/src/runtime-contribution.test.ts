@@ -23,7 +23,7 @@ function privateConfiguration(
     descriptor: {
       kind: "connector" as const,
       type: "jitbit",
-      version: "2",
+      version: "4",
       ...(descriptor as Record<string, unknown> | undefined),
     },
     settings: {
@@ -65,12 +65,13 @@ describe("Jitbit runtime contribution", () => {
     expect(contribution.descriptor).toEqual({
       kind: "connector",
       type: "jitbit",
-      version: "2",
+      version: "4",
     });
     expect(ports).toEqual(
       expect.objectContaining({
         knowledgeSource: expect.anything(),
         caseSource: expect.anything(),
+        attachmentSource: expect.anything(),
         analysisDestination: expect.anything(),
       }),
     );
@@ -136,11 +137,19 @@ describe("Jitbit runtime contribution", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it("supports the retained revision-one timeout shape but rejects it for revision two", async () => {
+  it("retains descriptor versions one, two, and three while new construction uses version four", async () => {
     const secrets = new InMemoryConnectorSecretResolver({ [locator]: token });
-    const [legacy, current] = createJitbitRuntimeContributions({});
-    if (legacy === undefined || current === undefined) {
-      throw new Error("Both Jitbit descriptor contributions are required.");
+    const [legacy, versionTwo, versionThree, current] =
+      createJitbitRuntimeContributions({});
+    if (
+      legacy === undefined ||
+      versionTwo === undefined ||
+      versionThree === undefined ||
+      current === undefined
+    ) {
+      throw new Error(
+        "All retained Jitbit descriptor contributions are required.",
+      );
     }
 
     await expect(
@@ -153,10 +162,23 @@ describe("Jitbit runtime contribution", () => {
       }),
     ).resolves.toBeDefined();
     await expect(
-      current.create({
+      versionTwo.create({
+        configuration: privateConfiguration({ descriptor: { version: "2" } }),
+        secrets,
+      }),
+    ).resolves.toBeDefined();
+    await expect(
+      versionTwo.create({
         configuration: privateConfiguration({ settings: { timeoutMs: 1_500 } }),
         secrets,
       }),
     ).rejects.toThrow("Jitbit runtime is unavailable");
+    await expect(
+      versionThree.create({
+        configuration: privateConfiguration({ descriptor: { version: "3" } }),
+        secrets,
+      }),
+    ).resolves.toBeDefined();
+    expect(current.descriptor.version).toBe("4");
   });
 });

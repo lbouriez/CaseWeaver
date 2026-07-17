@@ -10,7 +10,10 @@ import {
   AttachmentError,
 } from "@caseweaver/attachments";
 
+export * from "./attachment-processor-protocol.js";
+export * from "./attachment-processor-service.js";
 export * from "./derivative-evidence-reader.js";
+export * from "./unix-socket-executor.js";
 
 export interface IsolatedAttachmentExecutor {
   readonly attestation: AttachmentRuntimeAttestation;
@@ -25,8 +28,14 @@ export interface AttachmentOutputCleaner {
 }
 
 function assertQuotas(request: AttachmentRuntimeRequest): void {
-  const values = Object.values(request.quotas);
-  if (values.some((value) => !Number.isSafeInteger(value) || value < 1)) {
+  const entries = Object.entries(request.quotas);
+  if (
+    entries.some(
+      ([key, value]) =>
+        !Number.isSafeInteger(value) ||
+        value < (key === "maximumArchiveDepth" ? 0 : 1),
+    )
+  ) {
     throw new RangeError(
       "Attachment runtime quotas must be positive integers.",
     );

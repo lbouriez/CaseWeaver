@@ -1,5 +1,6 @@
 import type {
   CaseAnalysisScheduleStore,
+  CaseDiscoveryScheduleStore,
   KnowledgeScheduleStore,
   SchedulerRunResult,
 } from "@caseweaver/scheduling";
@@ -23,7 +24,7 @@ const result: SchedulerRunResult = Object.freeze({
 });
 
 describe("scheduler production bootstrap", () => {
-  it("mounts knowledge and exact-pinned case-analysis producers on one owned pool", async () => {
+  it("mounts knowledge, trigger, and target-free discovery producers on one owned pool", async () => {
     const pool = { end: vi.fn(async () => undefined) } as unknown as Pool;
     const knowledgeStore = {
       findDue: vi.fn(async () => []),
@@ -31,6 +32,9 @@ describe("scheduler production bootstrap", () => {
     const analysisStore = {
       findDue: vi.fn(async () => []),
     } as unknown as CaseAnalysisScheduleStore;
+    const discoveryStore = {
+      findDue: vi.fn(async () => []),
+    } as unknown as CaseDiscoveryScheduleStore;
     const start = vi.fn(async () => undefined);
     const stop = vi.fn(async () => undefined);
     let processDependencies: SchedulerProcessDependencies | undefined;
@@ -50,6 +54,7 @@ describe("scheduler production bootstrap", () => {
       createPool: vi.fn(() => pool),
       createKnowledgeScheduleStore: vi.fn(() => knowledgeStore),
       createCaseAnalysisScheduleStore: vi.fn(() => analysisStore),
+      createCaseDiscoveryScheduleStore: vi.fn(() => discoveryStore),
       clock: { now: () => "2026-07-15T12:00:00.000Z" },
       createProcess: vi.fn((input) => {
         processDependencies = input;
@@ -74,13 +79,20 @@ describe("scheduler production bootstrap", () => {
     expect(dependencies.createCaseAnalysisScheduleStore).toHaveBeenCalledWith(
       pool,
     );
-    expect(processDependencies?.runtimes).toHaveLength(2);
-    await expect(runtime.runOnce()).resolves.toEqual([result, result]);
+    expect(dependencies.createCaseDiscoveryScheduleStore).toHaveBeenCalledWith(
+      pool,
+    );
+    expect(processDependencies?.runtimes).toHaveLength(3);
+    await expect(runtime.runOnce()).resolves.toEqual([result, result, result]);
     expect(knowledgeStore.findDue).toHaveBeenCalledWith({
       now: "2026-07-15T12:00:00.000Z",
       limit: 25,
     });
     expect(analysisStore.findDue).toHaveBeenCalledWith({
+      now: "2026-07-15T12:00:00.000Z",
+      limit: 25,
+    });
+    expect(discoveryStore.findDue).toHaveBeenCalledWith({
       now: "2026-07-15T12:00:00.000Z",
       limit: 25,
     });

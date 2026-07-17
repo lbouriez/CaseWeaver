@@ -1,53 +1,77 @@
 import type {
+  ConfiguredRepository,
+  OpaqueRepositoryRuntime,
   RepositoryAgentRuntime,
+  RepositoryAgentRuntimeBinder,
   RepositoryAgentRuntimeContext,
   RepositoryAgentRuntimeRequest,
+  RepositoryAgentUnverifiedResult,
 } from "@caseweaver/ai-sdk";
+
 import {
-  RepositoryRuntimeError,
   type AdministratorRepositoryConfiguration,
   type IsolatedRepositorySandbox,
-  type RepositoryAgentOutput,
+  type PreparedRepositoryTreeReader,
   type RepositoryCheckoutBroker,
+  RepositoryRuntimeError,
   type RepositorySandboxAttestation,
   type RepositorySandboxLimits,
   type RepositorySandboxSession,
   type SanitizedPinnedTree,
 } from "./contracts.js";
+import { verifyRepositoryAgentOutput } from "./tree-verifier.js";
 
 export type {
   ConfiguredRepository,
+  OpaqueRepositoryRuntime,
+  RepositoryAgentCitationLocation,
   RepositoryAgentEvidence,
+  RepositoryAgentFinding,
   RepositoryAgentRuntime,
+  RepositoryAgentRuntimeBinder,
   RepositoryAgentRuntimeContext,
   RepositoryAgentRuntimeRequest,
   RepositoryAgentRuntimeResult,
   RepositoryAgentSandboxLimits,
   RepositoryAgentToolGateway,
+  RepositoryAgentUnverifiedFinding,
+  RepositoryAgentUnverifiedResult,
   RepositoryReadOnlyTool,
 } from "@caseweaver/ai-sdk";
 export {
-  RepositoryRuntimeError,
   type AdministratorRepositoryConfiguration,
   type IsolatedRepositorySandbox,
   type PinnedRepositoryFile,
+  type PreparedRepositoryTreeReader,
+  type PreparedRepositoryTreeRegistrar,
   type RepositoryAgentOutput,
   type RepositoryCheckoutBroker,
+  type RepositoryCheckoutMaterial,
   type RepositoryEvidence,
+  RepositoryRuntimeError,
   type RepositorySandboxAttestation,
   type RepositorySandboxLimits,
   type RepositorySandboxSession,
   type RepositoryToolName,
   type SanitizedPinnedTree,
 } from "./contracts.js";
+export {
+  createPrivatePreparedRepositoryTree,
+  type PrivatePreparedRepositoryTree,
+  publishPreparedRepositoryTree,
+} from "./prepared-tree.js";
+export { isSafeRepositoryTextFile } from "./tree-sanitizer.js";
+export { verifyRepositoryAgentOutput } from "./tree-verifier.js";
 
 const forbiddenTreeProperties = new Set([
   "checkoutSecretReference",
   "credential",
   "credentials",
+  "directory",
   "remote",
   "remoteUrl",
   "secret",
+  "url",
 ]);
 
 function hasControlCharacter(value: string): boolean {
@@ -66,7 +90,7 @@ function assertSafeString(value: string, label: string): void {
   }
 }
 
-function assertAdministratorConfiguration(
+function assertCheckoutMaterial(
   configuration: AdministratorRepositoryConfiguration,
 ): void {
   assertSafeString(configuration.repositoryId, "Repository identifier");
@@ -75,6 +99,16 @@ function assertAdministratorConfiguration(
     "Checkout secret reference",
   );
   if (!/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/u.test(configuration.pinnedCommit)) {
+    throw new RepositoryRuntimeError(
+      "repository.runtimeConfiguration",
+      "Repository commit must be a pinned SHA-1 or SHA-256 identifier.",
+    );
+  }
+}
+
+function assertRuntimeIdentity(runtime: OpaqueRepositoryRuntime): void {
+  assertSafeString(runtime.repositoryId, "Repository identifier");
+  if (!/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/u.test(runtime.pinnedCommit)) {
     throw new RepositoryRuntimeError(
       "repository.runtimeConfiguration",
       "Repository commit must be a pinned SHA-1 or SHA-256 identifier.",
@@ -104,7 +138,9 @@ function assertSafePath(path: string): void {
     /^[a-z]:/iu.test(path) ||
     path
       .split(/[\\/]/u)
-      .some((segment) => segment === "" || segment === "..") ||
+      .some(
+        (segment) => segment === "" || segment === "." || segment === "..",
+      ) ||
     hasControlCharacter(path)
   ) {
     throw new RepositoryRuntimeError(
@@ -116,7 +152,7 @@ function assertSafePath(path: string): void {
 
 function assertSanitizedTree(
   tree: SanitizedPinnedTree,
-  configuration: AdministratorRepositoryConfiguration,
+  configuration: ConfiguredRepository,
 ): void {
   for (const property of Object.keys(tree)) {
     if (forbiddenTreeProperties.has(property)) {
@@ -127,9 +163,12 @@ function assertSanitizedTree(
     }
   }
   if (
+    typeof tree.treeId !== "string" ||
     tree.treeId.length === 0 ||
+    tree.treeId.length > 200 ||
+    hasControlCharacter(tree.treeId) ||
     tree.repositoryId !== configuration.repositoryId ||
-    tree.pinnedCommit !== configuration.pinnedCommit
+    tree.pinnedCommit.toLowerCase() !== configuration.pinnedCommit.toLowerCase()
   ) {
     throw new RepositoryRuntimeError(
       "repository.runtimeIsolation",
@@ -160,7 +199,10 @@ function assertAttestation(attestation: RepositorySandboxAttestation): void {
     !attestation.readOnlyFilesystem ||
     !attestation.disposableFilesystem ||
     !attestation.toolAllowlistEnforced ||
-    !attestation.quotasEnforced
+    !attestation.quotasEnforced ||
+    !attestation.unprivilegedUser ||
+    !attestation.immutableImage ||
+    !attestation.readOnlyRepositoryMount
   ) {
     throw new RepositoryRuntimeError(
       "repository.runtimeIsolation",
@@ -169,75 +211,41 @@ function assertAttestation(attestation: RepositorySandboxAttestation): void {
   }
 }
 
-function assertOutput(
-  output: RepositoryAgentOutput,
-  tree: SanitizedPinnedTree,
-  maximumOutputBytes: number,
-): void {
-  if (
-    typeof output !== "object" ||
-    output === null ||
-    typeof output.summary !== "string" ||
-    !Array.isArray(output.evidence)
-  ) {
-    throw new RepositoryRuntimeError(
-      "repository.runtimeOutput",
-      "Repository agent output is invalid.",
-    );
-  }
-  if (
-    output.summary.length === 0 ||
-    new TextEncoder().encode(JSON.stringify(output)).byteLength >
-      maximumOutputBytes
-  ) {
-    throw new RepositoryRuntimeError(
-      "repository.runtimeOutput",
-      "Repository agent output is invalid or exceeds its limit.",
-    );
-  }
-  const files = new Map(tree.files.map((file) => [file.path, file.lineCount]));
-  for (const reference of output.evidence) {
-    if (
-      typeof reference !== "object" ||
-      reference === null ||
-      typeof reference.path !== "string"
-    ) {
-      throw new RepositoryRuntimeError(
-        "repository.runtimeOutput",
-        "Repository agent returned invalid evidence.",
-      );
-    }
-    const lineCount = files.get(reference.path);
-    if (
-      lineCount === undefined ||
-      !Number.isSafeInteger(reference.startLine) ||
-      !Number.isSafeInteger(reference.endLine) ||
-      reference.startLine < 1 ||
-      reference.endLine < reference.startLine ||
-      reference.endLine > lineCount
-    ) {
-      throw new RepositoryRuntimeError(
-        "repository.runtimeOutput",
-        "Repository agent returned evidence outside the pinned tree.",
-      );
-    }
-  }
+function abortError(timedOut: boolean): RepositoryRuntimeError {
+  return new RepositoryRuntimeError(
+    timedOut ? "repository.runtimeTimeout" : "repository.runtimeIsolation",
+    timedOut
+      ? "Repository sandbox exceeded its time limit."
+      : "Repository sandbox was cancelled.",
+  );
 }
 
-export class AttestedRepositoryRuntime implements RepositoryAgentRuntime {
+class BoundAttestedRepositoryRuntime implements RepositoryAgentRuntime {
   public constructor(
+    private readonly checkout: ConfiguredRepository,
     private readonly checkoutBroker: RepositoryCheckoutBroker,
     private readonly sandbox: IsolatedRepositorySandbox,
+    private readonly reader: PreparedRepositoryTreeReader,
   ) {}
 
   public async run(
     request: RepositoryAgentRuntimeRequest,
     runner: (
       context: RepositoryAgentRuntimeContext,
-    ) => Promise<RepositoryAgentOutput>,
-  ): Promise<RepositoryAgentOutput> {
-    assertAdministratorConfiguration(request.repository);
+    ) => Promise<RepositoryAgentUnverifiedResult>,
+  ) {
+    assertRuntimeIdentity(request.runtime);
     assertLimits(request.limits);
+    if (
+      request.runtime.repositoryId !== this.checkout.repositoryId ||
+      request.runtime.pinnedCommit.toLowerCase() !==
+        this.checkout.pinnedCommit.toLowerCase()
+    ) {
+      throw new RepositoryRuntimeError(
+        "repository.runtimeConfiguration",
+        "Repository runtime identity does not match its bound checkout.",
+      );
+    }
     if (request.signal.aborted) throw request.signal.reason;
     if (request.allowedTools.length === 0) {
       throw new RepositoryRuntimeError(
@@ -247,18 +255,13 @@ export class AttestedRepositoryRuntime implements RepositoryAgentRuntime {
     }
 
     const tree = await this.checkoutBroker.checkout(
-      request.repository,
+      this.checkout,
       request.signal,
     );
     try {
-      assertSanitizedTree(tree, request.repository);
+      assertSanitizedTree(tree, this.checkout);
       assertAttestation(this.sandbox.attestation);
-      if (request.signal.aborted) {
-        throw new RepositoryRuntimeError(
-          "repository.runtimeIsolation",
-          "Repository sandbox was cancelled before it started.",
-        );
-      }
+      if (request.signal.aborted) throw abortError(false);
     } catch (error) {
       await this.sandbox.cleanup(tree.treeId);
       throw error;
@@ -272,8 +275,9 @@ export class AttestedRepositoryRuntime implements RepositoryAgentRuntime {
     const timer = setTimeout(() => {
       timedOut = true;
       controller.abort();
-      void session?.terminate();
+      void session?.terminate().catch(() => undefined);
     }, request.limits.timeoutMs);
+    let removeAbortListener: (() => void) | undefined;
     try {
       const openedSession = await this.sandbox.open({
         tree,
@@ -282,11 +286,24 @@ export class AttestedRepositoryRuntime implements RepositoryAgentRuntime {
         signal: controller.signal,
       });
       session = openedSession;
+      if (controller.signal.aborted) throw abortError(timedOut);
       let toolCalls = 0;
+      const aborted = new Promise<never>((_resolve, reject) => {
+        const rejectAborted = () => reject(abortError(timedOut));
+        controller.signal.addEventListener("abort", rejectAborted, {
+          once: true,
+        });
+        removeAbortListener = () =>
+          controller.signal.removeEventListener("abort", rejectAborted);
+        if (controller.signal.aborted) rejectAborted();
+      });
       const output = await Promise.race([
         runner({
-          repositoryId: tree.repositoryId,
-          pinnedCommit: tree.pinnedCommit,
+          runtime: Object.freeze({
+            repositoryId: tree.repositoryId,
+            pinnedCommit: tree.pinnedCommit,
+          }),
+          signal: controller.signal,
           tools: {
             execute: async (tool, input) => {
               if (!request.allowedTools.includes(tool)) {
@@ -306,43 +323,48 @@ export class AttestedRepositoryRuntime implements RepositoryAgentRuntime {
             },
           },
         }),
-        new Promise<never>((_resolve, reject) => {
-          const abort = () =>
-            reject(
-              new RepositoryRuntimeError(
-                timedOut
-                  ? "repository.runtimeTimeout"
-                  : "repository.runtimeIsolation",
-                timedOut
-                  ? "Repository sandbox exceeded its time limit."
-                  : "Repository sandbox was cancelled.",
-              ),
-            );
-          if (controller.signal.aborted) {
-            abort();
-          } else {
-            controller.signal.addEventListener("abort", abort, { once: true });
-          }
-        }),
+        aborted,
       ]);
-      if (timedOut) {
-        throw new RepositoryRuntimeError(
-          "repository.runtimeTimeout",
-          "Repository sandbox exceeded its time limit.",
-        );
-      }
-      if (request.signal.aborted) throw request.signal.reason;
-      assertOutput(output, tree, request.limits.maximumOutputBytes);
-      return Object.freeze({
-        summary: output.summary,
-        evidence: Object.freeze([...output.evidence]),
+      if (controller.signal.aborted) throw abortError(timedOut);
+      return await verifyRepositoryAgentOutput({
+        output,
+        tree,
+        reader: this.reader,
+        signal: controller.signal,
+        maximumOutputBytes: request.limits.maximumOutputBytes,
       });
     } finally {
+      removeAbortListener?.();
       clearTimeout(timer);
       request.signal.removeEventListener("abort", cancel);
-      await session?.terminate();
+      await session?.terminate().catch(() => undefined);
       await this.sandbox.cleanup(tree.treeId);
     }
+  }
+}
+
+/**
+ * Binds private checkout material into a capability before a provider is
+ * resolved. The returned runtime exposes only the opaque identity on `run`.
+ */
+export class AttestedRepositoryRuntime implements RepositoryAgentRuntimeBinder {
+  public constructor(
+    private readonly checkoutBroker: RepositoryCheckoutBroker,
+    private readonly sandbox: IsolatedRepositorySandbox,
+    private readonly reader: PreparedRepositoryTreeReader,
+  ) {}
+
+  public bind(checkout: ConfiguredRepository): RepositoryAgentRuntime {
+    assertCheckoutMaterial(checkout);
+    return new BoundAttestedRepositoryRuntime(
+      Object.freeze({
+        ...checkout,
+        pinnedCommit: checkout.pinnedCommit.toLowerCase(),
+      }),
+      this.checkoutBroker,
+      this.sandbox,
+      this.reader,
+    );
   }
 }
 

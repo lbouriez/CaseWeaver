@@ -9,6 +9,7 @@ import type {
 import type { Pool, QueryResultRow } from "pg";
 
 export * from "./case-analysis.js";
+export * from "./case-discovery.js";
 
 interface ScheduleRow extends QueryResultRow {
   readonly id: string;

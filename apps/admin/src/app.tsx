@@ -46,6 +46,7 @@ import {
   AdminResourceShow,
 } from "./pages/resource-pages.js";
 import { SectionPage } from "./pages/section-page.js";
+import { RepositoryAnalysisWorkflows } from "./pages/repository-analysis-workflows.js";
 import type { RuntimeConfig } from "./runtime-config.js";
 import { operatorTheme } from "./theme.js";
 
@@ -705,6 +706,10 @@ function AdminShell({
             />
           }
           path="/knowledge-analysis"
+        />
+        <Route
+          element={<RepositoryAnalysisWorkflows section="repository" />}
+          path="/repository-analysis"
         />
         <Route
           element={

@@ -42,6 +42,29 @@ describe("parseApiConfig", () => {
     });
   });
 
+  it("treats empty optional Compose placeholders as absent without accepting a partial OIDC setup", () => {
+    expect(
+      parseApiConfig({
+        ...validEnvironment,
+        OIDC_ISSUER: "",
+        OIDC_CLIENT_ID: "",
+        OIDC_CLIENT_SECRET: "",
+        OIDC_CALLBACK_URL: "",
+        OIDC_EPHEMERAL_ENCRYPTION_KEY: "",
+        OIDC_EPHEMERAL_KEY_ID: "",
+        ADMIN_BOOTSTRAP_OIDC_SUBJECT: "",
+        ADMIN_BOOTSTRAP_DISPLAY_NAME: "",
+      }),
+    ).toMatchObject({ localAuthentication: { login: "admin" } });
+    expect(() =>
+      parseApiConfig({
+        ...validEnvironment,
+        OIDC_ISSUER: "",
+        OIDC_CLIENT_ID: "caseweaver-console",
+      }),
+    ).toThrow(ApiConfigurationError);
+  });
+
   it.each([
     ["DATABASE_URL", undefined],
     ["DATABASE_URL", "not-a-url"],
@@ -251,6 +274,9 @@ describe("parseApiConfig", () => {
 });
 
 describe("API process configuration", () => {
+  // Starting the TypeScript entrypoint imports the complete composition root.
+  // On resource-constrained CI runners that is legitimately slower than Vitest's
+  // default unit-test timeout; the assertion is still wholly synchronous.
   it("fails before serving traffic when its environment is invalid", () => {
     const result = spawnSync(
       process.execPath,
@@ -275,5 +301,5 @@ describe("API process configuration", () => {
     expect(result.stdout).toBe("");
     expect(result.stderr).toBe("API startup failed.\n");
     expect(result.stderr).not.toContain("not-a-database-url");
-  });
+  }, 60_000);
 });

@@ -65,7 +65,7 @@ describe("CopilotSdkByokRuntimeClient", () => {
                     apiCallId: "request-1",
                     model: "byok-model",
                     content:
-                      '{"summary":"Pinned source handles the failure.","evidence":[{"path":"src/service.ts","startLine":2,"endLine":3}]}',
+                      '{"summary":"Pinned source handles the failure.","findings":[{"summary":"Pinned source handles the failure.","citations":[{"path":"src/service.ts","startLine":2,"endLine":3}]}]}',
                   },
                 };
               },
@@ -103,7 +103,12 @@ describe("CopilotSdkByokRuntimeClient", () => {
       }),
     ).resolves.toMatchObject({
       summary: "Pinned source handles the failure.",
-      evidence: [{ path: "src/service.ts", startLine: 2, endLine: 3 }],
+      findings: [
+        {
+          summary: "Pinned source handles the failure.",
+          citations: [{ path: "src/service.ts", startLine: 2, endLine: 3 }],
+        },
+      ],
       metering: {
         mode: "observableTurns",
         turns: [{ turn: 1, usage: { inputTokens: 12, outputTokens: 4 } }],

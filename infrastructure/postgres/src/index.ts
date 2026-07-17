@@ -22,6 +22,7 @@ import type {
   AuthorizationGuard,
   BootstrapInstallation,
   BootstrapWorkspaceStore,
+  CaseDiscoveryStateStore,
   ClaimedOutboxEnvelope,
   ExecutionContext,
   KnowledgeSourceCommandStore,
@@ -85,6 +86,9 @@ import {
   PostgresAdministrationResourceReadStore,
 } from "./administration/resource-read-store.js";
 import { PostgresRuntimeConnectorConfigurationResolver } from "./administration/runtime-connector-configuration-resolver.js";
+import { PostgresRepositoryAnalysisOptionsStore } from "./administration/repository-analysis-options-store.js";
+import { PostgresRepositoryAnalysisTransitionStore } from "./administration/repository-analysis-transition-store.js";
+import { PostgresRepositoryDraftTestStore } from "./administration/repository-draft-test-store.js";
 import { PostgresWebhookEndpointRuntimeStore } from "./administration/webhook-endpoint-runtime-store.js";
 import { PostgresWorkspaceRoleAssignmentStore } from "./administration/workspace-role-assignment-store.js";
 import { PostgresAiBindingResolver } from "./ai/postgres-ai-binding-resolver.js";
@@ -99,12 +103,17 @@ import {
   PostgresPublicationIntentStore,
   PostgresVerifiedWebhookEventStore,
 } from "./publication/index.js";
+import { PostgresCaseDiscoveryStateStore } from "./triggers/case-discovery-state-store.js";
+import { PostgresRepositoryAnalysisExecutionInputStore } from "./triggers/repository-analysis-execution-input-store.js";
+import { PostgresRepositoryAnalysisRuntimeConfigurationResolver } from "./repository-runtime/repository-analysis-runtime-configuration-resolver.js";
+import { PostgresAttachmentPolicyResolver } from "./attachments/policy-resolver.js";
 
 export * from "./administration/platform-link-configuration-store.js";
 export * from "./administration/webhook-endpoint-configuration-store.js";
 export * from "./administration/webhook-endpoint-runtime-store.js";
 export * from "./administration/workspace-role-assignment-store.js";
 export * from "./retrieval/index.js";
+export * from "./attachments/policy-resolver.js";
 
 type PrismaTransaction = Prisma.TransactionClient;
 
@@ -783,6 +792,12 @@ export interface PostgresPersistence {
   readonly unitOfWork: UnitOfWork;
   readonly bootstrapWorkspaceStore: BootstrapWorkspaceStore;
   readonly analysisRequestStore: AnalysisRequestStore;
+  /** Private target-free PBI-020 schedule cursor/lease state for worker composition. */
+  readonly caseDiscoveryStateStore: CaseDiscoveryStateStore;
+  /** Fenced PBI-020 pre-analysis recipe input preparation state. */
+  readonly repositoryAnalysisExecutionInputStore: PostgresRepositoryAnalysisExecutionInputStore;
+  /** Exact PBI-020 trigger recipe attachment policy; never resolves a current pointer. */
+  readonly attachmentPolicyResolver: PostgresAttachmentPolicyResolver;
   readonly knowledgeSourceCommandStore: KnowledgeSourceCommandStore;
   readonly publicationIntentStore: PublicationIntentStore;
   readonly analysisExecutionStore: PostgresAnalysisExecutionStore;
@@ -823,6 +838,13 @@ export interface PostgresPersistence {
   readonly webhookEndpointRuntimeStore: PostgresWebhookEndpointRuntimeStore;
   /** Server-private immutable connector settings/locator lookup for runtime composition. */
   readonly runtimeConnectorConfigurationResolver: PostgresRuntimeConnectorConfigurationResolver;
+  /** Private exact-current-version material for repository-analysis transitions. */
+  readonly repositoryAnalysisTransitionStore: PostgresRepositoryAnalysisTransitionStore;
+  /** Safe option catalog and redacted durable draft-test state. */
+  readonly repositoryAnalysisOptionsStore: PostgresRepositoryAnalysisOptionsStore;
+  /** Private exact recipe/version checkout material for PBI-020 worker composition. */
+  readonly repositoryAnalysisRuntimeResolver: PostgresRepositoryAnalysisRuntimeConfigurationResolver;
+  readonly repositoryDraftTestStore: PostgresRepositoryDraftTestStore;
   /** Public-link values are safe but their development URL policy is deployment-owned. */
   platformLinkReadStore(
     policy: PlatformLinkConfigurationPolicy,
@@ -853,6 +875,10 @@ export function createPostgresPersistence(
     unitOfWork,
     bootstrapWorkspaceStore: new PostgresBootstrapStore(unitOfWork),
     analysisRequestStore: new PostgresAnalysisRequestStore(unitOfWork),
+    caseDiscoveryStateStore: new PostgresCaseDiscoveryStateStore(client),
+    repositoryAnalysisExecutionInputStore:
+      new PostgresRepositoryAnalysisExecutionInputStore(client),
+    attachmentPolicyResolver: new PostgresAttachmentPolicyResolver(client),
     knowledgeSourceCommandStore: new PostgresKnowledgeSourceCommandStore(
       unitOfWork,
     ),
@@ -904,6 +930,14 @@ export function createPostgresPersistence(
     ),
     runtimeConnectorConfigurationResolver:
       new PostgresRuntimeConnectorConfigurationResolver(client),
+    repositoryAnalysisTransitionStore:
+      new PostgresRepositoryAnalysisTransitionStore(client),
+    repositoryAnalysisOptionsStore: new PostgresRepositoryAnalysisOptionsStore(
+      client,
+    ),
+    repositoryAnalysisRuntimeResolver:
+      new PostgresRepositoryAnalysisRuntimeConfigurationResolver(client),
+    repositoryDraftTestStore: new PostgresRepositoryDraftTestStore(client),
     platformLinkReadStore: (policy: PlatformLinkConfigurationPolicy) =>
       new PostgresPlatformLinkConfigurationReadStore(client, policy),
     providerCapabilityTestStores: (
@@ -935,6 +969,11 @@ export * from "./administration/diagnostic-export-store.js";
 export * from "./administration/provider-capability-test-store.js";
 export * from "./administration/publication-profile-configuration-store.js";
 export * from "./administration/read-store.js";
+export * from "./administration/repository-analysis-configuration-store.js";
+export * from "./administration/repository-analysis-options-store.js";
+export * from "./administration/repository-analysis-transition-store.js";
+export * from "./administration/repository-analysis-resource-read-store.js";
+export * from "./administration/repository-draft-test-store.js";
 export * from "./administration/resource-read-store.js";
 export * from "./administration/runtime-connector-configuration-resolver.js";
 export * from "./administration/source-schedule-configuration-store.js";

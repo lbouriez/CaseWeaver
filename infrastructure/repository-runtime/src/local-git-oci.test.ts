@@ -1,5 +1,12 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -13,6 +20,8 @@ import {
 } from "./index.js";
 
 const execFileAsync = promisify(execFile);
+const sandboxImage =
+  "node:22.13.1-bookworm-slim@sha256:83fdfa2a4de32d7f8d79829ea259bd6a4821f8b2d123204ac467fbe3966450fc";
 
 async function git(
   directory: string,
@@ -44,11 +53,31 @@ async function createRepository(): Promise<{
     "export const answer = 42;\n",
   );
   await writeFile(join(directory, "empty.txt"), "");
+  await writeFile(join(directory, ".env"), "API_TOKEN=never-model-readable\n");
   await writeFile(join(directory, "binary.bin"), Buffer.from([0, 255, 1]));
   await git(directory, ["add", "."]);
   await git(directory, ["commit", "-m", "Initial source"]);
   const commit = (await git(directory, ["rev-parse", "HEAD"])).trim();
   return { directory, commit };
+}
+
+async function dockerImageAvailable(): Promise<boolean> {
+  try {
+    const version = await execFileAsync("docker", [
+      "version",
+      "--format",
+      "{{.Server.Os}}",
+    ]);
+    if (version.stdout.trim() !== "linux") return false;
+    try {
+      await execFileAsync("docker", ["image", "inspect", sandboxImage]);
+    } catch {
+      await execFileAsync("docker", ["pull", sandboxImage]);
+    }
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 describe("LocalGitPinnedRepositoryCheckoutBroker", () => {
@@ -91,6 +120,7 @@ describe("LocalGitPinnedRepositoryCheckoutBroker", () => {
       expect(tree).not.toHaveProperty("checkoutSecretReference");
       expect(tree).not.toHaveProperty("directory");
       expect(tree.files.map((file) => file.path)).not.toContain("binary.bin");
+      expect(tree.files.map((file) => file.path)).not.toContain(".env");
       expect(tree.files.map((file) => file.path)).not.toContain(
         "untracked-secret.txt",
       );
@@ -161,4 +191,75 @@ describe("DockerOciRepositorySandbox", () => {
       }),
     ).rejects.toMatchObject({ code: "repository.runtimeConfiguration" });
   });
+
+  it.runIf(process.platform === "linux")(
+    "allows Docker UID 65532 to list and read an atomically published prepared tree",
+    async (context) => {
+      if (!(await dockerImageAvailable())) {
+        context.skip(
+          "A local Linux Docker Engine and sandbox image are required.",
+        );
+        return;
+      }
+      const source = await createRepository();
+      const temporaryDirectory = await mkdtemp(
+        join(tmpdir(), "caseweaver-repository-tree-"),
+      );
+      const trees = new LocalPreparedRepositoryTreeStore();
+      const broker = new LocalGitPinnedRepositoryCheckoutBroker({
+        sources: [
+          { repositoryId: "support-service", directory: source.directory },
+        ],
+        treeStore: trees,
+        temporaryDirectory,
+      });
+      let treeId: string | undefined;
+      try {
+        const tree = await broker.checkout(
+          {
+            repositoryId: "support-service",
+            checkoutSecretReference: "vault:repository/support-service",
+            pinnedCommit: source.commit,
+          },
+          new AbortController().signal,
+        );
+        treeId = tree.treeId;
+        const prepared = trees.resolve(tree);
+        expect((await stat(prepared.cleanupDirectory)).mode & 0o777).toBe(
+          0o700,
+        );
+        expect((await stat(prepared.directory)).mode & 0o777).toBe(0o555);
+        expect((await stat(join(prepared.directory, "src"))).mode & 0o777).toBe(
+          0o555,
+        );
+        expect(
+          (await stat(join(prepared.directory, "src", "service.ts"))).mode &
+            0o777,
+        ).toBe(0o444);
+
+        const result = await execFileAsync("docker", [
+          "run",
+          "--rm",
+          "--network=none",
+          "--user=65532:65532",
+          `--mount=type=bind,src=${prepared.directory},dst=/workspace,readonly`,
+          sandboxImage,
+          "node",
+          "-e",
+          [
+            'const fs = require("node:fs");',
+            'const files = fs.readdirSync("/workspace/src");',
+            'const text = fs.readFileSync("/workspace/src/service.ts", "utf8");',
+            'if (!files.includes("service.ts") || !text.includes("answer = 42")) process.exit(1);',
+          ].join(" "),
+        ]);
+        expect(result.stderr).toBe("");
+      } finally {
+        if (treeId !== undefined) await trees.remove(treeId);
+        await rm(source.directory, { recursive: true, force: true });
+        await rm(temporaryDirectory, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
 });

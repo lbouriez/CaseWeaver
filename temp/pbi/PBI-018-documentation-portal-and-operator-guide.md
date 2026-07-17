@@ -180,7 +180,7 @@ link to the deeper specification where useful.
 | Welcome | What CaseWeaver is and is not; support-case investigation lifecycle; terminology; component/topology diagram; security, evidence, cost, and vendor-neutrality principles; capability-status legend. |
 | Quick start and local development | Prerequisites (Node, Corepack, pnpm, Docker/Compose); clone/install; disposable PostgreSQL/pgvector startup; migration; API and admin bridge start; health check; cleanup. Document the deliberately low-assurance local password sign-in and how to override it before sharing a private UI. Clearly label OIDC-dependent actions and use no real secret values. |
 | Administration authentication | Document the default deployment-owned local login/password path: `ADMIN_LOGIN` and `ADMIN_PASSWORD` default to `admin` / `admin`, are overridable through deployment/Compose environment only, and must be changed before the UI is exposed beyond its private local edge. Explain that the password is never returned by the API, retained by the browser, or configured through a console form. Document optional OIDC prerequisites—standards-compliant client, callback URL, trusted HTTPS origin/proxy, issuer/client/session/bootstrap configuration—and first OIDC administrator bootstrap/removal. Explain that complete OIDC configuration adds an OIDC choice without disabling password login; `ADMIN_DISABLE_LOGIN_AUTHENTICATION=true` is valid only with complete OIDC configuration and forces OIDC-only access. Cover login, logout, workspace selection, roles, cookie/CSRF behavior, and common safe failure messages. OIDC is deployment-owned and is never configured with a browser token or through a generic UI form. |
-| Sources, knowledge, destinations, and schedules | Conceptual distinction between connector instance, external secret reference, knowledge collection, source, source version, schedule, analysis profile, publication profile, and destination. Step pages for Git/Markdown (local/remote repository, safe ref, roots, path filters, Docusaurus mapping, optional token reference) and Jitbit (HTTPS base URL, registered token reference, ingestion settings, delta/overlap behavior, internal-note publication semantics). Include the source synchronization, analysis, evidence-review, approval, and publication flows. Mark unavailable UI workflows until PBI-016 delivers them. |
+| Sources, knowledge, destinations, and schedules | Conceptual distinction between connector instance, external secret reference, knowledge collection, source, source version, schedule, analysis profile, publication profile, and destination. Include a capability matrix and a short setup page for every connector registered on the delivery branch. The initial pages cover Git/Markdown as a knowledge/attachment source and Jitbit as a knowledge, case, attachment, and analysis-destination connector. They include the verified Git/Markdown remote and mounted-repository examples, and the Jitbit source-to-internal-note-publication example defined below. Explain safe refs, roots, filters, Docusaurus mapping, registered token references, ingestion settings, delta/overlap behavior, and internal-note publication semantics. Include the source synchronization, analysis, evidence-review, approval, and publication flows. Mark unavailable UI workflows until PBI-016 delivers them. |
 | AI configuration and cost | Register redacted secret-reference metadata; configure the OpenAI-compatible or optional Copilot SDK BYOK descriptor using only supported HTTPS endpoints; explain provider/model/binding/profile separation, model-role selection, immutable activation/history, catalog/pricing, unknown-price behavior, budgets, capability tests, usage/cost queries, and repository-agent restrictions. State that the UI does not expose an API key and no feature calls a provider outside `ai-execution`. |
 | Operations and self-hosting | Docker-first installation after PBI-017: digest verification, secret-file setup, explicit migration, TLS edge/public origins, local-password and OIDC UI paths, standalone versus distributed mode, readiness/liveness, logs/diagnostics, worker scaling, and mode transition. Include a distinct development-only page for `compose.test.yml` and `compose.admin.yml`; it must not be confused with a production deployment. |
 | Configuration reference | A single searchable variable/reference table generated or manually verified from final configuration validators, Compose files, and entrypoints. For each key state purpose, consumer, required/default/conditional status, valid form, public-versus-secret classification, and where it is supplied. Cover local admin authentication (`ADMIN_LOGIN`, `ADMIN_PASSWORD`, and `ADMIN_DISABLE_LOGIN_AUTHENTICATION`), API/OIDC, CLI, OpenTelemetry, production Compose/release, PostgreSQL, local admin bridge, test/integration flags, and each port/image/secret-file variable. Explain that the first two are deployment secrets when overridden, and that disabling password login requires complete OIDC configuration. Never show a secret, production connection string, copied token, or credential-like placeholder. |
@@ -194,7 +194,105 @@ names, permission states, and availability behavior. A screenshot or click path 
 an authority: verify it against the corresponding API route, DTO, descriptor, and
 browser test before publishing it.
 
-### 4. Deployment, OAuth, configuration, and persistence accuracy
+### 4. Connector setup guides and worked examples
+
+The connector section must begin with a capability matrix. For every connector registered
+on the delivery branch, it identifies its supported source and destination capabilities,
+what each capability is used for, its required settings and secret references, and links
+to its setup, test, synchronization, and troubleshooting pages. A destination must not
+be described as a source, or vice versa: a connector instance, knowledge source, case
+source, source-version filter, schedule, analysis profile, publication profile, and
+destination are separately created and selected configuration records.
+
+Every connector guide must give a short, end-to-end procedure: prerequisites; where the
+value is supplied (deployment or console); configuration values and their safe forms;
+a connection test; creation of the applicable source or destination; the expected safe
+outcome; and the bounded recovery path. Examples may use `*.example.test` URLs and
+non-secret names only. They must never contain a token, a credential-bearing URL, a real
+operator's filesystem layout, a browser-computer path, or a command that changes an
+external system merely to demonstrate the setup. Generic runtime paths are permitted
+only where a mounted-repository example needs them.
+
+The initial Git/Markdown and Jitbit pages must contain these reviewed worked examples.
+The prose stays task-oriented, but the settings snippets must be complete enough for an
+operator to recognize the final descriptor fields and their relationship.
+
+#### Git/Markdown knowledge and attachment source
+
+- Explain that Git/Markdown is a knowledge and attachment source only; it is not a case
+  source or an analysis-publication destination. A Git clone URL is not the source-link
+  base URL, and an optional `browserUrl` supplies only links back to source content.
+- Include a **remote HTTPS repository** example. It configures a credential-free
+  `repository` such as `{"kind":"remote","url":"https://github.com/example/support-docs.git"}`,
+  an empty `allowedLocalRoots`, a safe `ref` such as
+  `{"kind":"branch","name":"main"}`, relative POSIX `paths.include` and
+  `paths.exclude` patterns, and a bounded document-character limit. It shows a
+  registered external `gitTokenReference` only as an optional selection for a private
+  repository, never as part of the URL or example value. The guide explains that the
+  URL is HTTPS-only and cannot contain a username, password, query, or fragment, and
+  that each synchronization records the immutable commit reached by a moving branch or
+  tag.
+- Include a **mounted local Git working tree** example. It first shows, using the final
+  PBI-017 Compose or deployment contract, a read-only mount of a host directory that
+  contains a complete Git working tree (including its `.git` metadata) into every
+  runtime process that opens the source. It then configures the *container/runtime*
+  paths, for example an `allowedLocalRoots` entry of
+  `/srv/caseweaver/repositories` and a local repository path of
+  `/srv/caseweaver/repositories/support-docs`; it must not show the operator's browser
+  path. The final rendered sample must use the exact service names and mount syntax
+  accepted by PBI-017. Explain that both paths must already exist, resolve
+  canonically, and keep the repository inside the allowed root (including after symlink
+  resolution); local repositories cannot use a Git token reference. State whether the
+  final standalone and distributed deployment profiles require the same mount in the
+  worker, API, or both, based on accepted runtime composition.
+- In each Git example, show how the operator creates the knowledge source and schedule
+  after the connector instance passes its non-destructive test, and the expected result:
+  only selected Markdown/MDX is indexed, provenance links identify repository, exact
+  commit, relative path, and heading, and unchanged blobs avoid repeat processing.
+  Include a Docusaurus variant that clearly separates `siteUrl`, `baseUrl`,
+  `routeBasePath`, and `docsPath`, and only enables it for a Docusaurus repository.
+- Include focused failure guidance for an unreachable HTTPS repository, missing or
+  out-of-root mount, unsafe ref/path pattern, missing private-repository secret
+  reference, and a Git directory whose runtime user cannot read. It must recommend
+  correcting the descriptor or deployment mount and rerunning the bounded connector
+  test, not broadening allowed roots or placing credentials in configuration.
+
+#### Jitbit knowledge, case, attachment, and analysis destination
+
+- Explain, with a capability diagram or ordered flow, that the same Jitbit connector
+  instance can support a resolved-case knowledge source, a live case source and its
+  attachments, and an analysis destination, but configuring one does not automatically
+  create or enable the others.
+- Include a **Jitbit source-to-publication** example: register an external API-token
+  reference; create a connector instance with an HTTPS installation `baseUrl` (not a
+  ticket URL and never credentials), the selected token reference, request timeout,
+  discovery page size, and document/ticket bound; run the bounded connection test; then
+  create a resolved-case knowledge source and its schedule. The example documents the
+  optional first-import `initialUpdatedFrom` date, the default one-day
+  `updatedFromOverlapDays` protection for date-granular updates, and the default
+  resolved/closed-only source filter. It must make clear that the durable cursor takes
+  over after a completed synchronization and that the filter is source-version policy,
+  not a connector-wide setting.
+- Continue the same example through creation of the Jitbit case source, an analysis
+  profile, a publication profile selecting the Jitbit analysis destination, and the
+  applicable approval policy. State the expected result precisely: CaseWeaver publishes
+  only an approved **internal** Jitbit comment with its stable marker; it does not
+  publish a customer-visible reply, choose an approval policy, or rerun analysis. A
+  timeout after a possible write becomes an outcome requiring reconciliation before
+  another write.
+- Include focused failure guidance for a non-HTTPS or credential-bearing base URL,
+  absent/unresolvable token reference, failed connector test, an initial-date import
+  that omits expected older cases, and an unsupported customer-visible publication
+  request. The recovery steps must preserve the immutable configuration and audit trail;
+  they must never advise pasting a token into the console, URL, or logs.
+
+When an accepted connector adds, removes, or materially changes a capability or
+descriptor field, update its matrix row, example, configuration reference, and French
+counterpart in the same documentation change. A new connector cannot be shown as
+operator-configurable until its equivalent guide and non-destructive validation path
+exist.
+
+### 5. Deployment, OAuth, configuration, and persistence accuracy
 
 The documentation must make these boundaries unmistakable:
 
@@ -280,10 +378,23 @@ dependency of applications or packages.
   recommends storing an overridden password, token, client secret, or connector/
   provider secret in the browser, a URL, an environment example, or a documentation
   file.
-- [ ] Git/Markdown, Jitbit, source/schedule, destination/publication, AI binding, model
-  budget, and secret-reference guides match final descriptors, schemas, API behavior,
-  and permission states. Incomplete workflows are visibly unavailable rather than
-  represented by invented instructions.
+- [ ] The connector capability matrix and a short setup/test/recovery guide exist for
+  every connector registered on the delivery branch. They match final descriptors,
+  schemas, API behavior, and permission states; incomplete workflows are visibly
+  unavailable rather than represented by invented instructions.
+- [ ] The Git/Markdown guide contains reviewed, runnable remote-HTTPS and read-only
+  mounted-local-working-tree examples. The latter shows the verified deployment mount
+  and the matching runtime `allowedLocalRoots` and repository paths; both examples
+  cover safe ref/path filtering, optional external token selection, creation of the
+  knowledge source/schedule, expected provenance, and bounded failure recovery.
+- [ ] The Jitbit guide contains a reviewed source-to-publication example that separately
+  creates and tests the connector, resolved knowledge source/schedule, case source,
+  analysis profile, publication profile, and Jitbit destination. It documents cursor/
+  overlap and source-filter behavior and proves that publication is approval-gated,
+  internal-only, marker-idempotent, and reconciled after an uncertain write.
+- [ ] Connector examples contain only safe illustrative values and registered secret
+  references, never secret values, credential-bearing URLs, operator workstation paths,
+  or unverified service/mount syntax.
 - [ ] The deployment guide accurately distinguishes the disposable test database and
   local static-admin bridge from the accepted PBI-017 production installation. The
   production guide covers digest verification, secret files, migration, TLS, local

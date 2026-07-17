@@ -1,7 +1,11 @@
 import { InMemoryConnectorSecretResolver } from "@caseweaver/connector-sdk";
 import { describe, expect, it, vi } from "vitest";
 
-import { FakeGitRepository, fixtureOid } from "./fakes.js";
+import {
+  FakeGitMarkdownAttachmentLocatorCodec,
+  FakeGitRepository,
+  fixtureOid,
+} from "./fakes.js";
 import { createGitMarkdownRuntimeContribution } from "./runtime-contribution.js";
 
 const locator = "env:GIT_DOCUMENTATION_TOKEN";
@@ -69,6 +73,24 @@ describe("Git/Markdown runtime contribution", () => {
     expect(capabilities.knowledgeSource).toBeDefined();
     expect(create).toHaveBeenCalledOnce();
     expect(secrets.calls).toEqual([]);
+  });
+
+  it("declares its repository attachment source only with a trusted sealed locator codec", async () => {
+    const repository = new FakeGitRepository([
+      { ref: "branch:main", commitSha: fixtureOid("a"), files: [] },
+    ]);
+    const contribution = createGitMarkdownRuntimeContribution({
+      repositoryFactory: { create: () => repository },
+      attachmentLocatorCodec: new FakeGitMarkdownAttachmentLocatorCodec(),
+    });
+
+    const capabilities = await contribution.create({
+      configuration: privateConfiguration(),
+      secrets: new InMemoryConnectorSecretResolver({ [locator]: token }),
+    });
+
+    expect(capabilities.knowledgeSource).toBeDefined();
+    expect(capabilities.attachmentSource).toBeDefined();
   });
 
   it("fails closed before repository construction or secret resolution", async () => {

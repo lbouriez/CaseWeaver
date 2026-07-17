@@ -53,6 +53,12 @@ import {
   mapRoutedOperation,
 } from "./operation-dispatcher.js";
 import type {
+  RepositoryAnalysisApiFacade,
+  RepositoryAnalysisCreateDraftInput,
+  RepositoryAnalysisCreateDraftRevisionInput,
+  RepositoryAnalysisTransitionInput,
+} from "./repository-analysis-api.js";
+import type {
   AdministrationRouteOperations,
   AdminRequestContext,
   AdminResource,
@@ -195,6 +201,15 @@ export class AdministrationApiOperations
       auditStore: AuditStore;
       authAudits: AuthAuditRecorder;
       auditWorkspaceId: string;
+      repositoryAnalysis?: Pick<
+        RepositoryAnalysisApiFacade,
+        | "listOptions"
+        | "createDraft"
+        | "createDraftRevision"
+        | "transition"
+        | "previewRepositoryDraftTest"
+        | "executeRepositoryDraftTest"
+      >;
       dispatcher?: AdministrationOperationDispatcher;
       createDraft: (
         input: Readonly<{
@@ -225,6 +240,13 @@ export class AdministrationApiOperations
           readonly chunkingProfileVersion: string;
           readonly embeddingBatchSize: number;
           readonly embeddingBudgetPolicyId: string;
+          readonly attachmentStage:
+            | Readonly<{ readonly mode: "disabled" }>
+            | Readonly<{
+                readonly mode: "optional" | "required";
+                readonly attachmentPolicyId: string;
+                readonly attachmentPolicyConfigurationVersionId: string;
+              }>;
           readonly synchronizationPolicy: Readonly<Record<string, unknown>>;
           readonly deletionBehavior: "tombstone" | "retain";
           readonly context: AdminRequestContext;
@@ -877,6 +899,63 @@ export class AdministrationApiOperations
     if (value === undefined) throw new Error("resource.notFound");
     return value;
   }
+  public async repositoryAnalysisOptions(context: AdminRequestContext) {
+    return this.repositoryAnalysis().listOptions(
+      repositoryAnalysisContext(context),
+    );
+  }
+  public async createRepositoryAnalysisDraft(
+    input: RepositoryAnalysisCreateDraftInput,
+    context: AdminRequestContext,
+  ) {
+    return this.repositoryAnalysis().createDraft(
+      input,
+      repositoryAnalysisContext(context),
+    );
+  }
+  public async createRepositoryAnalysisDraftRevision(
+    input: RepositoryAnalysisCreateDraftRevisionInput,
+    context: AdminRequestContext,
+  ) {
+    return this.repositoryAnalysis().createDraftRevision(
+      input,
+      repositoryAnalysisContext(context),
+    );
+  }
+  public async transitionRepositoryAnalysis(
+    input: RepositoryAnalysisTransitionInput,
+    context: AdminRequestContext,
+  ) {
+    return this.repositoryAnalysis().transition(
+      input,
+      repositoryAnalysisContext(context),
+    );
+  }
+  public async previewRepositoryAnalysisDraftTest(
+    input: Readonly<{
+      readonly repositoryId: string;
+      readonly candidateVersionId: string;
+    }>,
+    context: AdminRequestContext,
+  ) {
+    return this.repositoryAnalysis().previewRepositoryDraftTest(
+      input,
+      repositoryAnalysisContext(context),
+    );
+  }
+  public async executeRepositoryAnalysisDraftTest(
+    input: Readonly<{
+      readonly repositoryId: string;
+      readonly candidateVersionId: string;
+      readonly confirmationId: string;
+    }>,
+    context: AdminRequestContext,
+  ) {
+    return this.repositoryAnalysis().executeRepositoryDraftTest(
+      input,
+      repositoryAnalysisContext(context),
+    );
+  }
   public async configurationSurfaces(context: AdminRequestContext) {
     await this.authorizeAndAudit(
       context,
@@ -1063,6 +1142,13 @@ export class AdministrationApiOperations
       readonly chunkingProfileVersion: string;
       readonly embeddingBatchSize: number;
       readonly embeddingBudgetPolicyId: string;
+      readonly attachmentStage:
+        | Readonly<{ readonly mode: "disabled" }>
+        | Readonly<{
+            readonly mode: "optional" | "required";
+            readonly attachmentPolicyId: string;
+            readonly attachmentPolicyConfigurationVersionId: string;
+          }>;
       readonly synchronizationPolicy: Readonly<Record<string, unknown>>;
       readonly deletionBehavior: "tombstone" | "retain";
     }>,
@@ -2321,6 +2407,16 @@ export class AdministrationApiOperations
       }),
     );
   }
+  private repositoryAnalysis(): NonNullable<
+    (typeof this.dependencies)["repositoryAnalysis"]
+  > {
+    const repositoryAnalysis = this.dependencies.repositoryAnalysis;
+    if (repositoryAnalysis === undefined) {
+      throw new AdministrationUnavailableError();
+    }
+    return repositoryAnalysis;
+  }
+
   private async authorizeAndAudit(
     context: AdminRequestContext,
     permission: import("@caseweaver/security").Permission,
@@ -2461,6 +2557,25 @@ export class AdministrationApiOperations
       }),
     );
   }
+}
+
+function repositoryAnalysisContext(
+  context: AdminRequestContext,
+): Parameters<RepositoryAnalysisApiFacade["listOptions"]>[0] {
+  return Object.freeze({
+    principalId: context.principalId,
+    workspaceId: context.workspaceId,
+    sessionId: context.sessionId,
+    permissions: context.permissions,
+    requestId: context.requestId,
+    correlationId: context.correlationId,
+    ...(context.uiActionId === undefined
+      ? {}
+      : { uiActionId: context.uiActionId }),
+    ...(context.idempotencyKey === undefined
+      ? {}
+      : { idempotencyKey: context.idempotencyKey }),
+  });
 }
 function header(
   headers: Record<string, unknown>,

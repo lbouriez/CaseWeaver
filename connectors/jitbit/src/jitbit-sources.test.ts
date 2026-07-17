@@ -1,18 +1,17 @@
 import {
   ConnectorProtocolError,
-  type DiscoveryPage,
   type DiscoveredCase,
   type DiscoveredKnowledgeItem,
+  type DiscoveryPage,
 } from "@caseweaver/connector-sdk";
-import { describe, expect, it } from "vitest";
-
-import { JitbitCaseSource } from "./jitbit-case-source.js";
+import { describe, expect, it, vi } from "vitest";
 import { JitbitClient } from "./client.js";
 import {
   createJitbitConfiguration,
   createJitbitSecretResolver,
   jsonResponse,
 } from "./fakes.js";
+import { JitbitCaseSource } from "./jitbit-case-source.js";
 import { JitbitKnowledgeSource } from "./jitbit-knowledge-source.js";
 
 function clientFor(
@@ -263,6 +262,98 @@ describe("Jitbit sources", () => {
         signal: new AbortController().signal,
       }),
     ).rejects.toBeInstanceOf(ConnectorProtocolError);
+  });
+
+  it("keeps resolved/closed-only knowledge ingestion as the default source filter", async () => {
+    const client = clientFor((url) => {
+      if (url.pathname === "/api/Tickets") {
+        return jsonResponse([{ IssueID: 8, Status: "Open" }]);
+      }
+      return url.pathname === "/api/ticket"
+        ? jsonResponse({ IssueID: 8, Status: "Open", Body: "Current issue" })
+        : jsonResponse([]);
+    });
+    const source = new JitbitKnowledgeSource({
+      client,
+      configuration: createJitbitConfiguration(),
+      resolvedKnowledgeFilter: { resolvedOrClosedOnly: false },
+    });
+
+    const pages = await collect(
+      source.discover({
+        pageSize: 3,
+        signal: new AbortController().signal,
+      }),
+    );
+    expect(pages[0]).toMatchObject({
+      events: [
+        {
+          item: { reference: { externalId: "8" } },
+        },
+      ],
+    });
+    await expect(
+      source.load({
+        reference: {
+          connectorInstanceId: "jitbit-helpdesk",
+          resourceType: "resolved-case",
+          externalId: "8",
+        },
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({ title: "Jitbit ticket 8" });
+  });
+
+  it("recognizes every supported terminal status without allowing active cases by default", async () => {
+    const source = new JitbitKnowledgeSource({
+      client: clientFor(() =>
+        jsonResponse([
+          { IssueID: "1", Status: "Closed" },
+          { IssueID: "2", Status: "Resolved" },
+          { IssueID: "3", Status: "Done" },
+          { IssueID: "4", Status: "Completed" },
+          { IssueID: "5", Status: "Solved" },
+          { IssueID: "6", Status: "Cancelled" },
+          { IssueID: "7", Status: "Pending" },
+          { IssueID: "8", Status: "Open" },
+        ]),
+      ),
+      configuration: createJitbitConfiguration(),
+    });
+
+    const pages = await collect(
+      source.discover({ pageSize: 10, signal: new AbortController().signal }),
+    );
+    const page = pages[0];
+    if (page === undefined || page.mode !== "delta") {
+      throw new Error("The fixture must return one Jitbit delta page.");
+    }
+
+    expect(
+      page.events.flatMap((event) =>
+        event.kind === "upsert" ? [event.item.reference.externalId] : [],
+      ),
+    ).toEqual(["1", "2", "3", "4", "5", "6"]);
+  });
+
+  it("rejects a foreign knowledge reference before any Jitbit request", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>();
+    const source = new JitbitKnowledgeSource({
+      client: clientFor(fetch),
+      configuration: createJitbitConfiguration(),
+    });
+
+    await expect(
+      source.load({
+        reference: {
+          connectorInstanceId: "another-workspace-jitbit",
+          resourceType: "resolved-case",
+          externalId: "7",
+        },
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toBeInstanceOf(ConnectorProtocolError);
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it("discovers only live cases through the case capability", async () => {

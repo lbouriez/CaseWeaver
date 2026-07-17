@@ -1,6 +1,6 @@
 import {
-  InMemoryConnectorSecretResolver,
   type ConnectorSecretResolver,
+  InMemoryConnectorSecretResolver,
 } from "@caseweaver/connector-sdk";
 
 import {

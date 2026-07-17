@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
-  TransitionConfigurationVersion,
+  type ConfigurationDraftRevisionStore,
   type ConfigurationLifecycleStore,
+  CreateConfigurationDraftRevision,
+  TransitionConfigurationVersion,
 } from "./configuration-lifecycle.js";
 import { IdempotencyConflictError } from "./errors.js";
 
@@ -67,6 +69,59 @@ function store(
 }
 
 describe("TransitionConfigurationVersion", () => {
+  it("creates an inert immutable successor draft through the explicit opt-in store", async () => {
+    const persistence: ConfigurationLifecycleStore &
+      ConfigurationDraftRevisionStore = {
+      ...store(),
+      createDraftRevision: vi.fn(async (input) => ({
+        configuration: {
+          id: input.configurationId,
+          workspaceId: input.workspaceId,
+          resourceType: input.resourceType,
+          revision: input.expectedRevision + 1,
+          lifecycle: "draft" as const,
+          currentVersionId: "version-2",
+        },
+        version: {
+          id: "version-2",
+          workspaceId: input.workspaceId,
+          configurationId: input.configurationId,
+          version: input.expectedRevision + 1,
+          canonicalSettings: input.canonicalSettings,
+          secretReferenceIds: input.secretReferenceIds,
+        },
+      })),
+    };
+    const audit = { append: vi.fn(async () => undefined) };
+    const service = new CreateConfigurationDraftRevision(
+      { transaction: async (callback) => callback() },
+      persistence,
+      audit,
+    );
+
+    const result = await service.execute({
+      ...command,
+      mutation: {
+        operation: "connector.draftRevision",
+        keyDigest: "key-draft",
+        requestDigest: "request-draft",
+      },
+    });
+
+    expect(result.configuration.lifecycle).toBe("draft");
+    expect(persistence.createDraftRevision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedRevision: 1,
+        canonicalSettings: '{"a":1,"b":2}',
+      }),
+    );
+    expect(audit.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "admin.configuration.draftRevision.created",
+      }),
+    );
+  });
+
   it("canonicalizes, de-duplicates secret reference identities, and audits in its transaction", async () => {
     const persistence = store();
     const transaction = vi.fn(async <T>(callback: () => Promise<T>) =>

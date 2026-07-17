@@ -247,7 +247,15 @@ export interface CapturedCaseSnapshot {
     readonly connectorRegistrationId: string;
     readonly resourceType: string;
     readonly externalId: string;
+    /** Distinguishes two appearances of a binary in an occurrence-aware capture. */
+    readonly occurrenceIdentity?: string;
   }>[];
+  /**
+   * Server-private immutable preparation attempt selected before this
+   * snapshot existed. PostgreSQL pins it only when it creates the snapshot;
+   * a duplicate capture can never attach newer derivative work retroactively.
+   */
+  readonly attachmentPreparationAttemptId?: string;
 }
 
 /** Immutable request material returned only from the durable trigger store. */
@@ -403,6 +411,57 @@ export interface TriggeredCaseSnapshotCapture {
       readonly signal: AbortSignal;
     }>,
   ): Promise<CapturedCaseSnapshot>;
+}
+
+/** Server-private opaque scan progress; neither field is an API/read-model DTO. */
+export interface CaseDiscoveryCursor {
+  readonly version: string;
+  readonly value: string;
+}
+
+export interface ClaimedCaseDiscovery {
+  readonly fencingToken: bigint;
+  /** Server-owned activation principal; never browser authority. */
+  readonly actorPrincipalId: PrincipalId;
+  readonly cursor?: CaseDiscoveryCursor;
+}
+
+/**
+ * Durable state for a target-free PBI-020 discovery command. The adapter
+ * validates exact schedule/trigger/connector pins while claiming and retains
+ * an opaque connector cursor only in private persistence.
+ */
+export interface CaseDiscoveryStateStore {
+  claim(
+    input: Readonly<{
+      readonly command: import("@caseweaver/domain").EnvelopeFor<"analysis.discover.v1">;
+      readonly leaseMs: number;
+    }>,
+  ): Promise<
+    | Readonly<{ readonly kind: "claimed"; readonly claim: ClaimedCaseDiscovery }>
+    | Readonly<{ readonly kind: "alreadyRunning" | "unavailable" }>
+  >;
+  advance(
+    input: Readonly<{
+      readonly command: import("@caseweaver/domain").EnvelopeFor<"analysis.discover.v1">;
+      readonly claim: ClaimedCaseDiscovery;
+      readonly cursor: CaseDiscoveryCursor;
+    }>,
+  ): Promise<void>;
+  complete(
+    input: Readonly<{
+      readonly command: import("@caseweaver/domain").EnvelopeFor<"analysis.discover.v1">;
+      readonly claim: ClaimedCaseDiscovery;
+    }>,
+  ): Promise<void>;
+  fail(
+    input: Readonly<{
+      readonly command: import("@caseweaver/domain").EnvelopeFor<"analysis.discover.v1">;
+      readonly claim: ClaimedCaseDiscovery;
+      readonly code: string;
+      readonly retryable: boolean;
+    }>,
+  ): Promise<void>;
 }
 
 /**

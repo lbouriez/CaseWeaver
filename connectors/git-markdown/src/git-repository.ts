@@ -119,6 +119,26 @@ export interface ReadGitRepositoryFileRequest
   readonly commitSha: string;
 }
 
+/**
+ * Reads bytes from one exact Git blob. The adapter must not resolve a mutable ref
+ * while servicing this request, and the connector deliberately consumes the
+ * returned stream without buffering it.
+ */
+export interface ReadGitRepositoryBinaryRequest
+  extends InspectGitRepositoryRequest {
+  readonly path: string;
+  /** Immutable commit resolved during discovery, never a mutable branch or tag. */
+  readonly commitSha: string;
+}
+
+export interface GitRepositoryBinaryFile {
+  readonly path: string;
+  readonly commitSha: string;
+  readonly content: AsyncIterable<Uint8Array>;
+  readonly mediaType?: string;
+  readonly contentLength?: number;
+}
+
 export interface DiffGitRepositoryRequest extends InspectGitRepositoryRequest {
   readonly fromCommitSha: string;
 }
@@ -130,6 +150,13 @@ export interface DiffGitRepositoryRequest extends InspectGitRepositoryRequest {
 export interface GitRepository {
   inspect(request: InspectGitRepositoryRequest): Promise<GitRepositorySnapshot>;
   readFile(request: ReadGitRepositoryFileRequest): Promise<GitRepositoryFile>;
+  /**
+   * Optional while installations roll out attachment-capable Git runtimes. A
+   * GitMarkdownAttachmentSource fails closed when it is unavailable.
+   */
+  readBinary?(
+    request: ReadGitRepositoryBinaryRequest,
+  ): Promise<GitRepositoryBinaryFile>;
   diff?(request: DiffGitRepositoryRequest): Promise<GitRepositoryDelta>;
 }
 

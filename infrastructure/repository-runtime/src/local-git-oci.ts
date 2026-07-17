@@ -1,16 +1,15 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
-  chmod,
   mkdir,
-  mkdtemp,
+  readFile,
   realpath,
   rm,
   stat,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type {
@@ -28,6 +27,11 @@ import {
   type RepositorySandboxSession,
   type SanitizedPinnedTree,
 } from "./contracts.js";
+import {
+  createPrivatePreparedRepositoryTree,
+  publishPreparedRepositoryTree,
+} from "./prepared-tree.js";
+import { isSafeRepositoryTextFile } from "./tree-sanitizer.js";
 
 const shaPattern = /^[a-f0-9]{40}(?:[a-f0-9]{24})?$/iu;
 const supportedToolNames = new Set<RepositoryReadOnlyTool>([
@@ -59,7 +63,10 @@ export interface RestrictedProcessRunner {
 }
 
 function unavailable(
-  code: "repository.runtimeConfiguration" | "repository.runtimeIsolation",
+  code:
+    | "repository.runtimeConfiguration"
+    | "repository.runtimeIsolation"
+    | "repository.runtimePreparation",
   message: string,
 ): RepositoryRuntimeError {
   return new RepositoryRuntimeError(code, message);
@@ -257,6 +264,8 @@ export interface LocalPreparedRepositoryTree {
   readonly repositoryId: string;
   readonly pinnedCommit: string;
   readonly directory: string;
+  /** Private parent retained only so cleanup can remove the complete tree. */
+  readonly cleanupDirectory: string;
   readonly files: readonly PinnedRepositoryFile[];
 }
 
@@ -295,11 +304,54 @@ export class LocalPreparedRepositoryTreeStore {
     return value;
   }
 
+  public async readText(input: {
+    readonly tree: SanitizedPinnedTree;
+    readonly path: string;
+    readonly signal: AbortSignal;
+  }): Promise<string> {
+    if (input.signal.aborted) throw input.signal.reason;
+    const tree = this.resolve(input.tree);
+    if (!tree.files.some((file) => file.path === input.path)) {
+      throw unavailable(
+        "repository.runtimePreparation",
+        "Prepared repository evidence is unavailable.",
+      );
+    }
+    const candidate = resolve(tree.directory, input.path);
+    if (!isWithin(tree.directory, candidate)) {
+      throw unavailable(
+        "repository.runtimePreparation",
+        "Prepared repository evidence is unavailable.",
+      );
+    }
+    let metadata: Awaited<ReturnType<typeof stat>>;
+    let bytes: Uint8Array;
+    try {
+      metadata = await stat(candidate);
+      if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error();
+      bytes = await readFile(candidate);
+    } catch {
+      throw unavailable(
+        "repository.runtimePreparation",
+        "Prepared repository evidence is unavailable.",
+      );
+    }
+    if (input.signal.aborted) throw input.signal.reason;
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      throw unavailable(
+        "repository.runtimePreparation",
+        "Prepared repository evidence is unavailable.",
+      );
+    }
+  }
+
   public async remove(treeId: string): Promise<void> {
     const value = this.entries.get(treeId);
     this.entries.delete(treeId);
     if (value !== undefined) {
-      await rm(value.directory, {
+      await rm(value.cleanupDirectory, {
         recursive: true,
         force: true,
         maxRetries: 2,
@@ -455,11 +507,9 @@ export class LocalGitPinnedRepositoryCheckoutBroker
     }
 
     const sourceDirectory = await this.validateWorktree(source, signal);
-    await mkdir(this.temporaryDirectory, { recursive: true, mode: 0o700 });
-    const directory = await mkdtemp(
-      join(this.temporaryDirectory, "caseweaver-repository-"),
+    const preparedTree = await createPrivatePreparedRepositoryTree(
+      this.temporaryDirectory,
     );
-    await chmod(directory, 0o700);
     try {
       await this.verifyCommit(
         sourceDirectory,
@@ -474,8 +524,12 @@ export class LocalGitPinnedRepositoryCheckoutBroker
       const files = await this.materializeTextBlobs(
         sourceDirectory,
         entries,
-        directory,
+        preparedTree.stagingDirectory,
         signal,
+      );
+      const directory = await publishPreparedRepositoryTree(
+        preparedTree,
+        files.map((file) => file.path),
       );
       const treeId = randomUUID();
       const tree: SanitizedPinnedTree = Object.freeze({
@@ -484,10 +538,18 @@ export class LocalGitPinnedRepositoryCheckoutBroker
         pinnedCommit: configuration.pinnedCommit.toLowerCase(),
         files: Object.freeze(files),
       });
-      this.treeStore.register({ ...tree, directory });
+      this.treeStore.register({
+        ...tree,
+        directory,
+        cleanupDirectory: preparedTree.parentDirectory,
+      });
       return tree;
     } catch (error) {
-      await rm(directory, { recursive: true, force: true, maxRetries: 2 });
+      await rm(preparedTree.parentDirectory, {
+        recursive: true,
+        force: true,
+        maxRetries: 2,
+      });
       throw error;
     }
   }
@@ -629,6 +691,7 @@ export class LocalGitPinnedRepositoryCheckoutBroker
           "Configured repository blob is unavailable.",
         );
       }
+      if (!isSafeRepositoryTextFile(entry.path, blob.stdout)) continue;
       const lines = lineCount(blob.stdout);
       if (lines === undefined) continue;
       totalBytes += size;
@@ -684,6 +747,9 @@ const strictAttestation: RepositorySandboxAttestation = Object.freeze({
   disposableFilesystem: true,
   toolAllowlistEnforced: true,
   quotasEnforced: true,
+  unprivilegedUser: true,
+  immutableImage: true,
+  readOnlyRepositoryMount: true,
 });
 
 /**
@@ -752,6 +818,22 @@ export class DockerOciRepositorySandbox implements IsolatedRepositorySandbox {
       throw unavailable(
         "repository.runtimeConfiguration",
         "Local Linux OCI runtime is unavailable.",
+      );
+    }
+    const image = await processRunner.run({
+      command: "docker",
+      arguments: ["image", "inspect", "--format", "{{.Id}}", options.image],
+      maximumOutputBytes: 1_024,
+      signal: controller.signal,
+      environment,
+    });
+    if (
+      image.exitCode !== 0 ||
+      !/^sha256:[a-f0-9]{64}$/iu.test(decodeSingleLine(image.stdout) ?? "")
+    ) {
+      throw unavailable(
+        "repository.runtimeConfiguration",
+        "Pinned OCI repository sandbox image is unavailable.",
       );
     }
     return new DockerOciRepositorySandbox({
@@ -829,50 +911,76 @@ export class DockerOciRepositorySandbox implements IsolatedRepositorySandbox {
     readonly limits: RepositorySandboxLimits;
     readonly signal: AbortSignal;
   }): Promise<unknown> {
-    const result = await this.dependencies.processRunner.run({
-      command: "docker",
-      arguments: dockerArguments({
-        image: this.dependencies.image,
-        treeDirectory: input.directory,
-        toolRunnerPath: this.dependencies.toolRunnerPath,
-        tool: input.tool,
-        limits: input.limits,
-      }),
-      standardInput: encodeInput(input.input),
-      maximumOutputBytes: input.limits.maximumOutputBytes,
-      signal: input.signal,
-      environment: this.dependencies.environment,
-    });
-    if (result.exitCode !== 0) {
-      throw unavailable(
-        "repository.runtimeIsolation",
-        "Repository tool sandbox failed.",
-      );
-    }
-    let response: unknown;
+    const containerName = `caseweaver-repository-tool-${randomUUID()}`;
     try {
-      response = JSON.parse(
-        new TextDecoder("utf-8", { fatal: true }).decode(result.stdout),
-      );
+      const result = await this.dependencies.processRunner.run({
+        command: "docker",
+        arguments: dockerArguments({
+          image: this.dependencies.image,
+          treeDirectory: input.directory,
+          toolRunnerPath: this.dependencies.toolRunnerPath,
+          tool: input.tool,
+          limits: input.limits,
+          containerName,
+        }),
+        standardInput: encodeInput(input.input),
+        maximumOutputBytes: input.limits.maximumOutputBytes,
+        signal: input.signal,
+        environment: this.dependencies.environment,
+      });
+      if (result.exitCode !== 0) {
+        throw unavailable(
+          "repository.runtimeIsolation",
+          "Repository tool sandbox failed.",
+        );
+      }
+      let response: unknown;
+      try {
+        response = JSON.parse(
+          new TextDecoder("utf-8", { fatal: true }).decode(result.stdout),
+        );
+      } catch {
+        throw unavailable(
+          "repository.runtimeIsolation",
+          "Repository tool sandbox returned invalid output.",
+        );
+      }
+      if (
+        typeof response !== "object" ||
+        response === null ||
+        !("ok" in response) ||
+        response.ok !== true ||
+        !("value" in response)
+      ) {
+        throw unavailable(
+          "repository.runtimeIsolation",
+          "Repository tool sandbox rejected the request.",
+        );
+      }
+      return response.value;
+    } finally {
+      await this.forceRemoveContainer(containerName);
+    }
+  }
+
+  private async forceRemoveContainer(containerName: string): Promise<void> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5_000);
+    try {
+      await this.dependencies.processRunner.run({
+        command: "docker",
+        arguments: ["rm", "--force", "--volumes", containerName],
+        maximumOutputBytes: 1_024,
+        signal: controller.signal,
+        environment: this.dependencies.environment,
+      });
     } catch {
-      throw unavailable(
-        "repository.runtimeIsolation",
-        "Repository tool sandbox returned invalid output.",
-      );
+      // A successful `docker run --rm` removes its own container. If the CLI
+      // was cancelled, this best-effort force removal is the final cleanup
+      // boundary and must not replace the original tool failure.
+    } finally {
+      clearTimeout(timeout);
     }
-    if (
-      typeof response !== "object" ||
-      response === null ||
-      !("ok" in response) ||
-      response.ok !== true ||
-      !("value" in response)
-    ) {
-      throw unavailable(
-        "repository.runtimeIsolation",
-        "Repository tool sandbox rejected the request.",
-      );
-    }
-    return response.value;
   }
 }
 
@@ -900,6 +1008,7 @@ function dockerArguments(input: {
   readonly toolRunnerPath: string;
   readonly tool: RepositoryReadOnlyTool;
   readonly limits: RepositorySandboxLimits;
+  readonly containerName: string;
 }): readonly string[] {
   const cpuSeconds = input.limits.maximumCpuMilliseconds / 1_000;
   const temporaryBytes = Math.max(
@@ -910,6 +1019,7 @@ function dockerArguments(input: {
     "run",
     "--rm",
     "--interactive",
+    `--name=${input.containerName}`,
     "--pull=never",
     "--network=none",
     "--read-only",

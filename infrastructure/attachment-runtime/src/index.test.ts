@@ -17,6 +17,7 @@ const request = (signal = new AbortController().signal) => ({
   quotas: {
     timeoutMs: 10,
     maximumMemoryBytes: 100,
+    maximumInputBytes: 100,
     maximumOutputBytes: 100,
     maximumFiles: 1,
     maximumExpandedBytes: 100,
@@ -117,5 +118,22 @@ describe("AttestedAttachmentRuntime", () => {
       retryable: false,
     });
     expect(cleaned).toEqual(["runtime"]);
+  });
+
+  it("permits a zero archive depth while retaining positive resource limits", async () => {
+    const runtime = new AttestedAttachmentRuntime(
+      {
+        attestation,
+        execute: async () => ({ outputByteLength: 0 }),
+        cleanup: async () => undefined,
+      },
+      { delete: async () => undefined },
+    );
+    await expect(
+      runtime.execute({
+        ...request(),
+        quotas: { ...request().quotas, maximumArchiveDepth: 0 },
+      }),
+    ).resolves.toMatchObject({ outputByteLength: 0 });
   });
 });

@@ -56,9 +56,8 @@ function harness(
     resolve: async (pin) => {
       resolverPins.push(pin);
       return {
-        repository: {
+        runtime: {
           repositoryId: "support-service",
-          checkoutSecretReference: "vault:checkout/support-service",
           pinnedCommit: "a".repeat(40),
         },
         allowedTools: ["listFiles", "readFile"],
@@ -69,14 +68,33 @@ function harness(
           maximumOutputBytes: 2_048,
           maximumToolCalls: 4,
         },
-        runtime: {
+        executor: {
           run: async (request, runner) => {
             runtimeRequests.push(request);
-            return runner({
-              repositoryId: "support-service",
-              pinnedCommit: "a".repeat(40),
+            await runner({
+              runtime: request.runtime,
+              signal: request.signal,
               tools: { execute: async () => ({}) },
             });
+            return {
+              summary: "The pinned source handles the error.",
+              evidence: [
+                {
+                  id: `repository-evidence-${"a".repeat(64)}`,
+                  path: "src/service.ts",
+                  startLine: 2,
+                  endLine: 3,
+                  excerptHash: "b".repeat(64),
+                },
+              ],
+              findings: [
+                {
+                  id: `repository-finding-${"c".repeat(64)}`,
+                  summary: "The pinned source handles the error.",
+                  evidenceIds: [`repository-evidence-${"a".repeat(64)}`],
+                },
+              ],
+            };
           },
         },
       };
@@ -87,8 +105,16 @@ function harness(
       clientInputs.push(value);
       return {
         summary: "The pinned source handles the error.",
-        evidence: [{ path: "src/service.ts", startLine: 2, endLine: 3 }],
-        metering: { mode: "aggregate" },
+        findings: [
+          {
+            summary: "The pinned source handles the error.",
+            citations: [{ path: "src/service.ts", startLine: 2, endLine: 3 }],
+          },
+        ],
+        metering: {
+          mode: "observableTurns",
+          turns: [{ turn: 1, usage: { inputTokens: 12, outputTokens: 4 } }],
+        },
         usage: { inputTokens: 12, outputTokens: 4 },
         requestId: "intentionally-not-returned",
       };
@@ -128,7 +154,7 @@ describe("CopilotSdkAgentProvider", () => {
       usage: { inputTokens: 12, outputTokens: 4 },
       metadata: {
         providerRequestId: "intentionally-not-returned",
-        rawRedacted: { evidenceCount: 1 },
+        rawRedacted: { evidenceCount: 1, findingCount: 1 },
       },
     });
     expect(test.resolverPins).toEqual([runtimePin]);
@@ -162,9 +188,8 @@ describe("CopilotSdkAgentProvider", () => {
     const test = harness({
       resolver: {
         resolve: async () => ({
-          repository: {
+          runtime: {
             repositoryId: "different-service",
-            checkoutSecretReference: "vault:checkout/different-service",
             pinnedCommit: "b".repeat(40),
           },
           allowedTools: ["readFile"],
@@ -175,8 +200,12 @@ describe("CopilotSdkAgentProvider", () => {
             maximumOutputBytes: 1_024,
             maximumToolCalls: 1,
           },
-          runtime: {
-            run: async () => ({ summary: "unreachable", evidence: [] }),
+          executor: {
+            run: async () => ({
+              summary: "unreachable",
+              evidence: [],
+              findings: [],
+            }),
           },
         }),
       },
@@ -219,9 +248,12 @@ describe("CopilotSdkAgentProvider", () => {
       client: {
         run: async () => ({
           summary: "Bound exceeded.",
-          evidence: [],
-          metering: { mode: "aggregate" },
-          usage: { inputTokens: 51 },
+          findings: [],
+          metering: {
+            mode: "observableTurns",
+            turns: [{ turn: 1, usage: { inputTokens: 51, outputTokens: 1 } }],
+          },
+          usage: { inputTokens: 51, outputTokens: 1 },
         }),
       },
     });

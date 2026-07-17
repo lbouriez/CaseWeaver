@@ -4,19 +4,23 @@ import type {
 } from "@caseweaver/connector-sdk";
 
 import type { JitbitSettings } from "./config.js";
+import type { JitbitAttachmentSource } from "./jitbit-attachment-source.js";
 import type { JitbitCaseSource } from "./jitbit-case-source.js";
 import type { JitbitAnalysisDestination } from "./jitbit-destination.js";
 import type { JitbitKnowledgeSource } from "./jitbit-knowledge-source.js";
 
 export * from "./administration-descriptor.js";
 export * from "./administration-test.js";
+export * from "./attachment-identity.js";
 export * from "./client.js";
 export * from "./config.js";
 export * from "./fakes.js";
+export * from "./jitbit-attachment-source.js";
 export * from "./jitbit-case-source.js";
 export * from "./jitbit-destination.js";
 export * from "./jitbit-knowledge-source.js";
 export * from "./mapping.js";
+export * from "./resolved-knowledge-filter.js";
 export * from "./runtime-contribution.js";
 export * from "./schemas.js";
 
@@ -27,6 +31,7 @@ export function registerJitbitConnector(
   capabilities: {
     readonly knowledgeSource: JitbitKnowledgeSource;
     readonly caseSource: JitbitCaseSource;
+    readonly attachmentSource: JitbitAttachmentSource;
     readonly analysisDestination: JitbitAnalysisDestination;
   },
 ): void {

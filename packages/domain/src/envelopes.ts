@@ -34,6 +34,7 @@ export interface TraceContext {
 
 export type EnvelopeType =
   | "analysis.execute.v1"
+  | "analysis.discover.v1"
   | "analysis.trigger.v1"
   | "analysis.trigger.v2"
   | "publication.execute.v1"
@@ -50,6 +51,23 @@ export type EnvelopeType =
 export interface AnalysisExecutePayload {
   readonly analysisJobId: AnalysisJobId;
   readonly analysisIdentityId: AnalysisIdentityId;
+}
+
+/**
+ * A scheduled case-discovery command pins the intake schedule and case-source
+ * configuration that were active when its occurrence was committed.  It is
+ * deliberately target-free: resolving remote cases belongs to the worker,
+ * never the scheduler.  The cursor itself remains durable private worker
+ * state rather than queue data.
+ */
+export interface AnalysisDiscoverPayload {
+  readonly scheduleId: string;
+  readonly scheduleConfigurationVersionId: string;
+  readonly triggerId: AnalysisTriggerId;
+  readonly triggerVersionId: AnalysisTriggerVersionId;
+  readonly connectorRegistrationId: string;
+  readonly connectorConfigurationVersionId: string;
+  readonly occurrenceKey: string;
 }
 
 export interface PublicationExecutePayload {
@@ -162,6 +180,7 @@ export interface DiagnosticsExportGeneratePayload {
 
 export type EnvelopePayloadByType = {
   readonly "analysis.execute.v1": AnalysisExecutePayload;
+  readonly "analysis.discover.v1": AnalysisDiscoverPayload;
   readonly "analysis.trigger.v1": LegacyAnalysisTriggerPayload;
   readonly "analysis.trigger.v2": AnalysisTriggerPayload;
   readonly "publication.execute.v1": PublicationExecutePayload;
@@ -247,6 +266,32 @@ function parsePayload(
         ),
         analysisIdentityId: analysisIdentityId(
           requireString(payload.analysisIdentityId, "analysisIdentityId"),
+        ),
+      });
+    case "analysis.discover.v1":
+      return Object.freeze({
+        scheduleId: requireNonEmptyString(payload.scheduleId, "scheduleId"),
+        scheduleConfigurationVersionId: requireNonEmptyString(
+          payload.scheduleConfigurationVersionId,
+          "scheduleConfigurationVersionId",
+        ),
+        triggerId: analysisTriggerId(
+          requireNonEmptyString(payload.triggerId, "triggerId"),
+        ),
+        triggerVersionId: analysisTriggerVersionId(
+          requireNonEmptyString(payload.triggerVersionId, "triggerVersionId"),
+        ),
+        connectorRegistrationId: requireNonEmptyString(
+          payload.connectorRegistrationId,
+          "connectorRegistrationId",
+        ),
+        connectorConfigurationVersionId: requireNonEmptyString(
+          payload.connectorConfigurationVersionId,
+          "connectorConfigurationVersionId",
+        ),
+        occurrenceKey: requireNonEmptyString(
+          payload.occurrenceKey,
+          "occurrenceKey",
         ),
       });
     case "analysis.trigger.v1": {
@@ -490,6 +535,7 @@ function parseEnvelope(value: unknown, allowLegacy: boolean): Envelope {
   if (
     ![
       "analysis.execute.v1",
+      "analysis.discover.v1",
       "analysis.trigger.v1",
       "analysis.trigger.v2",
       "publication.execute.v1",

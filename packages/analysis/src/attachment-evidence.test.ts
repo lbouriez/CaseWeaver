@@ -7,9 +7,22 @@ import {
   FrozenSnapshotAttachmentEvidencePort,
 } from "./attachment-evidence.js";
 import type { AnalysisExecution } from "./contracts.js";
+import { createPreparedAttachmentEvidenceIdentity } from "./identity.js";
 
 const digest = (value: string) =>
   createHash("sha256").update(value, "utf8").digest("hex");
+
+const preparedAttachmentEvidence = {
+  evidence: [
+    {
+      attachmentId: "attachment-1",
+      derivativeId: "derivative-1",
+      outputContentHash: digest("Normalized attachment evidence."),
+      outcome: "ready" as const,
+      required: true,
+    },
+  ],
+};
 
 const execution: AnalysisExecution = {
   workspaceId: "workspace-1",
@@ -63,12 +76,19 @@ const execution: AnalysisExecution = {
     },
     repair: { maximumAttempts: 0, maximumInputCharacters: 1_000 },
   },
+  preparedAttachments: {
+    ...preparedAttachmentEvidence,
+    identityHash: createPreparedAttachmentEvidenceIdentity(
+      preparedAttachmentEvidence,
+    ),
+  },
 };
 
 function port(input: {
   readonly text: string;
   readonly expectedHash?: string;
   readonly references?: readonly {
+    readonly occurrenceIdentity?: string;
     readonly attachmentId: string;
     readonly derivativeId: string;
     readonly processorVersion: string;
@@ -137,6 +157,24 @@ describe("FrozenSnapshotAttachmentEvidencePort", () => {
     });
   });
 
+  it("fails closed when the prepared attachment identity is forged", async () => {
+    await expect(
+      port({ text: "Normalized attachment evidence." }).resolve({
+        execution: {
+          ...execution,
+          preparedAttachments: {
+            ...preparedAttachmentEvidence,
+            identityHash: "a".repeat(64),
+          },
+        },
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toMatchObject<FrozenAttachmentEvidenceError>({
+      code: "analysis.attachmentEvidenceIntegrity",
+      retryable: false,
+    });
+  });
+
   it("redacts derivative-reader failures instead of propagating storage details", async () => {
     const hash = digest("Normalized attachment evidence.");
     const evidence = new FrozenSnapshotAttachmentEvidencePort({
@@ -169,26 +207,57 @@ describe("FrozenSnapshotAttachmentEvidencePort", () => {
     });
   });
 
-  it("rejects duplicate derivative references instead of double-prompting evidence", async () => {
+  it("keeps two occurrences of one binary distinct while reusing its derivative", async () => {
     const hash = digest("Normalized attachment evidence.");
+    const occurrences = {
+      evidence: [
+        {
+          occurrenceIdentity: "case-occurrence-1",
+          attachmentId: "attachment-1",
+          derivativeId: "derivative-1",
+          outputContentHash: hash,
+          outcome: "ready" as const,
+          required: true,
+        },
+        {
+          occurrenceIdentity: "case-occurrence-2",
+          attachmentId: "attachment-1",
+          derivativeId: "derivative-1",
+          outputContentHash: hash,
+          outcome: "ready" as const,
+          required: true,
+        },
+      ],
+    };
     await expect(
       port({
         text: "Normalized attachment evidence.",
         references: [
           {
+            occurrenceIdentity: "case-occurrence-1",
             attachmentId: "attachment-1",
             derivativeId: "derivative-1",
             processorVersion: "processor-v1",
             outputContentHash: hash,
           },
           {
-            attachmentId: "attachment-2",
+            occurrenceIdentity: "case-occurrence-2",
+            attachmentId: "attachment-1",
             derivativeId: "derivative-1",
             processorVersion: "processor-v1",
             outputContentHash: hash,
           },
         ],
-      }).resolve({ execution, signal: new AbortController().signal }),
-    ).rejects.toMatchObject({ code: "analysis.attachmentEvidenceIntegrity" });
+      }).resolve({
+        execution: {
+          ...execution,
+          preparedAttachments: {
+            ...occurrences,
+            identityHash: createPreparedAttachmentEvidenceIdentity(occurrences),
+          },
+        },
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({ evidence: [{}, {}] });
   });
 });

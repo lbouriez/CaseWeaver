@@ -22,6 +22,9 @@ interface RuntimeRow extends QueryResultRow {
   readonly chunking_profile_version: string | null;
   readonly synchronization_policy: unknown;
   readonly embedding_batch_size: number | null;
+  readonly attachment_stage_mode: string | null;
+  readonly attachment_policy_configuration_version_id: string | null;
+  readonly attachment_access_policy_hash: string | null;
   readonly embedding_binding_version_id: string;
   readonly embedding_profile_version: string;
   readonly dimensions: number;
@@ -65,6 +68,9 @@ export class PostgresPinnedKnowledgeSourceConfigurationResolver
          runtime.chunking_profile_version,
          runtime.synchronization_policy,
          runtime.embedding_batch_size,
+         runtime.attachment_stage_mode,
+         runtime.attachment_policy_configuration_version_id,
+         runtime.attachment_access_policy_hash,
          collection_runtime.embedding_binding_version_id,
          collection_runtime.embedding_profile_version,
          collection_runtime.dimensions,
@@ -250,6 +256,22 @@ function toPinnedRuntime(
     row.synchronization_policy,
   );
   if (synchronization === undefined) return undefined;
+  if (
+    (row.attachment_stage_mode === null ||
+      row.attachment_stage_mode === "disabled") &&
+    (row.attachment_policy_configuration_version_id !== null ||
+      row.attachment_access_policy_hash !== null)
+  ) {
+    return undefined;
+  }
+  const attachmentPreparation = pinnedAttachmentPreparation(row);
+  if (
+    attachmentPreparation === undefined &&
+    row.attachment_stage_mode !== "disabled" &&
+    row.attachment_stage_mode !== null
+  ) {
+    return undefined;
+  }
   return Object.freeze({
     workspaceId: row.workspace_id,
     sourceId: row.source_id,
@@ -281,6 +303,38 @@ function toPinnedRuntime(
     }),
     synchronization,
     embeddingBatchSize: row.embedding_batch_size,
+    ...(attachmentPreparation === undefined ? {} : { attachmentPreparation }),
+  });
+}
+
+/** Legacy rows are deliberately treated as no-attachment configurations. */
+function pinnedAttachmentPreparation(row: RuntimeRow):
+  | Readonly<{
+      readonly mode: "optional" | "required";
+      readonly policyVersion: string;
+      readonly accessPolicyHash: string;
+    }>
+  | undefined {
+  if (row.attachment_stage_mode === null) {
+    return undefined;
+  }
+  if (row.attachment_stage_mode === "disabled") {
+    return undefined;
+  }
+  if (
+    (row.attachment_stage_mode !== "optional" &&
+      row.attachment_stage_mode !== "required") ||
+    row.attachment_policy_configuration_version_id === null ||
+    row.attachment_access_policy_hash === null ||
+    !isIdentifier(row.attachment_policy_configuration_version_id) ||
+    !/^[a-f0-9]{64}$/u.test(row.attachment_access_policy_hash)
+  ) {
+    return undefined;
+  }
+  return Object.freeze({
+    mode: row.attachment_stage_mode,
+    policyVersion: row.attachment_policy_configuration_version_id,
+    accessPolicyHash: row.attachment_access_policy_hash,
   });
 }
 

@@ -25,6 +25,9 @@ describe("OpenTelemetry configuration", () => {
       {
         OTEL_EXPORTER_OTLP_ENDPOINT: "https://collector.example.test/otel/",
         OTEL_METRIC_EXPORT_INTERVAL_MS: "60000",
+        OTEL_EXPORTER_OTLP_HEADERS:
+          "Authorization=Bearer deployment-secret,X-Tenant=collector",
+        OTEL_TRACE_SAMPLE_RATIO: "0.1",
         OTEL_SERVICE_NAME: "caseweaver-standalone",
         OTEL_SERVICE_VERSION: "2026.7.14",
       },
@@ -36,7 +39,12 @@ describe("OpenTelemetry configuration", () => {
       serviceVersion: "2026.7.14",
       tracesEndpoint: "https://collector.example.test/otel/v1/traces",
       metricsEndpoint: "https://collector.example.test/otel/v1/metrics",
+      headers: {
+        Authorization: "Bearer deployment-secret",
+        "X-Tenant": "collector",
+      },
       metricExportIntervalMs: 60_000,
+      traceSampleRatio: 0.1,
     });
     const sdk = createOpenTelemetrySdk(config);
     expect(sdk).toBeDefined();
@@ -56,6 +64,24 @@ describe("OpenTelemetry configuration", () => {
     {
       OTEL_EXPORTER_OTLP_ENDPOINT: "https://collector.example.test",
       OTEL_METRIC_EXPORT_INTERVAL_MS: "10",
+    },
+    {
+      OTEL_EXPORTER_OTLP_ENDPOINT: "https://collector.example.test",
+      OTEL_EXPORTER_OTLP_HEADERS:
+        "Authorization=Bearer token,authorization=duplicate",
+    },
+    {
+      OTEL_EXPORTER_OTLP_ENDPOINT: "https://collector.example.test",
+      OTEL_TRACE_SAMPLE_RATIO: "1.1",
+    },
+    {
+      OTEL_EXPORTER_OTLP_ENDPOINT: "https://collector.example.test",
+      OTEL_EXPORTER_OTLP_HEADERS:
+        "X-Collector=accepted\r\nAuthorization=Bearer private-token",
+    },
+    {
+      OTEL_EXPORTER_OTLP_ENDPOINT: "https://collector.example.test",
+      OTEL_TRACE_SAMPLE_RATIO: "-0.01",
     },
   ])("rejects unsafe OpenTelemetry configuration", (environment) => {
     expect(() =>

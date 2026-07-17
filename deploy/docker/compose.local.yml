@@ -2,6 +2,7 @@ name: caseweaver-local
 
 x-api-image: &api-image ${CASEWEAVER_API_IMAGE:-caseweaver-api:local}
 x-worker-image: &worker-image ${CASEWEAVER_WORKER_IMAGE:-caseweaver-worker:local}
+x-attachment-processor-image: &attachment-processor-image ${CASEWEAVER_ATTACHMENT_PROCESSOR_IMAGE:-caseweaver-attachment-processor:local}
 x-scheduler-image: &scheduler-image ${CASEWEAVER_SCHEDULER_IMAGE:-caseweaver-scheduler:local}
 x-webhook-image: &webhook-image ${CASEWEAVER_WEBHOOK_IMAGE:-caseweaver-webhook:local}
 x-build-args: &build-args
@@ -46,6 +47,8 @@ services:
       dockerfile: deploy/docker/Dockerfile
       target: migration
       args: *build-args
+      provenance: false
+      sbom: false
     environment:
       DATABASE_URL: postgresql://caseweaver@postgres:5432/caseweaver
     depends_on:
@@ -72,6 +75,8 @@ services:
       dockerfile: deploy/docker/Dockerfile
       target: worker
       args: *build-args
+      provenance: false
+      sbom: false
     command: ["node", "dist/main.js", "migrate-queue"]
     environment:
       DATABASE_URL: postgresql://caseweaver@postgres:5432/caseweaver
@@ -97,6 +102,8 @@ services:
       dockerfile: deploy/docker/Dockerfile
       target: api
       args: *build-args
+      provenance: false
+      sbom: false
     environment:
       NODE_ENV: development
       HOST: 0.0.0.0
@@ -162,6 +169,8 @@ services:
       dockerfile: deploy/docker/Dockerfile
       target: worker
       args: *build-args
+      provenance: false
+      sbom: false
     environment:
       NODE_ENV: development
       DATABASE_URL: postgresql://caseweaver@postgres:5432/caseweaver
@@ -174,10 +183,17 @@ services:
       OBJECT_STORAGE_LOCAL_ROOT: /tmp/caseweaver-objects
       WORKER_GIT_TEMPORARY_DIRECTORY: /tmp/caseweaver-git
       WORKER_GIT_REMOTE_CACHE_DIRECTORY: /tmp/caseweaver-git-cache
+      WORKER_ATTACHMENT_RUNTIME_SOCKET_PATH: /var/run/caseweaver-attachments/processor.sock
+      WORKER_ATTACHMENT_RUNTIME_JOBS_DIRECTORY: /var/run/caseweaver-attachments/jobs
     depends_on:
       queue-migrate:
         condition: service_completed_successfully
         required: true
+      attachment-processor:
+        condition: service_healthy
+        required: true
+    volumes:
+      - caseweaver_local_attachment_runtime:/var/run/caseweaver-attachments
     read_only: true
     tmpfs:
       - /tmp:uid=1000,gid=1000,mode=0700
@@ -195,6 +211,38 @@ services:
       retries: 12
       start_period: 8s
 
+  attachment-processor:
+    image: *attachment-processor-image
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+      target: attachment-processor
+      args: *build-args
+      provenance: false
+      sbom: false
+    environment:
+      WORKER_ATTACHMENT_RUNTIME_SOCKET_PATH: /var/run/caseweaver-attachments/processor.sock
+      WORKER_ATTACHMENT_RUNTIME_JOBS_DIRECTORY: /var/run/caseweaver-attachments/jobs
+    read_only: true
+    volumes:
+      - caseweaver_local_attachment_runtime:/var/run/caseweaver-attachments
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    network_mode: none
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /var/run/caseweaver-attachments/processor.sock"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+      start_period: 2s
+
   scheduler:
     image: *scheduler-image
     build:
@@ -202,6 +250,8 @@ services:
       dockerfile: deploy/docker/Dockerfile
       target: scheduler
       args: *build-args
+      provenance: false
+      sbom: false
     environment:
       DATABASE_URL: postgresql://caseweaver@postgres:5432/caseweaver
     depends_on:
@@ -231,6 +281,8 @@ services:
       dockerfile: deploy/docker/Dockerfile
       target: webhook
       args: *build-args
+      provenance: false
+      sbom: false
     environment:
       DATABASE_URL: postgresql://caseweaver@postgres:5432/caseweaver
       WEBHOOK_HOST: 0.0.0.0
@@ -269,6 +321,8 @@ services:
       dockerfile: deploy/docker/Dockerfile
       target: admin
       args: *build-args
+      provenance: false
+      sbom: false
     environment:
       # Keep the API same-origin with the edge. This accepts either localhost or
       # 127.0.0.1 in a browser without a CORS/preflight dependency.
@@ -332,6 +386,12 @@ services:
 
 volumes:
   caseweaver_local_postgres_data:
+  caseweaver_local_attachment_runtime:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: uid=1000,gid=1000,mode=0700,size=536870912
 
 networks:
   # The database is private even inside this disposable stack; only API/migration

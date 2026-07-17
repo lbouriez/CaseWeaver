@@ -65,6 +65,22 @@ x-worker-environment: &worker-environment
   WORKER_GIT_TEMPORARY_DIRECTORY: ${WORKER_GIT_TEMPORARY_DIRECTORY:-/tmp/caseweaver-git}
   WORKER_GIT_REMOTE_CACHE_DIRECTORY: ${WORKER_GIT_REMOTE_CACHE_DIRECTORY:-/tmp/caseweaver-git-cache}
 
+# The worker and this processor share only a private ephemeral job directory.
+# The protocol carries a UUID, fixed processor choice, and bounded quotas—never
+# an object key, filename, URL, source content, credential, or database value.
+x-attachment-runtime-environment: &attachment-runtime-environment
+  WORKER_ATTACHMENT_RUNTIME_SOCKET_PATH: ${WORKER_ATTACHMENT_RUNTIME_SOCKET_PATH:-/var/run/caseweaver-attachments/processor.sock}
+  WORKER_ATTACHMENT_RUNTIME_JOBS_DIRECTORY: ${WORKER_ATTACHMENT_RUNTIME_JOBS_DIRECTORY:-/var/run/caseweaver-attachments/jobs}
+  WORKER_ATTACHMENT_RUNTIME_TIMEOUT_MS: ${WORKER_ATTACHMENT_RUNTIME_TIMEOUT_MS:-60000}
+  WORKER_ATTACHMENT_RUNTIME_MAXIMUM_MEMORY_BYTES: ${WORKER_ATTACHMENT_RUNTIME_MAXIMUM_MEMORY_BYTES:-536870912}
+  WORKER_ATTACHMENT_RUNTIME_MAXIMUM_INPUT_BYTES: ${WORKER_ATTACHMENT_RUNTIME_MAXIMUM_INPUT_BYTES:-67108864}
+  WORKER_ATTACHMENT_RUNTIME_MAXIMUM_OUTPUT_BYTES: ${WORKER_ATTACHMENT_RUNTIME_MAXIMUM_OUTPUT_BYTES:-8388608}
+  WORKER_ATTACHMENT_RUNTIME_MAXIMUM_FILES: ${WORKER_ATTACHMENT_RUNTIME_MAXIMUM_FILES:-1000}
+  WORKER_ATTACHMENT_RUNTIME_MAXIMUM_EXPANDED_BYTES: ${WORKER_ATTACHMENT_RUNTIME_MAXIMUM_EXPANDED_BYTES:-268435456}
+  WORKER_ATTACHMENT_RUNTIME_MAXIMUM_EXTRACTED_FILE_BYTES: ${WORKER_ATTACHMENT_RUNTIME_MAXIMUM_EXTRACTED_FILE_BYTES:-33554432}
+  WORKER_ATTACHMENT_RUNTIME_MAXIMUM_ARCHIVE_DEPTH: ${WORKER_ATTACHMENT_RUNTIME_MAXIMUM_ARCHIVE_DEPTH:-16}
+  WORKER_ATTACHMENT_RUNTIME_MAXIMUM_COMPRESSION_RATIO: ${WORKER_ATTACHMENT_RUNTIME_MAXIMUM_COMPRESSION_RATIO:-100}
+
 services:
   postgres:
     image: pgvector/pgvector:pg17
@@ -154,8 +170,42 @@ services:
     image: ${CASEWEAVER_WORKER_IMAGE:?Set CASEWEAVER_WORKER_IMAGE to a pinned worker image.}
     profiles: ["distributed"]
     environment:
-      <<: [*runtime-environment, *worker-environment]
+      <<: [*runtime-environment, *worker-environment, *attachment-runtime-environment]
       OTEL_SERVICE_NAME: caseweaver-worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: true
+      attachment-processor:
+        condition: service_healthy
+        required: true
+    volumes:
+      - caseweaver_attachment_runtime:/var/run/caseweaver-attachments
+
+  attachment-processor:
+    image: ${CASEWEAVER_ATTACHMENT_PROCESSOR_IMAGE:?Set CASEWEAVER_ATTACHMENT_PROCESSOR_IMAGE to a pinned attachment processor image.}
+    profiles: ["distributed"]
+    restart: unless-stopped
+    environment: *attachment-runtime-environment
+    read_only: true
+    volumes:
+      - caseweaver_attachment_runtime:/var/run/caseweaver-attachments
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    network_mode: none
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /var/run/caseweaver-attachments/processor.sock"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
 
 secrets:
   database-url:
@@ -165,6 +215,15 @@ secrets:
 
 volumes:
   caseweaver_postgres_data:
+  # Local-driver tmpfs keeps UDS job data ephemeral. This reference topology
+  # targets Linux Docker hosts; an orchestrator deployment must provide an
+  # equivalent private ephemeral volume before enabling attachment policies.
+  caseweaver_attachment_runtime:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: uid=1000,gid=1000,mode=0700,size=536870912
 
 networks:
   caseweaver-data:

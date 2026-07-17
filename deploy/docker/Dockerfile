@@ -166,6 +166,41 @@ USER node
 ENTRYPOINT ["/usr/local/bin/caseweaver-entrypoint"]
 CMD ["node", "dist/main.js", "start"]
 
+# The attachment processor is deliberately a separate no-network process. It
+# receives only a UUID/processor/quotas UDS protocol and a private shared jobs
+# volume; it has no database, Git, connector, provider, or Docker dependency.
+FROM dependencies AS attachment-processor-build
+
+RUN pnpm --filter @caseweaver/attachment-runtime... run build \
+    && pnpm --filter @caseweaver/attachment-runtime deploy --legacy --prod /opt/caseweaver/attachment-processor
+
+RUN set -eux; \
+    rm -rf /opt/caseweaver/attachment-processor/src; \
+    find /opt/caseweaver/attachment-processor/node_modules/@caseweaver -type d \( -name src -o -name test -o -name tests -o -name coverage -o -name .git \) -prune -exec rm -rf {} +; \
+    find /opt/caseweaver/attachment-processor/node_modules/.pnpm -type d -path '*/node_modules/@caseweaver/*/src' -prune -exec rm -rf {} +; \
+    find /opt/caseweaver/attachment-processor -type f \( -name '*.ts' -o -name '*.tsx' -o -name '*.map' -o -name '.env' -o -name '.env.*' \) -delete
+
+FROM ${NODE_IMAGE} AS attachment-processor
+
+ARG VERSION=dev
+ARG REVISION=unknown
+ARG SOURCE=https://github.com/caseweaver/caseweaver
+ARG CREATED=unknown
+LABEL org.opencontainers.image.title="CaseWeaver attachment processor" \
+      org.opencontainers.image.description="CaseWeaver no-network isolated attachment processor" \
+      org.opencontainers.image.source="${SOURCE}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.created="${CREATED}"
+
+ENV NODE_ENV=production
+WORKDIR /opt/caseweaver/attachment-processor
+
+COPY --from=attachment-processor-build --chown=node:node /opt/caseweaver/attachment-processor ./
+
+USER node
+CMD ["node", "dist/attachment-processor-main.js"]
+
 FROM dependencies AS scheduler-build
 
 RUN pnpm --filter @caseweaver/scheduler... run build \

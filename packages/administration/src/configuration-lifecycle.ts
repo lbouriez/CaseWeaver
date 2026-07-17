@@ -112,6 +112,35 @@ export interface ConfigurationLifecycleStore {
   ): Promise<void>;
 }
 
+/**
+ * Opt-in successor-draft persistence. Existing configuration surfaces retain
+ * their active/disabled transition contract; a feature that needs a fresh
+ * immutable draft revision explicitly implements this additional port.
+ */
+export interface ConfigurationDraftRevisionStore {
+  createDraftRevision(
+    input: Readonly<{
+      readonly workspaceId: string;
+      readonly resourceType: string;
+      readonly configurationId: string;
+      readonly expectedRevision: number;
+      readonly canonicalSettings: string;
+      readonly secretReferenceIds: readonly string[];
+      readonly descriptor?: ConfigurationDescriptorReference;
+      readonly displayName?: string;
+    }>,
+  ): Promise<
+    | Readonly<{
+        readonly configuration: VersionedConfiguration;
+        readonly version: ImmutableConfigurationVersion;
+      }>
+    | undefined
+  >;
+}
+
+export interface CreateConfigurationDraftRevisionCommand
+  extends Omit<ConfigurationTransitionCommand, "lifecycle"> {}
+
 export interface ConfigurationLifecycleAudit {
   append(
     input: Readonly<{
@@ -202,6 +231,95 @@ export class CreateConfigurationDraft {
         permission: "configuration.manage",
         outcome: "succeeded",
         afterHash: configurationCanonicalHash(canonicalSettings),
+      });
+      return Object.freeze({ ...created, idempotency: "created" as const });
+    });
+  }
+}
+
+/**
+ * Creates an inert immutable successor revision. The caller must supply a
+ * complete new write-only settings payload; this use case never reads a prior
+ * version's settings back into an administration response or command.
+ */
+export class CreateConfigurationDraftRevision {
+  public constructor(
+    private readonly transactions: AdministrationTransactionRunner,
+    private readonly store: ConfigurationLifecycleStore &
+      ConfigurationDraftRevisionStore,
+    private readonly audit: ConfigurationLifecycleAudit,
+  ) {}
+
+  public async execute(
+    command: CreateConfigurationDraftRevisionCommand,
+  ): Promise<ConfigurationTransitionResult> {
+    return this.transactions.transaction(async () => {
+      const existing = await this.store.findMutation({
+        workspaceId: command.workspaceId,
+        identity: command.mutation,
+      });
+      if (existing !== undefined) {
+        if (existing.requestDigest !== command.mutation.requestDigest) {
+          throw new IdempotencyConflictError();
+        }
+        const version = await this.store.loadVersion({
+          workspaceId: command.workspaceId,
+          resourceType: command.resourceType,
+          configurationId: command.configurationId,
+          versionId: existing.resourceId,
+        });
+        if (version === undefined) throw new AdministrationConflictError();
+        return Object.freeze({
+          configuration: Object.freeze({
+            id: command.configurationId,
+            workspaceId: command.workspaceId,
+            resourceType: command.resourceType,
+            revision: command.expectedRevision + 1,
+            lifecycle: "draft",
+            currentVersionId: version.id,
+          }),
+          version,
+          idempotency: "replayed" as const,
+        });
+      }
+
+      const canonicalSettings = canonicalizeConfiguration(command.settings);
+      const afterHash = configurationCanonicalHash(canonicalSettings);
+      const created = await this.store.createDraftRevision({
+        workspaceId: command.workspaceId,
+        resourceType: command.resourceType,
+        configurationId: command.configurationId,
+        expectedRevision: command.expectedRevision,
+        canonicalSettings,
+        secretReferenceIds: Object.freeze(
+          [...new Set(command.secretReferenceIds)].sort(),
+        ),
+        ...(command.descriptor === undefined
+          ? {}
+          : { descriptor: command.descriptor }),
+        ...(command.displayName === undefined
+          ? {}
+          : { displayName: command.displayName }),
+      });
+      if (created === undefined) throw new AdministrationConflictError();
+      await this.store.recordMutation({
+        workspaceId: command.workspaceId,
+        identity: command.mutation,
+        result: {
+          requestDigest: command.mutation.requestDigest,
+          resourceId: created.version.id,
+        },
+      });
+      await this.audit.append({
+        action: "admin.configuration.draftRevision.created",
+        targetType: command.resourceType,
+        targetId: command.configurationId,
+        permission: "configuration.manage",
+        outcome: "succeeded",
+        ...(command.beforeHash === undefined
+          ? {}
+          : { beforeHash: command.beforeHash }),
+        afterHash,
       });
       return Object.freeze({ ...created, idempotency: "created" as const });
     });

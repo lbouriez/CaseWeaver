@@ -13,6 +13,8 @@ import {
   gitMarkdownConfigurationSchema,
   gitMarkdownSettingsSchema,
 } from "./config.js";
+import type { GitMarkdownAttachmentLocatorCodec } from "./attachment-locator.js";
+import { GitMarkdownAttachmentSource } from "./git-markdown-attachment-source.js";
 import { GitMarkdownKnowledgeSource } from "./git-markdown-source.js";
 import type { GitRepository } from "./git-repository.js";
 
@@ -32,6 +34,11 @@ export interface GitMarkdownRuntimeRepositoryFactory {
 
 export interface CreateGitMarkdownRuntimeContributionOptions {
   readonly repositoryFactory: GitMarkdownRuntimeRepositoryFactory;
+  /**
+   * Trusted composition owns sealed-token key lifecycle. Without it, documents with
+   * attachment links fail closed and no attachment source capability is advertised.
+   */
+  readonly attachmentLocatorCodec?: GitMarkdownAttachmentLocatorCodec;
 }
 
 /**
@@ -52,12 +59,25 @@ export function createGitMarkdownRuntimeContribution(
     >[0]): Promise<ConnectorRuntimeCapabilities> {
       const parsed = parseRuntimeConfiguration(configuration);
       const repository = options.repositoryFactory.create();
+      const attachmentLocatorCodec = options.attachmentLocatorCodec;
+      const knowledgeSource = new GitMarkdownKnowledgeSource({
+        configuration: parsed,
+        repository,
+        secrets,
+        attachmentLocatorCodec,
+      });
       return Object.freeze({
-        knowledgeSource: new GitMarkdownKnowledgeSource({
-          configuration: parsed,
-          repository,
-          secrets,
-        }),
+        knowledgeSource,
+        ...(attachmentLocatorCodec === undefined
+          ? {}
+          : {
+              attachmentSource: new GitMarkdownAttachmentSource({
+                configuration: parsed,
+                repository,
+                secrets,
+                locatorCodec: attachmentLocatorCodec,
+              }),
+            }),
       });
     },
   });

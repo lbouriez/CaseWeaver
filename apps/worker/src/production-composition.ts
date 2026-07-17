@@ -3,6 +3,10 @@ import {
   createAnalysisExecuteHandler,
 } from "./feature-handlers/analysis.js";
 import {
+  createCaseDiscoveryHandler,
+  type RuntimeCaseDiscoveryService,
+} from "./feature-handlers/analysis-discovery.js";
+import {
   createDiagnosticsHandlers,
   type DiagnosticsRuntimeDependencies,
 } from "./feature-handlers/diagnostics.js";
@@ -32,6 +36,8 @@ export interface ProductionWorkerCompositionDependencies {
   readonly knowledge: KnowledgeRuntimeDependencies;
   readonly diagnostics: DiagnosticsRuntimeDependencies;
   readonly analysis: AnalysisOrchestratorFactory;
+  /** Target-free PBI-020 polling discovery before version-pinned capture. */
+  readonly discovery: Pick<RuntimeCaseDiscoveryService, "execute">;
   readonly publication: Readonly<{
     /** Capture and submit a version-pinned analysis trigger. */
     readonly trigger: AnalysisTriggerService;
@@ -60,6 +66,7 @@ export function createProductionWorkerCommandHandlers(
     ...createKnowledgeHandlers(dependencies.knowledge),
     analysis: Object.freeze({
       execute: createAnalysisExecuteHandler(dependencies.analysis),
+      discover: createCaseDiscoveryHandler(dependencies.discovery),
     }),
     publication: Object.freeze({
       trigger: publication.trigger,

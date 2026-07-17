@@ -3,6 +3,12 @@ import type { Permission } from "@caseweaver/security";
 import { z } from "zod";
 
 import type { ApiInstance } from "../../app.js";
+import {
+  type RepositoryAnalysisCreateDraftInput,
+  type RepositoryAnalysisCreateDraftRevisionInput,
+  type RepositoryAnalysisTransitionInput,
+  repositoryAnalysisApiSchemas,
+} from "./repository-analysis-api.js";
 
 const identifier = z
   .string()
@@ -29,6 +35,12 @@ const resource = z.enum([
   "retrieval-profiles",
   "prompt-profiles",
   "analysis-profiles",
+  "analysis-recipes",
+  "code-repositories",
+  "repository-execution-policies",
+  "attachment-policies",
+  "case-analysis-triggers",
+  "case-analysis-schedules",
   "analyses",
   "publications",
   "operation-jobs",
@@ -58,6 +70,19 @@ const action = z.enum([
   "connector.disable",
   "provider.activate",
   "provider.disable",
+  "repository.test",
+  "repository.activate",
+  "repository.disable",
+  "repository-execution-policy.activate",
+  "repository-execution-policy.disable",
+  "attachment-policy.activate",
+  "attachment-policy.disable",
+  "analysis-recipe.activate",
+  "analysis-recipe.disable",
+  "case-analysis-trigger.activate",
+  "case-analysis-trigger.disable",
+  "case-analysis-schedule.activate",
+  "case-analysis-schedule.disable",
   "diagnostics.export",
   "secret.rotate",
   "secret.revoke",
@@ -78,6 +103,18 @@ const draft = z
     settings: z.record(z.string().min(1).max(200), z.unknown()),
   })
   .strict();
+/** The browser selects an already-versioned policy; it never supplies limits,
+ * processor settings, a vision binding, or an attachment locator. */
+const sourceAttachmentStage = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("disabled") }).strict(),
+  z
+    .object({
+      mode: z.enum(["optional", "required"]),
+      attachmentPolicyId: identifier,
+      attachmentPolicyConfigurationVersionId: identifier,
+    })
+    .strict(),
+]);
 const sourceDraft = z
   .object({
     displayName: z.string().trim().min(1).max(160),
@@ -89,6 +126,7 @@ const sourceDraft = z
     chunkingProfileVersion: identifier,
     embeddingBatchSize: z.number().int().min(1).max(1_000),
     embeddingBudgetPolicyId: identifier,
+    attachmentStage: sourceAttachmentStage,
     synchronizationPolicy: z
       .record(z.string().min(1).max(200), z.unknown())
       .refine((value) => Object.keys(value).length <= 100),
@@ -383,6 +421,34 @@ export interface AdministrationRouteOperations {
     context: AdminRequestContext,
   ): Promise<unknown>;
   configurationSurfaces(context: AdminRequestContext): Promise<unknown>;
+  repositoryAnalysisOptions?(context: AdminRequestContext): Promise<unknown>;
+  createRepositoryAnalysisDraft?(
+    input: RepositoryAnalysisCreateDraftInput,
+    context: AdminRequestContext,
+  ): Promise<unknown>;
+  createRepositoryAnalysisDraftRevision?(
+    input: RepositoryAnalysisCreateDraftRevisionInput,
+    context: AdminRequestContext,
+  ): Promise<unknown>;
+  transitionRepositoryAnalysis?(
+    input: RepositoryAnalysisTransitionInput,
+    context: AdminRequestContext,
+  ): Promise<unknown>;
+  previewRepositoryAnalysisDraftTest?(
+    input: Readonly<{
+      readonly repositoryId: string;
+      readonly candidateVersionId: string;
+    }>,
+    context: AdminRequestContext,
+  ): Promise<unknown>;
+  executeRepositoryAnalysisDraftTest?(
+    input: Readonly<{
+      readonly repositoryId: string;
+      readonly candidateVersionId: string;
+      readonly confirmationId: string;
+    }>,
+    context: AdminRequestContext,
+  ): Promise<unknown>;
   createDraft(
     kind: "connector" | "ai-provider",
     input: z.infer<typeof draft>,
@@ -1818,6 +1884,129 @@ export function registerAdministrationRoutes(
       await operations.resolve(request, { mutation: true }),
     );
   });
+
+  const unavailableRepositoryAnalysis = (reply: {
+    status(code: number): { send(value: unknown): unknown };
+  }) => failure(reply, 503, "service.unavailable");
+  const repositoryAnalysisMutation = async <T>(
+    request: {
+      readonly headers: Record<string, unknown>;
+      readonly body: unknown;
+    },
+    reply: { status(code: number): { send(value: unknown): unknown } },
+    input: z.ZodType<T>,
+    actionCode: string,
+    targetType: string,
+    targetId: string,
+    execute: (input: T, context: AdminRequestContext) => Promise<unknown>,
+  ) => {
+    const audit = invalidMutationAudit(
+      actionCode,
+      "configuration.manage",
+      targetType,
+      targetId,
+    );
+    if (!(await requireIdempotency(operations, request, reply, audit))) return;
+    const body = input.safeParse(request.body);
+    if (!body.success) {
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(audit, "request.invalid"),
+      );
+    }
+    return execute(
+      body.data,
+      await operations.resolve(request, { mutation: true }),
+    );
+  };
+
+  app.get("/v1/admin/repository-analysis/options", async (request, reply) => {
+    if (operations.repositoryAnalysisOptions === undefined)
+      return unavailableRepositoryAnalysis(reply);
+    reply.header("cache-control", "no-store, private");
+    return operations.repositoryAnalysisOptions(
+      await operations.resolve(request, { mutation: false }),
+    );
+  });
+  app.post("/v1/admin/repository-analysis/drafts", async (request, reply) => {
+    const create = operations.createRepositoryAnalysisDraft;
+    if (create === undefined) return unavailableRepositoryAnalysis(reply);
+    return repositoryAnalysisMutation(
+      request,
+      reply,
+      repositoryAnalysisApiSchemas.createDraft,
+      "admin.repositoryAnalysis.draft.invalid",
+      "repository_analysis_configuration",
+      "new",
+      (input, context) => create(input, context),
+    );
+  });
+  app.post(
+    "/v1/admin/repository-analysis/draft-revisions",
+    async (request, reply) => {
+      const create = operations.createRepositoryAnalysisDraftRevision;
+      if (create === undefined) return unavailableRepositoryAnalysis(reply);
+      return repositoryAnalysisMutation(
+        request,
+        reply,
+        repositoryAnalysisApiSchemas.createDraftRevision,
+        "admin.repositoryAnalysis.draftRevision.invalid",
+        "repository_analysis_configuration",
+        "invalid",
+        (input, context) => create(input, context),
+      );
+    },
+  );
+  app.post(
+    "/v1/admin/repository-analysis/lifecycle",
+    async (request, reply) => {
+      const transition = operations.transitionRepositoryAnalysis;
+      if (transition === undefined) return unavailableRepositoryAnalysis(reply);
+      return repositoryAnalysisMutation(
+        request,
+        reply,
+        repositoryAnalysisApiSchemas.transition,
+        "admin.repositoryAnalysis.lifecycle.invalid",
+        "repository_analysis_configuration",
+        "invalid",
+        (input, context) => transition(input, context),
+      );
+    },
+  );
+  app.post(
+    "/v1/admin/repository-analysis/code-repositories/draft-tests/previews",
+    async (request, reply) => {
+      const preview = operations.previewRepositoryAnalysisDraftTest;
+      if (preview === undefined) return unavailableRepositoryAnalysis(reply);
+      return repositoryAnalysisMutation(
+        request,
+        reply,
+        repositoryAnalysisApiSchemas.draftTestPreview,
+        "admin.codeRepository.draftTest.preview.invalid",
+        "code_repository",
+        "invalid",
+        (input, context) => preview(input, context),
+      );
+    },
+  );
+  app.post(
+    "/v1/admin/repository-analysis/code-repositories/draft-tests/executions",
+    async (request, reply) => {
+      const execute = operations.executeRepositoryAnalysisDraftTest;
+      if (execute === undefined) return unavailableRepositoryAnalysis(reply);
+      return repositoryAnalysisMutation(
+        request,
+        reply,
+        repositoryAnalysisApiSchemas.draftTestExecution,
+        "admin.codeRepository.draftTest.execute.invalid",
+        "code_repository",
+        "invalid",
+        (input, context) => execute(input, context),
+      );
+    },
+  );
 
   app.get("/v1/admin/configuration-surfaces", async (request) =>
     operations.configurationSurfaces(

@@ -1,4 +1,4 @@
-import { secretReference, type SecretReference } from "@caseweaver/domain";
+import { type SecretReference, secretReference } from "@caseweaver/domain";
 import { z } from "zod";
 
 export const CONNECTOR_SCHEMA_VERSION = 1 as const;
@@ -45,6 +45,33 @@ export type ExternalReference = z.infer<typeof externalReferenceSchema>;
 export type CaseReference = ExternalReference;
 export type AttachmentReference = ExternalReference;
 export type KnowledgeReference = ExternalReference;
+
+const opaqueAttachmentLocatorValueSchema = z
+  .string()
+  .min(1)
+  // A sealed durable locator may contain a public image address. It remains
+  // server-private and is deliberately larger than a normal opaque value so it
+  // never requires an unsafe process-local reverse lookup during retries.
+  .max(16_384)
+  .regex(
+    /^[A-Za-z0-9_-]+$/,
+    "Attachment locators must be URL-safe opaque tokens, not URLs or file paths.",
+  );
+
+/**
+ * A connector-private, durable handle used only by trusted server-side attachment
+ * source code to reopen an attachment occurrence. It deliberately accepts only an
+ * opaque URL-safe token: URLs, host paths, credentials, and connector-specific
+ * transport details must never become normalized records or public DTOs.
+ */
+export const attachmentLocatorSchema = z
+  .object({
+    version: opaqueValueVersionSchema,
+    value: opaqueAttachmentLocatorValueSchema,
+  })
+  .strict();
+
+export type AttachmentLocator = z.infer<typeof attachmentLocatorSchema>;
 
 export const secretReferenceSchema = z
   .string()

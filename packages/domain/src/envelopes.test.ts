@@ -25,6 +25,35 @@ const envelopeMetadata = {
 };
 
 describe("analysis trigger command envelopes", () => {
+  it("creates a target-free, exact-pinned case-discovery command", () => {
+    const envelope = createEnvelope({
+      ...envelopeMetadata,
+      type: "analysis.discover.v1",
+      payload: {
+        scheduleId: "intake-schedule-1",
+        scheduleConfigurationVersionId: "intake-schedule-version-3",
+        triggerId: analysisTriggerId("trigger-1"),
+        triggerVersionId: analysisTriggerVersionId("trigger-version-2"),
+        connectorRegistrationId: "connector-1",
+        connectorConfigurationVersionId: "connector-configuration-8",
+        occurrenceKey: "occurrence-1",
+      },
+    });
+
+    expect(envelope).toMatchObject<EnvelopeFor<"analysis.discover.v1">>({
+      type: "analysis.discover.v1",
+      kind: "command",
+      payload: {
+        scheduleId: "intake-schedule-1",
+        scheduleConfigurationVersionId: "intake-schedule-version-3",
+        triggerId: "trigger-1",
+        triggerVersionId: "trigger-version-2",
+      },
+    });
+    expect(JSON.stringify(envelope)).not.toContain("cursor");
+    expect(JSON.stringify(envelope)).not.toContain("secret");
+  });
+
   it("creates a version-pinned trigger v2 command without configuration data", () => {
     const envelope = createEnvelope({
       ...envelopeMetadata,

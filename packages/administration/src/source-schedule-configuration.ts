@@ -14,6 +14,18 @@ import type { MutationIdentity } from "./configuration.js";
 export type KnowledgeSourceProjectionLifecycle = "enabled" | "disabled";
 export type KnowledgeScheduleKind = "synchronize" | "fullRescan";
 
+/**
+ * Source-owned immutable attachment selection. A source never borrows an
+ * analysis recipe's policy or a mutable current attachment-policy pointer.
+ */
+export type KnowledgeSourceAttachmentStage =
+  | Readonly<{ readonly mode: "disabled" }>
+  | Readonly<{
+      readonly mode: "optional" | "required";
+      readonly attachmentPolicyId: string;
+      readonly attachmentPolicyConfigurationVersionId: string;
+    }>;
+
 export type KnowledgeScheduleCadence =
   | Readonly<{
       readonly kind: "cron";
@@ -47,6 +59,8 @@ export interface KnowledgeSourceConfigurationProjection {
   readonly embeddingBatchSize: number;
   /** An active hard policy is resolved to an immutable policy revision by storage. */
   readonly embeddingBudgetPolicyId: string;
+  /** Exact source attachment policy selection; disabled is explicit. */
+  readonly attachmentStage: KnowledgeSourceAttachmentStage;
   readonly synchronizationPolicy: Readonly<Record<string, unknown>>;
   readonly deletionBehavior: "tombstone" | "retain";
 }
@@ -333,6 +347,27 @@ function assertSource(source: KnowledgeSourceConfigurationProjection): void {
   ) {
     throw new RangeError("Knowledge source embedding batch size is invalid.");
   }
+  assertAttachmentStage(source.attachmentStage);
+}
+
+function assertAttachmentStage(value: KnowledgeSourceAttachmentStage): void {
+  if (value.mode === "disabled") {
+    if (Object.keys(value).length !== 1) {
+      throw new RangeError("Disabled source attachment stage is invalid.");
+    }
+    return;
+  }
+  if (
+    (value.mode !== "optional" && value.mode !== "required") ||
+    Object.keys(value).length !== 3
+  ) {
+    throw new RangeError("Knowledge source attachment stage is invalid.");
+  }
+  assertIdentifier(value.attachmentPolicyId, "Knowledge source attachment policy");
+  assertIdentifier(
+    value.attachmentPolicyConfigurationVersionId,
+    "Knowledge source attachment policy version",
+  );
 }
 
 function assertSchedule(

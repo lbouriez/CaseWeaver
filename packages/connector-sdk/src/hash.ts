@@ -1,16 +1,19 @@
 import { createHash } from "node:crypto";
 
-import { sha256Digest, type Sha256Digest } from "@caseweaver/domain";
+import { type Sha256Digest, sha256Digest } from "@caseweaver/domain";
 
 import { ConnectorIdempotencyConflictError } from "./errors.js";
 import type {
   AttachmentMetadata,
+  AttachmentOccurrence,
   NormalizedActor,
   NormalizedCase,
 } from "./schemas.js";
 
 export const CASE_NORMALIZATION_VERSION =
   "caseweaver.case-normalization.v1" as const;
+export const ATTACHMENT_OCCURRENCE_IDENTITY_VERSION =
+  "caseweaver.attachment-occurrence.v1" as const;
 
 type CanonicalJson =
   | null
@@ -102,6 +105,34 @@ function attachmentRevisionInput(attachment: AttachmentMetadata): object {
 }
 
 /**
+ * Selects the durable, content-relevant identity of an observed attachment location.
+ * The server-private reopen locator is deliberately excluded: rotating a connector's
+ * opaque handle must not change a case revision or force fresh attachment processing.
+ */
+export function attachmentOccurrenceIdentityInput(
+  occurrence: AttachmentOccurrence,
+  identityVersion = ATTACHMENT_OCCURRENCE_IDENTITY_VERSION,
+): object {
+  return {
+    identityVersion,
+    owner: occurrence.owner,
+    ordinal: occurrence.ordinal,
+    relation: occurrence.relation,
+    reference: occurrence.reference,
+    declared: occurrence.declared,
+  };
+}
+
+export function attachmentOccurrenceIdentity(
+  occurrence: AttachmentOccurrence,
+  identityVersion = ATTACHMENT_OCCURRENCE_IDENTITY_VERSION,
+): Sha256Digest {
+  return sha256CanonicalJson(
+    attachmentOccurrenceIdentityInput(occurrence, identityVersion),
+  );
+}
+
+/**
  * Selects only neutral content-bearing fields. Connector metadata, source observation
  * time, and original (potentially non-normalized) message bodies are intentionally
  * excluded from a case revision.
@@ -170,8 +201,14 @@ export function normalizedCaseRevisionInput(
       },
       externalRevision: message.externalRevision,
       attachments: message.attachments.map(attachmentRevisionInput),
+      attachmentOccurrences: message.attachmentOccurrences?.map((occurrence) =>
+        attachmentOccurrenceIdentityInput(occurrence),
+      ),
     })),
     attachments: caseSnapshot.attachments.map(attachmentRevisionInput),
+    attachmentOccurrences: caseSnapshot.attachmentOccurrences?.map(
+      (occurrence) => attachmentOccurrenceIdentityInput(occurrence),
+    ),
   };
 }
 

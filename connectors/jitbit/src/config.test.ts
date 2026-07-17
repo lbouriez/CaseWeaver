@@ -5,7 +5,9 @@ import {
   jitbitAdministrationDescriptor,
   jitbitAdministrationDescriptorRevisions,
   legacyJitbitAdministrationDescriptor,
+  previousJitbitAdministrationDescriptor,
   validateJitbitAdministrationSettings,
+  versionTwoJitbitAdministrationDescriptor,
 } from "./administration-descriptor.js";
 import { createJitbitConfiguration } from "./fakes.js";
 
@@ -33,7 +35,7 @@ describe("Jitbit configuration", () => {
   });
 
   it("publishes the current immutable descriptor revision with the schema timeout field", () => {
-    expect(jitbitAdministrationDescriptor.version).toBe("3");
+    expect(jitbitAdministrationDescriptor.version).toBe("4");
     expect(
       jitbitAdministrationDescriptor.settingsSchema.properties,
     ).toHaveProperty("requestTimeoutMs");
@@ -46,8 +48,16 @@ describe("Jitbit configuration", () => {
     ).toHaveProperty("timeoutMs");
     expect(jitbitAdministrationDescriptorRevisions).toEqual([
       legacyJitbitAdministrationDescriptor,
+      versionTwoJitbitAdministrationDescriptor,
+      previousJitbitAdministrationDescriptor,
       jitbitAdministrationDescriptor,
     ]);
+    expect(jitbitAdministrationDescriptor.connectorCapabilities).toContain(
+      "attachmentSource",
+    );
+    expect(
+      previousJitbitAdministrationDescriptor.connectorCapabilities,
+    ).not.toContain("attachmentSource");
   });
 
   it("validates the current descriptor shape against the authoritative settings schema", () => {

@@ -138,6 +138,15 @@ const gitReferenceSchema = z.discriminatedUnion("kind", [
       name: gitReferenceNameSchema,
     })
     .strict(),
+  z
+    .object({
+      // An exact object ID is useful for a deliberately reproducible source
+      // or repository-analysis checkout.  It is not an arbitrary refspec and
+      // it is still verified as a commit by the runtime.
+      kind: z.literal("commit"),
+      sha: z.string().regex(/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/iu),
+    })
+    .strict(),
 ]);
 
 const docusaurusSettingsSchema = z

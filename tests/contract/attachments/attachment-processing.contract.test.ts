@@ -17,6 +17,7 @@ const inputSha256 = createHash("sha256").update(inputBytes).digest("hex");
 const quotas = {
   timeoutMs: 100,
   maximumMemoryBytes: 1_024,
+  maximumInputBytes: 1_024,
   maximumOutputBytes: 10,
   maximumFiles: 1,
   maximumExpandedBytes: 1_024,

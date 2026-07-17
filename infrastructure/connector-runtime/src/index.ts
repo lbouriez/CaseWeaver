@@ -5,6 +5,7 @@ import {
 } from "@caseweaver/administration";
 import {
   type AnalysisDestination,
+  type AttachmentSource,
   type CaseSource,
   ConnectorCancelledError,
   type ConnectorCapability,
@@ -31,6 +32,7 @@ export interface ConnectorRuntimeContribution {
 export interface ConnectorRuntimeCapabilities {
   readonly knowledgeSource?: KnowledgeSource;
   readonly caseSource?: CaseSource;
+  readonly attachmentSource?: AttachmentSource;
   readonly analysisDestination?: AnalysisDestination;
 }
 
@@ -91,6 +93,21 @@ export class RuntimeConnectorCapabilityResolver {
       throw new RuntimeConnectorCapabilityUnavailableError();
     }
     return capabilities.caseSource;
+  }
+
+  /**
+   * Resolves a declared attachment stream source from the exact immutable
+   * connector configuration selected by durable work. Attachment bytes remain
+   * entirely server-side; this method never receives an external locator.
+   */
+  public async resolveAttachmentSource(
+    input: ExactCapabilityRequest,
+  ): Promise<AttachmentSource> {
+    const capabilities = await this.resolve(input, "attachmentSource");
+    if (capabilities.attachmentSource === undefined) {
+      throw new RuntimeConnectorCapabilityUnavailableError();
+    }
+    return capabilities.attachmentSource;
   }
 
   public async resolveAnalysisDestination(

@@ -17,6 +17,9 @@ export interface PinnedRepositoryFile {
   readonly lineCount: number;
 }
 
+/** Broker-only checkout material. Never hand this to a provider adapter. */
+export type RepositoryCheckoutMaterial = ConfiguredRepository;
+
 /**
  * The broker is the sole recipient of checkout authentication. A sanitized tree is
  * deliberately an opaque identifier plus a manifest, never a local path or remote.
@@ -30,9 +33,33 @@ export interface SanitizedPinnedTree {
 
 export interface RepositoryCheckoutBroker {
   checkout(
-    configuration: AdministratorRepositoryConfiguration,
+    configuration: RepositoryCheckoutMaterial,
     signal: AbortSignal,
   ): Promise<SanitizedPinnedTree>;
+}
+
+/**
+ * Reads only a regular UTF-8 text blob from a private prepared tree. The
+ * attested runtime uses it to calculate citation hashes; no provider receives
+ * the directory, remote, credential, or source bytes through this port.
+ */
+export interface PreparedRepositoryTreeReader {
+  readText(input: {
+    readonly tree: SanitizedPinnedTree;
+    readonly path: string;
+    readonly signal: AbortSignal;
+  }): Promise<string>;
+}
+
+/** Server-private materialization sink shared by checkout adapters and OCI. */
+export interface PreparedRepositoryTreeRegistrar {
+  register(
+    value: SanitizedPinnedTree & {
+      readonly directory: string;
+      /** Server-private parent removed with the prepared tree. */
+      readonly cleanupDirectory: string;
+    },
+  ): void;
 }
 
 export interface RepositorySandboxAttestation {
@@ -42,6 +69,9 @@ export interface RepositorySandboxAttestation {
   readonly disposableFilesystem: boolean;
   readonly toolAllowlistEnforced: boolean;
   readonly quotasEnforced: boolean;
+  readonly unprivilegedUser: boolean;
+  readonly immutableImage: boolean;
+  readonly readOnlyRepositoryMount: boolean;
 }
 
 export interface RepositorySandboxSession {
@@ -70,7 +100,8 @@ export class RepositoryRuntimeError extends Error {
       | "repository.runtimeConfiguration"
       | "repository.runtimeIsolation"
       | "repository.runtimeTimeout"
-      | "repository.runtimeOutput",
+      | "repository.runtimeOutput"
+      | "repository.runtimePreparation",
     message: string,
   ) {
     super(message);
