@@ -90,6 +90,9 @@ importers:
       '@caseweaver/administration':
         specifier: workspace:*
         version: link:../../packages/administration
+      '@caseweaver/ai-catalog-source':
+        specifier: workspace:*
+        version: link:../../infrastructure/ai-catalog
       '@caseweaver/ai-config':
         specifier: workspace:*
         version: link:../../packages/ai-config
@@ -414,6 +417,25 @@ importers:
         specifier: 4.0.18
         version: 4.0.18(@opentelemetry/api@1.9.1)(@types/node@22.19.7)(jiti@2.7.0)(jsdom@26.1.0)(tsx@4.21.0)(yaml@2.9.0)
 
+  infrastructure/ai-catalog:
+    dependencies:
+      '@caseweaver/administration':
+        specifier: workspace:*
+        version: link:../../packages/administration
+      '@caseweaver/ai-config':
+        specifier: workspace:*
+        version: link:../../packages/ai-config
+    devDependencies:
+      '@types/node':
+        specifier: 22.19.7
+        version: 22.19.7
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.0.18
+        version: 4.0.18(@opentelemetry/api@1.9.1)(@types/node@22.19.7)(jiti@2.7.0)(jsdom@26.1.0)(tsx@4.21.0)(yaml@2.9.0)
+
   infrastructure/ai-provider-runtime:
     dependencies:
       '@caseweaver/ai-config':
@@ -634,6 +656,9 @@ importers:
       '@caseweaver/ai-execution':
         specifier: workspace:*
         version: link:../ai-execution
+      '@caseweaver/ai-sdk':
+        specifier: workspace:*
+        version: link:../ai-sdk
       '@caseweaver/domain':
         specifier: workspace:*
         version: link:../domain

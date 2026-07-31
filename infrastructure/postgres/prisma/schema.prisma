@@ -92,6 +92,7 @@ model Workspace {
   administrationSessions                    AdministrationSession[]
   administrationLoginTransactions           AdministrationLoginTransaction[]
   oidcIdentityMappings                      OidcIdentityMapping[]
+  aiProviderModelInventorySnapshots         AiProviderModelInventorySnapshot[]
 
   @@map("workspaces")
 }
@@ -2086,6 +2087,31 @@ model AiProviderInstanceVersion {
   @@unique([workspaceId, id])
   @@unique([workspaceId, providerInstanceId, version])
   @@map("ai_provider_instance_versions")
+}
+
+/**
+ * Immutable, workspace-scoped inventory acquired from one active provider
+ * version. `catalogSnapshotId` identifies a safe synthetic catalog projection
+ * used by the established binding/pricing machinery; raw provider JSON,
+ * endpoint details, and credentials never enter either table.
+ */
+model AiProviderModelInventorySnapshot {
+  id                        String   @id
+  workspaceId               String   @map("workspace_id")
+  providerInstanceId        String   @map("provider_instance_id")
+  providerInstanceVersionId String   @map("provider_instance_version_id")
+  catalogSnapshotId         String   @unique @map("catalog_snapshot_id")
+  contentSha256             String   @map("content_sha256")
+  discoveredAt              DateTime @map("discovered_at") @db.Timestamptz(6)
+  modelCount                Int      @map("model_count")
+  pricedModelCount          Int      @map("priced_model_count")
+  createdAt                 DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace                 Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, providerInstanceVersionId, contentSha256])
+  @@index([workspaceId, providerInstanceId, discoveredAt])
+  @@map("ai_provider_model_inventory_snapshots")
 }
 
 model AiModelBinding {

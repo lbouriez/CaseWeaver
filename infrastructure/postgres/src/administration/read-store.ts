@@ -199,27 +199,51 @@ export class PostgresAdministrationReadStore
       select: { secretReference: true },
     });
     if (registration === null) return Object.freeze([]);
+    // Only an aggregate's current *active* version can be broken by revocation.
+    // Historical versions remain immutable evidence and intentionally do not
+    // prevent lifecycle management of an otherwise unused reference.
+    const activeConfigurations =
+      await this.client.administrationConfiguration.findMany({
+        where: {
+          workspaceId: input.workspaceId,
+          lifecycle: "active",
+          currentVersionId: { not: null },
+        },
+        select: { id: true, resourceType: true, currentVersionId: true },
+      });
+    const currentVersionIds = activeConfigurations.flatMap((configuration) =>
+      configuration.currentVersionId === null
+        ? []
+        : [configuration.currentVersionId],
+    );
+    if (currentVersionIds.length === 0) return Object.freeze([]);
     const versions =
       await this.client.administrationConfigurationVersion.findMany({
         where: {
           workspaceId: input.workspaceId,
+          id: { in: currentVersionIds },
           secretReferences: { array_contains: [registration.secretReference] },
         },
-        distinct: ["configurationId"],
-        orderBy: [{ configurationId: "asc" }, { version: "desc" }],
-        take: 20,
-        select: {
-          configurationId: true,
-          configuration: { select: { resourceType: true } },
-        },
+        select: { configurationId: true },
       });
+    const byId = new Map(
+      activeConfigurations.map((configuration) => [
+        configuration.id,
+        configuration.resourceType,
+      ]),
+    );
     return Object.freeze(
-      versions.map((version) =>
-        Object.freeze({
-          configurationId: version.configurationId,
-          resourceType: version.configuration.resourceType,
-        }),
-      ),
+      versions.slice(0, 20).flatMap((version) => {
+        const resourceType = byId.get(version.configurationId);
+        return resourceType === undefined
+          ? []
+          : [
+              Object.freeze({
+                configurationId: version.configurationId,
+                resourceType,
+              }),
+            ];
+      }),
     );
   }
 

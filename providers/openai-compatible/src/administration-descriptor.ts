@@ -5,6 +5,7 @@ const administrationSettingsSchema = z
   .object({
     endpoint: z.url().refine((value) => new URL(value).protocol === "https:"),
     secretReference: z.string().trim().min(1).max(500),
+    wireApi: z.enum(["embeddings", "chatCompletions", "responses"]),
     defaultTimeoutMs: z.number().int().min(1).max(300000).default(30000),
   })
   .strict();
@@ -14,9 +15,10 @@ export const openAiCompatibleAdministrationDescriptor: ConfigurationDescriptor =
   Object.freeze({
     kind: "aiProvider",
     type: "openai-compatible",
-    // Existing version 1 rows remain immutable configuration history. Version
-    // 2 improves only the safe operator guidance presented by the console.
-    version: "2",
+    // Earlier rows remain immutable history. Version 3 makes the protocol mode
+    // explicit so a single endpoint can be configured as separate immutable
+    // embedding and analysis instances without hidden first-item selection.
+    version: "3",
     displayName: "OpenAI-compatible",
     description:
       "Uses a configured OpenAI-compatible HTTPS endpoint through the metered AI execution gateway.",
@@ -40,6 +42,13 @@ export const openAiCompatibleAdministrationDescriptor: ConfigurationDescriptor =
           description:
             "Choose the registered secret location for this provider credential. The API key is never entered, returned, or displayed by the console.",
         },
+        wireApi: {
+          type: "string",
+          title: "API capability",
+          enum: ["embeddings", "chatCompletions", "responses"],
+          description:
+            "Select the OpenAI-compatible API family this immutable provider instance will use. Create a separate instance for embeddings and for chat or analysis; the server never guesses or switches protocol mode at runtime.",
+        },
         defaultTimeoutMs: {
           type: "integer",
           title: "Default timeout (ms)",
@@ -47,14 +56,14 @@ export const openAiCompatibleAdministrationDescriptor: ConfigurationDescriptor =
             "Maximum time the execution gateway waits for a provider call before it is treated as unavailable. This is a default in milliseconds; request-specific server limits still apply.",
         },
       },
-      required: ["endpoint", "secretReference"],
+      required: ["endpoint", "secretReference", "wireApi"],
       additionalProperties: false,
     },
     uiGroups: [
       {
         id: "connection",
         title: "Connection",
-        fields: ["endpoint", "secretReference", "defaultTimeoutMs"],
+        fields: ["endpoint", "secretReference", "wireApi", "defaultTimeoutMs"],
         advanced: false,
       },
     ],

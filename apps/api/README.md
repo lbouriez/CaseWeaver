@@ -1,6 +1,6 @@
 # API application
 
-**PBIs:** 001, 002, 012, 013, 016
+**PBIs:** 001, 002, 012, 013, 016, 021
 
 Authenticated control-plane HTTP API for configuration, synchronization requests,
 analysis jobs, approvals, publications, evidence, budgets, and cost queries.
@@ -110,3 +110,42 @@ API lifecycle without binding its port. `startApi` retains the executable behavi
 starting that runtime. A standalone host passes `startTelemetry: false` so it can own a
 single process-wide OpenTelemetry lifecycle; API resources still close with the Fastify
 application and no policy or transport behavior is duplicated.
+
+## PBI-021 trusted AI catalog and secret lifecycle
+
+`infrastructure/ai-catalog` is a deployment-owned LiteLLM GitHub source composed here.
+The browser can request a refresh but cannot select an upstream URL, commit, raw bytes,
+or credential. The adapter resolves a commit, downloads bounded HTTPS bytes from fixed
+hosts, hashes them, and passes them to the existing immutable catalog importer. Set the
+optional `AI_CATALOG_LITELLM_COMMIT_SHA` to a 40-character trusted commit when a
+deployment requires a fixed source revision.
+
+`POST /v1/admin/ai/provider-instances/:id/models/refresh` asks only the active
+provider's registered server-side adapter for a bounded model inventory. Its credential,
+endpoint, raw response, and account metadata stay in trusted composition. The resulting
+workspace-scoped immutable inventory is tied to the exact active provider version and is
+the sole availability source for `GET /v1/admin/ai/binding-options`; a LiteLLM catalog
+only enriches exact canonical-name pricing matches. Binding creation repeats the same
+inventory check, so a global catalog model cannot be submitted as a bypass. Unknown
+prices remain unknown and cannot satisfy a hard budget. The binding-options DTO also
+retains the safe provider identity needed to author an explicit override for that same
+provider-owned model; it never permits a global catalog model to become executable. The
+OpenAI-compatible descriptor
+carries an immutable protocol mode, so its provider capability test probes embeddings
+for an embeddings instance and generation for a chat/responses instance. Tests remain
+confirmation-bound, known-price/budget-gated, rate-limited, and execute only through
+`@caseweaver/ai-execution`.
+
+External secret lifecycle is owned by the Access & security registry. Registration,
+rotation-required marking, explicit external-rotation reconciliation, and guarded
+revocation are transactional with server-owned audits. Reconciliation changes only
+opaque metadata after an operator rotates their external value. Revocation is checked
+again inside the transaction and is denied when an active current configuration still
+depends on the reference; neither a locator nor a secret value reaches a DTO, audit,
+log, trace, or error.
+
+Disabling an inert descriptor-backed connector/provider draft is a guarded terminal
+discard: the API records an immutable `discarded` lifecycle version, audit event, and
+cache invalidation, omits it from normal resource lists, and creates no runtime
+projection. It is not a physical deletion and cannot be reactivated. Disabling an
+active configuration retains the ordinary immutable `disabled` lifecycle behavior.

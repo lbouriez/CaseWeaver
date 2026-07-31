@@ -334,26 +334,36 @@ function SecretReferenceSelector({
     (reference) => reference.status === "active",
   );
   return (
-    <TextField
-      select
-      fullWidth
-      required={required}
-      label={slot.label}
-      helperText={
-        active.length === 0
-          ? "Register an external secret reference before creating this configuration. The secret value is never entered here."
-          : "Select an opaque, server-registered secret reference. Secret values are never displayed or requested."
-      }
-      value={displayValue(value)}
-      onChange={(event) => onChange(event.target.value)}
-    >
-      <MenuItem value="">Select a registered reference</MenuItem>
-      {active.map((reference) => (
-        <MenuItem key={reference.id} value={reference.id}>
-          {reference.label}
-        </MenuItem>
-      ))}
-    </TextField>
+    <Stack spacing={0.5}>
+      <TextField
+        select
+        fullWidth
+        required={required}
+        label={slot.label}
+        helperText={
+          active.length === 0
+            ? "Register an external secret reference before creating this configuration. The secret value is never entered here."
+            : "Select an opaque, server-registered secret reference. Secret values are never displayed or requested."
+        }
+        value={displayValue(value)}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        <MenuItem value="">Select a registered reference</MenuItem>
+        {active.map((reference) => (
+          <MenuItem key={reference.id} value={reference.id}>
+            {reference.label}
+          </MenuItem>
+        ))}
+      </TextField>
+      <Button
+        component="a"
+        href="#/access"
+        size="small"
+        sx={{ alignSelf: "flex-start" }}
+      >
+        Manage secret references
+      </Button>
+    </Stack>
   );
 }
 

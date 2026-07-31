@@ -24,6 +24,7 @@ import { ActionConfirmationDialog } from "../components/action-confirmation-dial
 import { ApiFailure } from "../components/api-failure.js";
 import { PolicyProfileDraftForm } from "../components/policy-profile-draft-form.js";
 import { PublicationWebhookLifecycleControl } from "../components/publication-webhook-lifecycle-control.js";
+import { SecretReferenceDependenciesDialog } from "../components/secret-reference-dependencies-dialog.js";
 import { SourceScheduleLifecycleControl } from "../components/source-schedule-lifecycle-control.js";
 import { AiConfigurationAuthoring } from "./ai-configuration-authoring.js";
 import { ControlPlaneAuthoring } from "./control-plane-authoring.js";
@@ -31,8 +32,8 @@ import { DescriptorCatalog } from "./descriptor-catalog.js";
 import { DiagnosticExportPanel } from "./diagnostic-export.js";
 import { KnowledgeCollectionAuthoring } from "./knowledge-collection-authoring.js";
 import { PrivacyPurgeDialog } from "./privacy-purge-dialog.js";
-import { RoleAssignmentEditor } from "./role-assignment-editor.js";
 import { RepositoryAnalysisWorkflows } from "./repository-analysis-workflows.js";
+import { RoleAssignmentEditor } from "./role-assignment-editor.js";
 import { SecretReferenceRegistration } from "./secret-reference-registration.js";
 import { SourceScheduleDrafts } from "./source-schedule-drafts.js";
 
@@ -41,6 +42,8 @@ interface ResourcePanelProps {
   readonly title: string;
   readonly description: string;
   readonly configurationSurface?: ConfigurationSurface;
+  /** Refreshes adjacent authoring selectors after an audited state change. */
+  readonly onActionCompleted?: () => void;
 }
 
 export type ResourceItemAction = Readonly<{
@@ -52,6 +55,7 @@ export type ResourceItemAction = Readonly<{
     | "source.synchronize"
     | "source.fullRescan"
     | "secret.rotate"
+    | "secret.reconcile"
     | "secret.revoke"
     | "dead-letter.retry"
     | "job.cancel"
@@ -70,11 +74,21 @@ export function itemActions(
       case "connector-instances":
         return item.status === "active"
           ? [{ action: "connector.disable", label: "Disable" }]
-          : [{ action: "connector.activate", label: "Activate" }];
+          : item.status === "draft"
+            ? [
+                { action: "connector.activate", label: "Activate" },
+                { action: "connector.disable", label: "Remove draft" },
+              ]
+            : [{ action: "connector.activate", label: "Activate" }];
       case "ai-provider-instances":
         return item.status === "active"
           ? [{ action: "provider.disable", label: "Disable" }]
-          : [{ action: "provider.activate", label: "Activate" }];
+          : item.status === "draft"
+            ? [
+                { action: "provider.activate", label: "Activate" },
+                { action: "provider.disable", label: "Remove draft" },
+              ]
+            : [{ action: "provider.activate", label: "Activate" }];
       case "knowledge-sources":
         return item.status === "enabled"
           ? [
@@ -85,10 +99,18 @@ export function itemActions(
       case "secret-references":
         return item.status === "revoked"
           ? []
-          : [
-              { action: "secret.rotate", label: "Rotate" },
-              { action: "secret.revoke", label: "Revoke" },
-            ];
+          : item.status === "rotation_required"
+            ? [
+                {
+                  action: "secret.reconcile",
+                  label: "Confirm rotation",
+                },
+                { action: "secret.revoke", label: "Revoke" },
+              ]
+            : [
+                { action: "secret.rotate", label: "Rotate" },
+                { action: "secret.revoke", label: "Revoke" },
+              ];
       case "dead-letters":
         return [{ action: "dead-letter.retry", label: "Retry" }];
       case "operation-jobs":
@@ -178,6 +200,7 @@ export function ResourcePanel({
   title,
   description,
   configurationSurface,
+  onActionCompleted,
 }: ResourcePanelProps) {
   const client = useApiClient();
   const { data, error, isLoading, refetch } = useGetList<AdminListItem>(
@@ -249,6 +272,14 @@ export function ResourcePanel({
                   }
                 />
               </ListItemButton>
+              {resource === "secret-references" ? (
+                <Box sx={{ p: 0.75 }}>
+                  <SecretReferenceDependenciesDialog
+                    client={client}
+                    secretReferenceId={item.id}
+                  />
+                </Box>
+              ) : null}
               {itemActions(resource, item, configurationSurface).length ===
               0 ? null : (
                 <Stack
@@ -263,6 +294,10 @@ export function ResourcePanel({
                         client={client}
                         key={action}
                         label={label}
+                        onCompleted={() => {
+                          void refetch();
+                          onActionCompleted?.();
+                        }}
                         target={{ resource, id: item.id }}
                       />
                     ),
@@ -277,7 +312,10 @@ export function ResourcePanel({
                 <Box sx={{ p: 0.75 }}>
                   <SourceScheduleLifecycleControl
                     client={client}
-                    onCompleted={() => refetch().then(() => undefined)}
+                    onCompleted={() => {
+                      void refetch();
+                      onActionCompleted?.();
+                    }}
                     resource={resource}
                     resourceId={item.id}
                     status={item.status}
@@ -292,7 +330,10 @@ export function ResourcePanel({
                 <Box sx={{ p: 0.75 }}>
                   <PublicationWebhookLifecycleControl
                     client={client}
-                    onCompleted={() => refetch().then(() => undefined)}
+                    onCompleted={() => {
+                      void refetch();
+                      onActionCompleted?.();
+                    }}
                     resource={resource}
                     resourceId={item.id}
                     status={item.status}
@@ -334,11 +375,6 @@ const sectionResources = {
     ],
   ],
   integrations: [
-    [
-      "secret-references",
-      "Secret references",
-      "External-secret metadata and lifecycle only; values are never displayed.",
-    ],
     [
       "connector-instances",
       "Connector instances",
@@ -425,6 +461,11 @@ const sectionResources = {
     ["audit-events", "Audit", "Append-only administrative activity."],
   ],
   access: [
+    [
+      "secret-references",
+      "Secret references",
+      "Shared external-secret registration and lifecycle metadata; values are never displayed.",
+    ],
     ["workspaces", "Workspaces", "Server-authorized workspace membership."],
     ["principals", "Principals", "Resolved operator identities."],
     ["role-assignments", "Role assignments", "Permission-bearing assignments."],
@@ -452,6 +493,13 @@ export function SectionPage({
   const client = useApiClient();
   const refresh = useRefresh();
   const [secretReferenceRefresh, setSecretReferenceRefresh] = useState(0);
+  const [aiProviderRefresh, setAiProviderRefresh] = useState(0);
+  const [integrationAuthoringRefresh, setIntegrationAuthoringRefresh] =
+    useState(0);
+  const refreshIntegrationAuthoring = () => {
+    refresh();
+    setIntegrationAuthoringRefresh((current) => current + 1);
+  };
   const [configurationSurfaces, setConfigurationSurfaces] =
     useState<readonly ConfigurationSurface[]>();
   useEffect(() => {
@@ -472,6 +520,7 @@ export function SectionPage({
   const publicationProfileSurface = surfaceFor("publication-profiles");
   const webhookEndpointSurface = surfaceFor("webhook-endpoints");
   const aiBindingSurface = surfaceFor("ai-bindings");
+  const aiCatalogSurface = surfaceFor("ai-catalog-snapshots");
   const aiRoleDefaultSurface = surfaceFor("ai-role-defaults");
   const aiPricingSurface = surfaceFor("ai-pricing-overrides");
   const aiBudgetSurface = surfaceFor("ai-budgets");
@@ -520,7 +569,7 @@ export function SectionPage({
           onCreated={() => refresh()}
         />
       ) : null}
-      {section === "integrations" || section === "ai" ? (
+      {section === "access" ? (
         <SecretReferenceRegistration
           onRegistered={() =>
             setSecretReferenceRefresh((current) => current + 1)
@@ -531,11 +580,14 @@ export function SectionPage({
         <DescriptorCatalog
           key={`connector-${secretReferenceRefresh}`}
           kind="connector"
+          onCreated={refreshIntegrationAuthoring}
           title="Connector configuration drafts"
         />
       ) : null}
       {section === "integrations" ? (
         <SourceScheduleDrafts
+          key={`source-schedule-${integrationAuthoringRefresh}`}
+          onCompleted={() => refresh()}
           scheduleEnabled={
             scheduleSurface?.mode === "managed" &&
             scheduleSurface.workflows.includes("create_draft")
@@ -577,14 +629,21 @@ export function SectionPage({
         <DescriptorCatalog
           key={`ai-provider-${secretReferenceRefresh}`}
           kind="ai-provider"
-          title="AI provider configuration drafts"
+          onActivated={() => setAiProviderRefresh((current) => current + 1)}
+          onCreated={() => setAiProviderRefresh((current) => current + 1)}
+          title="Configure an AI provider"
         />
       ) : null}
       {section === "ai" ? (
         <AiConfigurationAuthoring
+          key={`ai-configuration-${aiProviderRefresh}`}
           bindingsEnabled={
             aiBindingSurface?.mode === "managed" &&
             aiBindingSurface.workflows.includes("create_draft")
+          }
+          catalogRefreshEnabled={
+            aiCatalogSurface?.mode === "managed" &&
+            aiCatalogSurface.operationalActions.includes("catalog.refresh")
           }
           budgetsEnabled={
             aiBudgetSurface?.mode === "managed" &&
@@ -661,6 +720,13 @@ export function SectionPage({
               key={resource}
               resource={resource}
               configurationSurface={surfaceFor(resource)}
+              onActionCompleted={
+                section === "integrations"
+                  ? resource === "connector-instances"
+                    ? refreshIntegrationAuthoring
+                    : refresh
+                  : undefined
+              }
               title={resourceTitle}
             />
           ),

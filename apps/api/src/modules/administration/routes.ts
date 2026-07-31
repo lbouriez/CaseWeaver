@@ -85,6 +85,7 @@ const action = z.enum([
   "case-analysis-schedule.disable",
   "diagnostics.export",
   "secret.rotate",
+  "secret.reconcile",
   "secret.revoke",
   "publication.approve",
 ]);
@@ -209,8 +210,17 @@ const passwordLogin = z
     password: z.string().min(1).max(1_024),
   })
   .strict();
-/** Commands with no browser-supplied fields must reject, rather than ignore, a body. */
-const noRequestBody = z.undefined();
+/**
+ * Commands with no browser-supplied fields reject every value that could carry
+ * command data.  A reverse proxy may represent a zero-byte chunked request as
+ * `null`; JSON `null` also has no fields and is therefore an equivalent empty
+ * command.  This deliberately accepts neither objects nor arrays, strings,
+ * numbers, or booleans, so a proxy's framing choice cannot turn supplied data
+ * into an ignored command parameter.
+ */
+function hasEmptyRequestBody(request: { readonly body: unknown }): boolean {
+  return request.body === undefined || request.body === null;
+}
 const safeConfigurationObject = z
   .record(z.string().min(1).max(120), z.unknown())
   .refine((value) => Object.keys(value).length <= 100)
@@ -285,6 +295,15 @@ const aiBindingDraft = z
   .strict();
 const aiBindingVersionDraft = aiBindingDraft
   .extend({ expectedRevision: z.number().int().min(1) })
+  .strict();
+const aiBindingOptionsQuery = z
+  .object({
+    providerInstanceId: identifier,
+    role: aiRole,
+    // This is a server-side catalog filter, not a browser-supplied model
+    // identity. The resulting selected value still comes only from `items`.
+    search: z.string().trim().min(1).max(120).optional(),
+  })
   .strict();
 const aiRoleDefault = z
   .object({
@@ -458,6 +477,10 @@ export interface AdministrationRouteOperations {
     input: z.infer<typeof secretReferenceRegistration>,
     context: AdminRequestContext,
   ): Promise<unknown>;
+  secretReferenceDependencies(
+    secretReferenceId: string,
+    context: AdminRequestContext,
+  ): Promise<unknown>;
   createKnowledgeSourceDraft(
     input: z.infer<typeof sourceDraft>,
     context: AdminRequestContext,
@@ -548,6 +571,19 @@ export interface AdministrationRouteOperations {
   ): Promise<unknown>;
   createAiBindingDraft?(
     input: z.infer<typeof aiBindingDraft>,
+    context: AdminRequestContext,
+  ): Promise<unknown>;
+  aiBindingOptions?(
+    input: Readonly<{
+      readonly providerInstanceId: string;
+      readonly role: z.infer<typeof aiRole>;
+      readonly search?: string;
+    }>,
+    context: AdminRequestContext,
+  ): Promise<unknown>;
+  refreshAiCatalog?(context: AdminRequestContext): Promise<unknown>;
+  refreshAiProviderModels?(
+    providerInstanceId: string,
     context: AdminRequestContext,
   ): Promise<unknown>;
   createAiBindingVersionDraft?(
@@ -805,7 +841,7 @@ export function registerAdministrationRoutes(
       "current",
     );
     if (!(await requireIdempotency(operations, request, reply, audit))) return;
-    if (!noRequestBody.safeParse(request.body).success)
+    if (!hasEmptyRequestBody(request))
       return rejectInvalidRequest(
         operations,
         request,
@@ -1259,6 +1295,83 @@ export function registerAdministrationRoutes(
       await operations.resolve(request, { mutation: true }),
     );
   });
+  app.get("/v1/admin/ai/binding-options", async (request, reply) => {
+    const query = aiBindingOptionsQuery.safeParse(request.query);
+    if (!query.success)
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(
+          invalidReadAudit(
+            "admin.aiBinding.options.read.invalid",
+            "configuration.read",
+            "ai_binding_options",
+            "invalid",
+          ),
+          "request.invalid",
+        ),
+      );
+    if (operations.aiBindingOptions === undefined)
+      return failure(reply, 503, "service.unavailable");
+    return operations.aiBindingOptions(
+      query.data,
+      await operations.resolve(request, { mutation: false }),
+    );
+  });
+  app.post("/v1/admin/ai/catalog-snapshots/refresh", async (request, reply) => {
+    const audit = invalidMutationAudit(
+      "admin.aiCatalog.refresh.invalid",
+      "configuration.manage",
+      "ai_catalog_snapshot",
+      "trusted",
+    );
+    if (!(await requireIdempotency(operations, request, reply, audit))) return;
+    if (!hasEmptyRequestBody(request))
+      return rejectInvalidRequest(
+        operations,
+        request,
+        reply,
+        invalidRequestAudit(audit, "request.invalid"),
+      );
+    if (operations.refreshAiCatalog === undefined)
+      return failure(reply, 503, "service.unavailable");
+    return operations.refreshAiCatalog(
+      await operations.resolve(request, { mutation: true }),
+    );
+  });
+  app.post(
+    "/v1/admin/ai/provider-instances/:id/models/refresh",
+    async (request, reply) => {
+      const audit = invalidMutationAudit(
+        "admin.aiProviderModelInventory.refresh.invalid",
+        "configuration.manage",
+        "ai_provider_model_inventory",
+        "invalid",
+      );
+      if (!(await requireIdempotency(operations, request, reply, audit)))
+        return;
+      const params = z
+        .object({ id: identifier })
+        .strict()
+        .safeParse(request.params);
+      if (!params.success || !hasEmptyRequestBody(request)) {
+        return rejectInvalidRequest(
+          operations,
+          request,
+          reply,
+          invalidRequestAudit(audit, "request.invalid"),
+        );
+      }
+      if (operations.refreshAiProviderModels === undefined) {
+        return failure(reply, 503, "service.unavailable");
+      }
+      return operations.refreshAiProviderModels(
+        params.data.id,
+        await operations.resolve(request, { mutation: true }),
+      );
+    },
+  );
   app.post("/v1/admin/ai/bindings/drafts", async (request, reply) => {
     const audit = invalidMutationAudit(
       "admin.aiBinding.draft.create.invalid",
@@ -1454,7 +1567,7 @@ export function registerAdministrationRoutes(
       );
       if (!(await requireIdempotency(operations, request, reply, audit)))
         return;
-      if (!noRequestBody.safeParse(request.body).success)
+      if (!hasEmptyRequestBody(request))
         return rejectInvalidRequest(
           operations,
           request,
@@ -1702,6 +1815,34 @@ export function registerAdministrationRoutes(
       await operations.resolve(request, { mutation: true }),
     );
   });
+  app.get(
+    "/v1/admin/secret-references/:id/dependencies",
+    async (request, reply) => {
+      const params = z
+        .object({ id: identifier })
+        .strict()
+        .safeParse(request.params);
+      if (!params.success)
+        return rejectInvalidRequest(
+          operations,
+          request,
+          reply,
+          invalidRequestAudit(
+            invalidReadAudit(
+              "admin.secretReference.dependency.read.invalid",
+              "credential.manage",
+              "secret_reference",
+              "invalid",
+            ),
+            "request.invalid",
+          ),
+        );
+      return operations.secretReferenceDependencies(
+        params.data.id,
+        await operations.resolve(request, { mutation: false }),
+      );
+    },
+  );
   app.post("/v1/admin/diagnostics/exports", async (request, reply) => {
     const audit = invalidMutationAudit(
       "admin.diagnostics.export.request.invalid",
@@ -1710,7 +1851,7 @@ export function registerAdministrationRoutes(
       "new",
     );
     if (!(await requireIdempotency(operations, request, reply, audit))) return;
-    if (!noRequestBody.safeParse(request.body).success)
+    if (!hasEmptyRequestBody(request))
       return rejectInvalidRequest(
         operations,
         request,

@@ -6,7 +6,45 @@ import { ApiClientProvider } from "../api/context.js";
 import { AiConfigurationAuthoring } from "./ai-configuration-authoring.js";
 
 describe("AI configuration authoring", () => {
-  it("uses only server-discovered identities and a server-issued provider-test confirmation", async () => {
+  it("refreshes only the server-owned trusted catalog and never receives catalog bytes", async () => {
+    const client = {
+      list: vi.fn(async () => ({
+        items: [],
+        page: { hasNextPage: false },
+      })),
+      refreshAiCatalog: vi.fn(async () => ({
+        id: "catalog-1",
+        label: "Trusted catalog snapshot",
+        status: "pinned",
+        fields: {},
+      })),
+    };
+    render(
+      <ApiClientProvider client={client as never}>
+        <AiConfigurationAuthoring
+          bindingsEnabled={false}
+          budgetsEnabled={false}
+          catalogRefreshEnabled
+          pricingEnabled={false}
+          rolesEnabled={false}
+        />
+      </ApiClientProvider>,
+    );
+
+    await userEvent.setup().click(
+      await screen.findByRole("button", {
+        name: "Refresh trusted model catalog",
+      }),
+    );
+
+    await screen.findByText(/Trusted catalog snapshot was refreshed/u);
+    expect(client.refreshAiCatalog).toHaveBeenCalledWith();
+    expect(JSON.stringify(client.refreshAiCatalog.mock.calls)).not.toMatch(
+      /raw|github|token|secret|locator/iu,
+    );
+  });
+
+  it("uses a provider-owned inventory and a server-issued provider-test confirmation", async () => {
     const client = {
       list: vi.fn(async (resource: string) => ({
         items:
@@ -20,28 +58,36 @@ describe("AI configuration authoring", () => {
               ]
             : resource === "ai-catalog-snapshots"
               ? [{ id: "catalog-1", label: "Pinned catalog" }]
-              : resource === "ai-models"
+              : resource === "ai-bindings"
                 ? [
                     {
-                      id: "model-1",
-                      label: "provider/model-1",
-                      summary: "provider",
+                      id: "binding-1",
+                      label: "analysis",
+                      status: "active",
+                      version: "2",
+                      summary: "binding-version-1",
                     },
                   ]
-                : resource === "ai-bindings"
-                  ? [
-                      {
-                        id: "binding-1",
-                        label: "analysis",
-                        status: "active",
-                        version: "2",
-                        summary: "binding-version-1",
-                      },
-                    ]
-                  : resource === "ai-role-defaults"
-                    ? [{ id: "analysis", label: "analysis", version: "1" }]
-                    : [],
+                : resource === "ai-role-defaults"
+                  ? [{ id: "analysis", label: "analysis", version: "1" }]
+                  : [],
         page: { hasNextPage: false },
+      })),
+      aiBindingOptions: vi.fn(async () => ({
+        items: [
+          {
+            catalogSnapshotId: "catalog-1",
+            canonicalModel: "provider/model-1",
+            catalogProvider: "provider",
+          },
+        ],
+      })),
+      refreshAiProviderModels: vi.fn(async () => ({
+        id: "provider-inventory-1",
+        label: "Provider model inventory",
+        status: "refreshed",
+        summary: "2 available models; 1 with trusted pricing",
+        fields: {},
       })),
       createAiBindingDraft: vi.fn(async () => ({
         id: "binding-2",
@@ -122,6 +168,34 @@ describe("AI configuration authoring", () => {
     );
     const user = userEvent.setup();
     await screen.findByText("Create a model binding draft");
+    expect(
+      screen.getByText(
+        /referenced value must be present in the API deployment environment/u,
+      ),
+    ).not.toBeNull();
+    await user.type(
+      screen.getByRole("textbox", {
+        name: "Filter provider models",
+      }),
+      "embedding",
+    );
+    await waitFor(() =>
+      expect(client.aiBindingOptions).toHaveBeenLastCalledWith(
+        expect.objectContaining({ search: "embedding" }),
+        expect.anything(),
+      ),
+    );
+    await user.click(
+      screen.getByRole("button", {
+        name: "Refresh models available from provider",
+      }),
+    );
+    await waitFor(() =>
+      expect(client.refreshAiProviderModels).toHaveBeenCalledWith("provider-1"),
+    );
+    expect(
+      JSON.stringify(client.refreshAiProviderModels.mock.calls),
+    ).not.toMatch(/secret|locator|endpoint|token/iu);
     await user.click(
       screen.getByRole("button", { name: "Help for Budget scope" }),
     );
@@ -138,6 +212,24 @@ describe("AI configuration authoring", () => {
           providerInstanceId: "provider-1",
           catalogSnapshotId: "catalog-1",
           canonicalModel: "provider/model-1",
+        }),
+      ),
+    );
+    const createPricingOverride = screen.getByRole("button", {
+      name: "Create pricing override",
+    });
+    expect(createPricingOverride.hasAttribute("disabled")).toBe(true);
+    await user.type(screen.getByLabelText("Output price amount"), "0.000002");
+    await user.click(createPricingOverride);
+    await waitFor(() =>
+      expect(client.createAiPriceOverride).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: "provider",
+          canonicalModel: "provider/model-1",
+          components: [
+            expect.objectContaining({ kind: "input", amount: "0.001" }),
+            expect.objectContaining({ kind: "output", amount: "0.000002" }),
+          ],
         }),
       ),
     );
@@ -158,5 +250,5 @@ describe("AI configuration authoring", () => {
     expect(
       JSON.stringify(client.runProviderCapabilityTest.mock.calls),
     ).not.toMatch(/secret|locator|endpoint/iu);
-  });
+  }, 15_000);
 });

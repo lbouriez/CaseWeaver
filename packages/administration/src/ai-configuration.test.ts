@@ -11,6 +11,7 @@ import {
   ImportAiCatalogSnapshot,
   ReplaceAiBudgetPolicy,
   SetAiWorkspaceRoleDefault,
+  workspaceBudgetScopeKey,
 } from "./ai-configuration.js";
 import { AdministrationValidationError } from "./errors.js";
 
@@ -200,6 +201,40 @@ describe("AI configuration authoring", () => {
     );
     expect(fake.setRoleDefaultAndRecord).toHaveBeenCalled();
     expect(fake.replaceBudgetPolicyAndRecord).toHaveBeenCalled();
+  });
+
+  it("accepts only the execution-owned aggregate key for a workspace budget", async () => {
+    const fake = store();
+    await expect(
+      new ReplaceAiBudgetPolicy(fake).execute(
+        {
+          budgetPolicyId: "budget-1",
+          scope: "workspace",
+          scopeKey: "workspace",
+          limitAmount: "1",
+          currency: "USD",
+          hard: true,
+          expectedRevision: 0,
+          mutation,
+        },
+        context,
+      ),
+    ).rejects.toBeInstanceOf(AdministrationValidationError);
+
+    await new ReplaceAiBudgetPolicy(fake).execute(
+      {
+        budgetPolicyId: "budget-1",
+        scope: "workspace",
+        scopeKey: workspaceBudgetScopeKey,
+        limitAmount: "1",
+        currency: "USD",
+        hard: true,
+        expectedRevision: 0,
+        mutation,
+      },
+      context,
+    );
+    expect(fake.replaceBudgetPolicyAndRecord).toHaveBeenCalledTimes(1);
   });
 
   it("imports a pinned server-side catalog and records only a safe catalog digest in the audit", async () => {

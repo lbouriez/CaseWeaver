@@ -13,6 +13,7 @@ export * from "./pagination.js";
 export * from "./platform-link-configuration.js";
 export * from "./ports.js";
 export * from "./provider-capability-test.js";
+export * from "./provider-model-inventory.js";
 export * from "./publication-profile-configuration.js";
 export * from "./repository-analysis-configuration.js";
 export * from "./repository-analysis-options.js";

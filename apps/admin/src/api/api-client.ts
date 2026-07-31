@@ -7,6 +7,7 @@ import {
   type AdminListResponse,
   type AdminResourceName,
   type AiBindingDraftRequest,
+  type AiBindingOptions,
   type AiBudgetRequest,
   type AiPriceOverrideRequest,
   type AiRoleDefaultRequest,
@@ -14,6 +15,7 @@ import {
   actionPreviewSchema,
   adminDetailSchema,
   adminListResponseSchema,
+  aiBindingOptionsSchema,
   type ConfigurationDescriptor,
   type ConfigurationHistoryResponse,
   type ConfigurationInspection,
@@ -35,24 +37,26 @@ import {
   type ProviderCapabilityTestPreview,
   type ProviderCapabilityTestResult,
   type PublicApiErrorBody,
-  type RepositoryAnalysisConfiguration,
-  repositoryAnalysisConfigurationSchema,
-  type RepositoryAnalysisDraftInput,
-  type RepositoryAnalysisDraftRevisionInput,
-  type RepositoryAnalysisOptions,
-  repositoryAnalysisOptionsSchema,
-  type RepositoryAnalysisResource,
-  type RepositoryDraftTestExecution,
-  repositoryDraftTestExecutionSchema,
-  type RepositoryDraftTestPreview,
-  repositoryDraftTestPreviewSchema,
   platformLinkConfigurationSchema,
   providerCapabilityTestOperationsSchema,
   providerCapabilityTestPreviewSchema,
   providerCapabilityTestResultSchema,
   publicApiErrorBodySchema,
+  type RepositoryAnalysisConfiguration,
+  type RepositoryAnalysisDraftInput,
+  type RepositoryAnalysisDraftRevisionInput,
+  type RepositoryAnalysisOptions,
+  type RepositoryAnalysisResource,
+  type RepositoryDraftTestExecution,
+  type RepositoryDraftTestPreview,
+  repositoryAnalysisConfigurationSchema,
+  repositoryAnalysisOptionsSchema,
+  repositoryDraftTestExecutionSchema,
+  repositoryDraftTestPreviewSchema,
   resourceEndpoints,
+  type SecretReferenceDependencies,
   type Session,
+  secretReferenceDependenciesSchema,
   sessionSchema,
   type WorkspaceRoleAssignment,
   workspaceRoleAssignmentSchema,
@@ -667,6 +671,18 @@ export class CaseWeaverApiClient {
     );
   }
 
+  public async secretReferenceDependencies(
+    secretReferenceId: string,
+    signal?: AbortSignal,
+  ): Promise<SecretReferenceDependencies> {
+    return this.requestJson(
+      `/v1/admin/secret-references/${safelyEncodeIdentifier(secretReferenceId)}/dependencies`,
+      { method: "GET", signal },
+      secretReferenceDependenciesSchema,
+      "user",
+    );
+  }
+
   public async createKnowledgeSourceDraft(
     input: KnowledgeSourceDraftInput,
     signal?: AbortSignal,
@@ -806,6 +822,55 @@ export class CaseWeaverApiClient {
     return this.requestJson(
       "/v1/admin/ai/bindings/drafts",
       { method: "POST", signal, body: JSON.stringify(input) },
+      adminDetailSchema,
+      "user",
+    );
+  }
+
+  public async aiBindingOptions(
+    input: Readonly<{
+      readonly providerInstanceId: string;
+      readonly role: AiBindingDraftRequest["role"];
+      readonly search?: string;
+    }>,
+    signal?: AbortSignal,
+  ): Promise<AiBindingOptions> {
+    const parameters = new URLSearchParams({
+      providerInstanceId: validateIdentifier(input.providerInstanceId),
+      role: validateIdentifier(input.role),
+    });
+    if (input.search !== undefined && input.search.trim().length > 0) {
+      parameters.set("search", input.search.trim().slice(0, 120));
+    }
+    return this.requestJson(
+      `/v1/admin/ai/binding-options?${parameters.toString()}`,
+      { method: "GET", signal },
+      aiBindingOptionsSchema,
+      "user",
+    );
+  }
+
+  public async refreshAiCatalog(signal?: AbortSignal): Promise<AdminDetail> {
+    return this.requestJson(
+      "/v1/admin/ai/catalog-snapshots/refresh",
+      { method: "POST", signal, body: JSON.stringify(undefined) },
+      adminDetailSchema,
+      "user",
+    );
+  }
+
+  /**
+   * The server uses the active provider's retained endpoint/credential to
+   * refresh safe availability metadata. The browser supplies only its opaque
+   * provider instance ID and never receives raw provider metadata.
+   */
+  public async refreshAiProviderModels(
+    providerInstanceId: string,
+    signal?: AbortSignal,
+  ): Promise<AdminDetail> {
+    return this.requestJson(
+      `/v1/admin/ai/provider-instances/${safelyEncodeIdentifier(providerInstanceId)}/models/refresh`,
+      { method: "POST", signal, body: JSON.stringify(undefined) },
       adminDetailSchema,
       "user",
     );

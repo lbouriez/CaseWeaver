@@ -30,9 +30,12 @@ function nextHour(): string {
 export function SourceScheduleDrafts({
   sourceEnabled,
   scheduleEnabled,
+  onCompleted,
 }: {
   readonly sourceEnabled: boolean;
   readonly scheduleEnabled: boolean;
+  /** Refreshes adjacent resource read models after a committed source/schedule change. */
+  readonly onCompleted?: () => Promise<void> | void;
 }) {
   const client = useApiClient();
   const [connectors, setConnectors] = useState<readonly AdminListItem[]>();
@@ -280,6 +283,7 @@ export function SourceScheduleDrafts({
       setCreatedSource(created);
       setSourceName("");
       await refreshSources();
+      await onCompleted?.();
     } catch (error) {
       setSourceError(error);
     } finally {
@@ -333,6 +337,7 @@ export function SourceScheduleDrafts({
       );
       setCreatedSchedule(created);
       setScheduleName("");
+      await onCompleted?.();
     } catch (error) {
       setScheduleError(error);
     } finally {
@@ -379,7 +384,11 @@ export function SourceScheduleDrafts({
                 {createdSource === undefined ? null : (
                   <SourceScheduleLifecycleControl
                     client={client}
-                    onCompleted={() => refreshSources()}
+                    onCompleted={async (source) => {
+                      setCreatedSource(source);
+                      await refreshSources();
+                      await onCompleted?.();
+                    }}
                     resource="knowledge-sources"
                     resourceId={createdSource.id}
                     status={createdSource.status}
@@ -629,7 +638,10 @@ export function SourceScheduleDrafts({
                 {createdSchedule === undefined ? null : (
                   <SourceScheduleLifecycleControl
                     client={client}
-                    onCompleted={async () => undefined}
+                    onCompleted={async (schedule) => {
+                      setCreatedSchedule(schedule);
+                      await onCompleted?.();
+                    }}
                     resource="schedules"
                     resourceId={createdSchedule.id}
                     status={createdSchedule.status}

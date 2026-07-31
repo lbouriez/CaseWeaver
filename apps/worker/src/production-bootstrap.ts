@@ -37,7 +37,7 @@ import {
   type AttachmentRuntimeQuotas,
   type PreparedAttachmentDerivative,
 } from "@caseweaver/attachments";
-import { createGitMarkdownRuntimeContribution } from "@caseweaver/connector-git-markdown";
+import { createGitMarkdownRuntimeContributions } from "@caseweaver/connector-git-markdown";
 import { createJitbitRuntimeContributions } from "@caseweaver/connector-jitbit";
 import {
   EnvironmentConnectorSecretResolver,
@@ -48,7 +48,10 @@ import {
   CopilotSdkByokRuntimeClient,
 } from "@caseweaver/copilot-sdk-agent";
 import { utcInstant } from "@caseweaver/domain";
-import { GitCliRepository } from "@caseweaver/git-repository-runtime";
+import {
+  GitCliRepository,
+  parseTrustedLocalRootsJson,
+} from "@caseweaver/git-repository-runtime";
 import {
   createProductionKnowledgeTextProfileRegistry,
   KnowledgeIngestionService,
@@ -137,6 +140,8 @@ export interface WorkerRuntimeConfiguration {
   }>;
   readonly gitTemporaryDirectory?: string;
   readonly gitRemoteCacheDirectory?: string;
+  /** Deployment-owned roots permitted for local Git worktrees. */
+  readonly gitTrustedLocalRoots: readonly string[];
   /** Optional, explicit repository-agent host boundary. */
   readonly repositoryAgent?: Readonly<{
     readonly sources: readonly Readonly<{
@@ -399,6 +404,14 @@ export function loadWorkerRuntimeConfiguration(
   const gitRemoteCacheDirectory = optionalAbsoluteDirectory(
     environment.WORKER_GIT_REMOTE_CACHE_DIRECTORY,
   );
+  let gitTrustedLocalRoots: readonly string[];
+  try {
+    gitTrustedLocalRoots = parseTrustedLocalRootsJson(
+      environment.CASEWEAVER_GIT_TRUSTED_LOCAL_ROOTS_JSON,
+    );
+  } catch {
+    throw new WorkerConfigurationError();
+  }
   const repositoryAgent = repositoryAgentConfiguration(environment);
   const attachmentRuntime = attachmentRuntimeConfiguration(environment);
   return Object.freeze({
@@ -433,6 +446,7 @@ export function loadWorkerRuntimeConfiguration(
     ...(gitRemoteCacheDirectory === undefined
       ? {}
       : { gitRemoteCacheDirectory }),
+    gitTrustedLocalRoots,
     ...(repositoryAgent === undefined ? {} : { repositoryAgent }),
   });
 }
@@ -842,6 +856,9 @@ export async function createProductionWorkerRuntimeFromEnvironment(
       ...(configuration.gitRemoteCacheDirectory === undefined
         ? {}
         : { remoteCacheDirectory: configuration.gitRemoteCacheDirectory }),
+      ...(configuration.gitTrustedLocalRoots.length === 0
+        ? {}
+        : { trustedLocalRoots: configuration.gitTrustedLocalRoots }),
       environment,
     });
     let analysisRepositoryRuntimeResolver = repositoryRuntime.executionResolver;
@@ -955,7 +972,7 @@ export async function createProductionWorkerRuntimeFromEnvironment(
     const connectors = new RuntimeConnectorCapabilityResolver(
       persistence.runtimeConnectorConfigurationResolver,
       [
-        createGitMarkdownRuntimeContribution({
+        ...createGitMarkdownRuntimeContributions({
           repositoryFactory: { create: () => gitRepository },
         }),
         ...createJitbitRuntimeContributions({}),

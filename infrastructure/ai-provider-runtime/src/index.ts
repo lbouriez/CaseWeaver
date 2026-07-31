@@ -1,13 +1,17 @@
+import type { ImmutableAiBinding } from "@caseweaver/ai-config";
 import {
   AiConfigurationError,
   type AiModelTokenizer,
   type AiModelTokenizerContribution,
   type AiProviderDispatcher,
+  type AiWireApi,
   type EmbeddingRequest,
   type EmbeddingResult,
   type GenerationRequest,
   type GenerationResult,
+  type ProviderDiscoveredModel,
   type ProviderInvocation,
+  type ProviderModelDiscoverer,
   type ProviderResult,
   type RepositoryAgentRequest,
   type RepositoryAgentResult,
@@ -17,12 +21,80 @@ import {
   type VisionRequest,
   type VisionResult,
 } from "@caseweaver/ai-sdk";
-import type { ImmutableAiBinding } from "@caseweaver/ai-config";
 
 /** A provider package contributes its dispatcher under a stable descriptor type. */
 export interface AiProviderRuntimeContribution {
   readonly providerType: string;
   readonly dispatcher: AiProviderDispatcher;
+}
+
+/** A provider package contributes server-only model discovery under its descriptor type. */
+export interface AiProviderModelDiscoveryContribution {
+  readonly providerType: string;
+  readonly discoverer: ProviderModelDiscoverer;
+}
+
+/**
+ * Resolves an opaque credential only inside trusted composition, then delegates
+ * the endpoint inventory request to the registered provider adapter. The
+ * returned metadata is safe to persist as an immutable inventory; neither the
+ * raw response nor a credential crosses this boundary.
+ */
+export class RegisteredAiProviderModelDiscovery {
+  private readonly discoverers: ReadonlyMap<string, ProviderModelDiscoverer>;
+
+  public constructor(
+    contributions: readonly AiProviderModelDiscoveryContribution[],
+    private readonly secretResolver: SecretResolver,
+  ) {
+    const registered = new Map<string, ProviderModelDiscoverer>();
+    for (const contribution of contributions) {
+      if (
+        !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u.test(
+          contribution.providerType,
+        ) ||
+        registered.has(contribution.providerType)
+      ) {
+        throw new AiConfigurationError(
+          "AI provider model discovery is invalid.",
+        );
+      }
+      registered.set(contribution.providerType, contribution.discoverer);
+    }
+    this.discoverers = registered;
+  }
+
+  public async discover(
+    input: Readonly<{
+      readonly providerType: string;
+      readonly endpoint: string;
+      readonly wireApi: AiWireApi;
+      readonly secretReference: string;
+      readonly signal: AbortSignal;
+    }>,
+  ): Promise<readonly ProviderDiscoveredModel[]> {
+    const discoverer = this.discoverers.get(input.providerType);
+    if (discoverer === undefined) {
+      throw new AiConfigurationError(
+        "The configured provider cannot discover its model inventory.",
+      );
+    }
+    const secret = await this.secretResolver.resolve(
+      input.secretReference,
+      input.signal,
+    );
+    try {
+      return await discoverer.discoverModels({
+        endpoint: input.endpoint,
+        wireApi: input.wireApi,
+        secret,
+        signal: input.signal,
+      });
+    } finally {
+      // The secret is deliberately short-lived in this scope. JavaScript cannot
+      // reliably zero memory, but no field, log, DTO, or durable command keeps it.
+    }
+  }
 }
 
 /**

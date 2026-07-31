@@ -1,3 +1,5 @@
+import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient } from "@prisma/client";
 import { Pool } from "pg";
 import { beforeAll, describe, expect, it } from "vitest";
 
@@ -6,8 +8,6 @@ import {
   PostgresAuthSessionAuditMutationStore,
   PostgresOidcIdentityMappingStore,
 } from "./auth.js";
-import { PrismaPg } from "@prisma/adapter-pg";
-import { PrismaClient } from "@prisma/client";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (
@@ -69,23 +69,25 @@ describe("PostgreSQL authentication persistence", () => {
       VALUES ('credential-a', 'workspace-a', 'vault://operator/secret-a', 'active')
     `);
     const persistence = createPostgresPersistence({ databaseUrl });
-    await expect(
-      persistence.administrationResourceReadStore.list({
-        workspaceId: "workspace-a",
-        resource: "secret-references",
-        limit: 20,
-      }),
-    ).resolves.toEqual({
+    const result = await persistence.administrationResourceReadStore.list({
+      workspaceId: "workspace-a",
+      resource: "secret-references",
+      limit: 20,
+    });
+    expect(result).toMatchObject({
       items: [
         expect.objectContaining({
           id: "credential-a",
+          label: "Secret reference credential-a",
           status: "active",
           summary:
-            "Reference metadata only; secret material is never returned.",
+            "0 active configuration dependencies; secret material is never returned.",
         }),
       ],
       page: { hasNextPage: false },
     });
+    expect(result.items[0]?.updatedAt).toEqual(expect.any(String));
+    expect(JSON.stringify(result)).not.toContain("vault://operator/secret-a");
     await persistence.close();
   });
 

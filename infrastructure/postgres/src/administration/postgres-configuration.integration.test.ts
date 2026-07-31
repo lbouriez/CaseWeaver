@@ -1,5 +1,5 @@
-import type { ApplicationTransaction } from "@caseweaver/application";
 import type { MutationIdentity } from "@caseweaver/administration";
+import type { ApplicationTransaction } from "@caseweaver/application";
 import { principalId, sha256Digest, workspaceId } from "@caseweaver/domain";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
@@ -244,6 +244,67 @@ describe("PostgreSQL configuration lifecycle", () => {
     }
   });
 
+  it("persists a discarded draft immutably while keeping it inspectable", async () => {
+    const persistence = createPostgresPersistence({ databaseUrl });
+    try {
+      await persistence.unitOfWork.transaction(async (transaction) => {
+        const configurations = store(persistence, transaction, [
+          "discarded-draft-version",
+          "discarded-draft-change",
+          "discarded-version",
+          "discarded-change",
+        ]);
+        await configurations.createDraft({
+          workspaceId: "workspace-a",
+          resourceType: "ai-provider-instances",
+          configurationId: "discarded-provider-draft",
+          displayName: "Abandoned provider",
+          canonicalSettings: "{}",
+          secretReferenceIds: [],
+        });
+        await expect(
+          configurations.transition({
+            workspaceId: "workspace-a",
+            resourceType: "ai-provider-instances",
+            configurationId: "discarded-provider-draft",
+            expectedRevision: 1,
+            canonicalSettings: "{}",
+            secretReferenceIds: [],
+            lifecycle: "discarded",
+          }),
+        ).resolves.toMatchObject({
+          configuration: { lifecycle: "discarded", revision: 2 },
+          version: { id: "discarded-version", version: 2 },
+        });
+      });
+
+      await expect(
+        persistence.administrationResourceReadStore.configurationInspection({
+          workspaceId: "workspace-a",
+          configurationId: "discarded-provider-draft",
+        }),
+      ).resolves.toMatchObject({
+        lifecycle: "discarded",
+        revision: 2,
+        currentVersionId: "discarded-version",
+      });
+      await expect(
+        persistence.administrationResourceReadStore.list({
+          workspaceId: "workspace-a",
+          resource: "ai-provider-instances",
+          limit: 20,
+        }),
+      ).resolves.toMatchObject({ items: [] });
+      await expect(
+        pool.query(
+          "DELETE FROM administration_configuration_versions WHERE id = 'discarded-version'",
+        ),
+      ).rejects.toThrow(/immutable/i);
+    } finally {
+      await persistence.close();
+    }
+  });
+
   it("allows exactly one concurrent transition for a revision", async () => {
     const persistence = createPostgresPersistence({ databaseUrl });
     try {
@@ -292,13 +353,28 @@ describe("PostgreSQL configuration lifecycle", () => {
         "INSERT INTO credential_registrations (id, workspace_id, secret_reference, lifecycle) VALUES ('credential-a', 'workspace-a', 'vault:operator/connector-token', 'active')",
       );
       await persistence.unitOfWork.transaction(async (transaction) => {
-        await store(persistence, transaction).createDraft({
+        const configurations = store(persistence, transaction, [
+          "connector-secret-draft-version",
+          "connector-secret-draft-change",
+          "connector-secret-active-version",
+          "connector-secret-active-change",
+        ]);
+        await configurations.createDraft({
           workspaceId: "workspace-a",
           resourceType: "connector-instances",
           configurationId: "connector-with-secret",
           displayName: "Connector with reference",
           canonicalSettings: '{"endpoint":"https://example.test"}',
           secretReferenceIds: ["vault:operator/connector-token"],
+        });
+        await configurations.transition({
+          workspaceId: "workspace-a",
+          resourceType: "connector-instances",
+          configurationId: "connector-with-secret",
+          expectedRevision: 1,
+          canonicalSettings: '{"endpoint":"https://example.test"}',
+          secretReferenceIds: ["vault:operator/connector-token"],
+          lifecycle: "active",
         });
       });
 

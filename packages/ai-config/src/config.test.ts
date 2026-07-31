@@ -140,6 +140,8 @@ describe("AI binding and catalog configuration", () => {
       fetchedAt: "2026-01-01T00:00:00.000Z",
       verifiedSha256: createHash("sha256").update(bytes).digest("hex"),
     });
+    expect(imported.models[0]?.id).toMatch(/^catalog-model-[a-f0-9]{64}$/u);
+    expect(imported.models[0]?.id).not.toContain("/");
     expect(imported.models[0]?.rawEntry.future_field).toEqual({
       survives: true,
     });
@@ -162,6 +164,53 @@ describe("AI binding and catalog configuration", () => {
         verifiedSha256: createHash("sha256").update(malformed).digest("hex"),
       }),
     ).toThrow(/decimal/);
+  });
+
+  it("keeps an overly precise LiteLLM model selectable with unknown pricing", () => {
+    const source = new TextEncoder().encode(
+      JSON.stringify({
+        "provider/precise-model": {
+          litellm_provider: "openai",
+          mode: "chat",
+          input_cost_per_token: "0.0000000000000000001",
+        },
+      }),
+    );
+    const imported = importLiteLlmCatalog({
+      snapshotId: "snapshot-precision",
+      rawBytes: source,
+      upstreamUrl: "https://example.invalid/catalog.json",
+      upstreamCommitSha: "abcdef0",
+      fetchedAt: "2026-01-01T00:00:00.000Z",
+      verifiedSha256: createHash("sha256").update(source).digest("hex"),
+    });
+
+    expect(imported.models[0]?.priceComponents).toEqual([]);
+  });
+
+  it("treats unavailable LiteLLM token limits as unspecified rather than rejecting the catalog", () => {
+    const source = new TextEncoder().encode(
+      JSON.stringify({
+        "provider/moderation": {
+          litellm_provider: "openai",
+          max_input_tokens: 32768,
+          max_output_tokens: 0,
+        },
+      }),
+    );
+    const imported = importLiteLlmCatalog({
+      snapshotId: "snapshot-limits",
+      rawBytes: source,
+      upstreamUrl: "https://example.invalid/catalog.json",
+      upstreamCommitSha: "abcdef0",
+      fetchedAt: "2026-01-01T00:00:00.000Z",
+      verifiedSha256: createHash("sha256").update(source).digest("hex"),
+    });
+
+    expect(imported.models[0]).toMatchObject({
+      maximumInputTokens: 32768,
+      maximumOutputTokens: undefined,
+    });
   });
 
   it("prices all token components, preserves zero as known, and applies precedence", () => {

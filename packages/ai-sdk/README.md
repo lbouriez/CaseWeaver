@@ -1,6 +1,6 @@
 # AI SDK
 
-**PBI:** 003
+**PBIs:** 003, 021
 
 Provider-neutral contracts for embedding, vision, generation, reranking, and repository
 agents. It exposes normalized usage, provider metadata, typed safe errors, cancellation,
@@ -10,6 +10,13 @@ binding selection, or persistence behavior.
 Provider-owned model tokenizer contributions are also declared here. They construct a
 counter only from an already-selected immutable binding; selection/caching belong to
 outer runtime composition and a missing contribution is a configuration failure.
+
+Provider-owned model discovery is a separate server-only contract. A discoverer returns
+only normalized, safe model capability metadata for one configured endpoint after outer
+composition has resolved its opaque secret reference. It does not expose raw provider
+responses, replace the pinned LiteLLM pricing catalog, or make an inference call; the
+provider inventory and any pricing enrichment are persisted by outer administration
+composition.
 
 Repository-agent requests declare per-turn token limits. Their results explicitly state
 whether usage is a whole-run aggregate or observable turns, while the shared runtime

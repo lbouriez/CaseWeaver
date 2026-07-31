@@ -4,19 +4,17 @@ name: caseweaver-local
 # knowledge source. The host path is deliberately required rather than
 # committed: an open-source Compose stack must not assume a contributor's
 # filesystem layout. It is read-only and reaches only the API (bounded
-# connector test) and worker (actual ingestion), never the browser or the
-# no-network attachment processor.
+# connector test and actual ingestion), never the browser.  Both execution
+# paths live in the standalone backend in the normal local topology.
 services:
-  api:
+  backend:
+    environment:
+      # Docker Desktop bind mounts often retain the host owner. This explicit
+      # deployment-owned root lets the non-root runtime trust only this mounted
+      # worktree; Admin-provided allowed roots cannot widen it.
+      CASEWEAVER_GIT_TRUSTED_LOCAL_ROOTS_JSON: '["/mnt/caseweaver/repositories/documentation"]'
     volumes:
       - type: bind
         source: ${CASEWEAVER_DOCUMENTATION_REPOSITORY:?Set CASEWEAVER_DOCUMENTATION_REPOSITORY to the local Git repository directory.}
-        target: /mnt/caseweaver/repositories/cloud
-        read_only: true
-
-  worker:
-    volumes:
-      - type: bind
-        source: ${CASEWEAVER_DOCUMENTATION_REPOSITORY:?Set CASEWEAVER_DOCUMENTATION_REPOSITORY to the local Git repository directory.}
-        target: /mnt/caseweaver/repositories/cloud
+        target: /mnt/caseweaver/repositories/documentation
         read_only: true

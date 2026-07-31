@@ -36,6 +36,9 @@ export interface ProviderCapabilityTestTemplateLookup {
     input: Readonly<{
       readonly providerType: string;
       readonly testOperation: string;
+      /** Immutable provider protocol mode; templates must test the configured
+       * capability rather than assuming chat for an embedding-only instance. */
+      readonly wireApi: string;
     }>,
   ): Promise<
     | Readonly<{
@@ -79,12 +82,6 @@ export class PostgresProviderCapabilityTestConfigurationStore
     });
     if (provider === null || provider.lifecycle !== "active") return undefined;
 
-    const template = await this.templates.load({
-      providerType: provider.providerType,
-      testOperation: input.testOperation,
-    });
-    if (template === undefined) return undefined;
-
     const providerVersion =
       await this.client.aiProviderInstanceVersion.findFirst({
         where: {
@@ -92,9 +89,16 @@ export class PostgresProviderCapabilityTestConfigurationStore
           providerInstanceId: input.providerInstanceId,
         },
         orderBy: { version: "desc" },
-        select: { id: true },
+        select: { id: true, wireApi: true },
       });
     if (providerVersion === null) return undefined;
+
+    const template = await this.templates.load({
+      providerType: provider.providerType,
+      testOperation: input.testOperation,
+      wireApi: providerVersion.wireApi,
+    });
+    if (template === undefined) return undefined;
 
     const defaultBinding =
       await this.client.aiWorkspaceBindingDefault.findUnique({

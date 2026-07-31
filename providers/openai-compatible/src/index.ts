@@ -20,6 +20,7 @@ import {
 } from "@caseweaver/ai-sdk";
 
 export * from "./administration-descriptor.js";
+export * from "./model-discovery.js";
 export * from "./tokenizer.js";
 
 import { z } from "zod";

@@ -1,5 +1,5 @@
-import type { OperationsStore, UnitOfWork } from "@caseweaver/application";
 import type { AdministrationOperationPreflightPort } from "@caseweaver/administration";
+import type { OperationsStore, UnitOfWork } from "@caseweaver/application";
 import { workspaceId } from "@caseweaver/domain";
 import type { AdministrationReadStore } from "@caseweaver/postgres";
 
@@ -162,6 +162,13 @@ export class ExistingOperationsPreflight
           canConfirm: true,
         });
       }
+      case "secret.reconcile":
+        return Object.freeze({
+          confirmation: "Confirm external secret rotation has completed?",
+          impact:
+            "The server will mark only this opaque reference metadata active again. It does not read, verify, log, or change the external secret value.",
+          canConfirm: true,
+        });
       case "secret.revoke": {
         const dependencies =
           await this.dependencies.reads.secretReferenceDependencies({
@@ -173,8 +180,8 @@ export class ExistingOperationsPreflight
           impact:
             dependencies.length === 0
               ? "The server will disable the opaque reference for future configuration use. Existing immutable history remains unchanged."
-              : `The server will disable the opaque reference for future configuration use. ${dependencySummary(dependencies)} will no longer be activatable until a replacement is configured. Existing immutable history remains unchanged.`,
-          canConfirm: true,
+              : `Revocation is blocked because active configuration still uses this reference. ${dependencySummary(dependencies)} Disable or replace those configurations first; immutable history remains unchanged.`,
+          canConfirm: dependencies.length === 0,
         });
       }
       case "configuration.activate":
@@ -193,17 +200,31 @@ export class ExistingOperationsPreflight
         const matches =
           configuration !== undefined &&
           configuration.resourceType === resourceType;
+        const discardingDraft =
+          command.action === "configuration.disable" &&
+          configuration?.lifecycle === "draft";
         const lifecycle =
-          command.action === "configuration.activate" ? "active" : "disabled";
+          command.action === "configuration.activate"
+            ? "active"
+            : discardingDraft
+              ? "discarded"
+              : "disabled";
         return Object.freeze({
           confirmation:
             command.action === "configuration.activate"
               ? "Activate this immutable configuration version?"
-              : "Disable this configuration?",
+              : discardingDraft
+                ? "Remove this inactive draft?"
+                : "Disable this configuration?",
           impact: matches
-            ? "The server will create a new immutable lifecycle version. Existing jobs retain their prior configuration reference."
+            ? discardingDraft
+              ? "The server will retire this inert draft from normal configuration lists. Its immutable version and audit history remain preserved; it cannot be reactivated."
+              : "The server will create a new immutable lifecycle version. Existing jobs retain their prior configuration reference."
             : "The configuration is no longer available in this workspace.",
-          canConfirm: matches && configuration.lifecycle !== lifecycle,
+          canConfirm:
+            matches &&
+            configuration.lifecycle !== lifecycle &&
+            configuration.lifecycle !== "discarded",
         });
       }
       default:

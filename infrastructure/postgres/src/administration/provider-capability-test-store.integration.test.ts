@@ -41,15 +41,23 @@ const template: MeteredAiRequest = Object.freeze({
   budget: Object.freeze({ currency: "USD", hard: false }),
 });
 
+const templateRequests: Array<{
+  readonly providerType: string;
+  readonly testOperation: string;
+  readonly wireApi: string;
+}> = [];
+
 const templates: ProviderCapabilityTestTemplateLookup = {
-  load: async ({ providerType, testOperation }) =>
-    providerType === "test-provider" && testOperation === "healthCheck"
+  load: async ({ providerType, testOperation, wireApi }) => {
+    templateRequests.push({ providerType, testOperation, wireApi });
+    return providerType === "test-provider" && testOperation === "healthCheck"
       ? Object.freeze({
           templateDigest: digest("a"),
           request: template,
           timeoutMs: 5_000,
         })
-      : undefined,
+      : undefined;
+  },
 };
 
 function createClient(): PrismaClient {
@@ -157,6 +165,7 @@ function terminalAudit() {
 }
 
 beforeEach(async () => {
+  templateRequests.splice(0, templateRequests.length);
   await pool.query(
     "TRUNCATE TABLE ai_catalog_snapshots, workspaces RESTART IDENTITY CASCADE",
   );
@@ -185,6 +194,13 @@ describe("PostgreSQL provider capability-test stores", () => {
         templateDigest: digest("a"),
         budgetPolicy: { status: "configured" },
       });
+      expect(templateRequests).toEqual([
+        {
+          providerType: "test-provider",
+          testOperation: "healthCheck",
+          wireApi: "chatCompletions",
+        },
+      ]);
       await expect(
         stores.configuration.load({
           workspaceId: "provider-workspace-b",

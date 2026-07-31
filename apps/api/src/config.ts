@@ -22,6 +22,7 @@ const proxyAddress = z
 const booleanEnvironmentValue = z
   .enum(["true", "false"])
   .transform((value) => value === "true");
+const gitCommitSha = z.string().regex(/^[a-f0-9]{40}$/iu);
 
 /** Docker Compose mapping-form optional variables become empty strings. */
 function optionalEnvironmentValue<T extends z.ZodType>(schema: T) {
@@ -94,6 +95,8 @@ const apiConfigSchema = z
       .default(false),
     ADMIN_ALLOWED_ORIGINS: z.string().max(8_000).optional(),
     TRUSTED_PROXY_CIDRS: z.string().max(8_000).optional(),
+    /** Optional deployment pin for the trusted LiteLLM catalog source. */
+    AI_CATALOG_LITELLM_COMMIT_SHA: optionalEnvironmentValue(gitCommitSha),
   })
   .passthrough();
 
@@ -129,6 +132,8 @@ export interface ApiConfig {
   readonly allowedAdminOrigins: readonly string[];
   /** Explicit proxy sources only; forwarding headers are otherwise ignored. */
   readonly trustedProxyCidrs: readonly string[];
+  /** Optional deployment pin; absent means resolve the trusted source's main revision. */
+  readonly trustedAiCatalogPinnedCommitSha?: string;
 }
 
 export class ApiConfigurationError extends Error {
@@ -234,6 +239,12 @@ export function parseApiConfig(env: NodeJS.ProcessEnv): ApiConfig {
     databaseReadinessTimeoutMs: result.data.DATABASE_READINESS_TIMEOUT_MS,
     allowedAdminOrigins: Object.freeze(origins),
     trustedProxyCidrs: Object.freeze(trustedProxyCidrs),
+    ...(result.data.AI_CATALOG_LITELLM_COMMIT_SHA === undefined
+      ? {}
+      : {
+          trustedAiCatalogPinnedCommitSha:
+            result.data.AI_CATALOG_LITELLM_COMMIT_SHA.toLowerCase(),
+        }),
     ...(result.data.OIDC_ISSUER === undefined
       ? {}
       : {

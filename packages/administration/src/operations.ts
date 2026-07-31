@@ -28,6 +28,7 @@ export const administrationOperationActions = [
   "retention.reap",
   "privacy.purge",
   "secret.rotate",
+  "secret.reconcile",
   "secret.revoke",
   "configuration.activate",
   "configuration.disable",
@@ -59,6 +60,7 @@ export function requiredOperationPermission(
     case "privacy.purge":
       return "privacy.delete";
     case "secret.rotate":
+    case "secret.reconcile":
     case "secret.revoke":
       return "credential.manage";
     case "configuration.activate":
@@ -320,6 +322,7 @@ export function validateOperationCommand(
       requirePrivacyParameters(command.parameters);
       break;
     case "secret.rotate":
+    case "secret.reconcile":
     case "secret.revoke":
       requiresId("secretReference");
       requireEmptyParameters(command.parameters);

@@ -1,12 +1,16 @@
 import { InMemoryConnectorSecretResolver } from "@caseweaver/connector-sdk";
 import { describe, expect, it, vi } from "vitest";
 
+import { gitMarkdownDescriptorReference } from "./administration-descriptor.js";
 import {
   FakeGitMarkdownAttachmentLocatorCodec,
   FakeGitRepository,
   fixtureOid,
 } from "./fakes.js";
-import { createGitMarkdownRuntimeContribution } from "./runtime-contribution.js";
+import {
+  createGitMarkdownRuntimeContribution,
+  createGitMarkdownRuntimeContributions,
+} from "./runtime-contribution.js";
 
 const locator = "env:GIT_DOCUMENTATION_TOKEN";
 const token = "git-runtime-test-token";
@@ -20,9 +24,7 @@ function privateConfiguration(
     connectorRegistrationId: "connector-1",
     configurationVersionId: "connector-version-1",
     descriptor: {
-      kind: "connector" as const,
-      type: "git-markdown",
-      version: "1",
+      ...gitMarkdownDescriptorReference,
       ...(descriptor as Record<string, unknown> | undefined),
     },
     settings: {
@@ -65,11 +67,7 @@ describe("Git/Markdown runtime contribution", () => {
       secrets,
     });
 
-    expect(contribution.descriptor).toEqual({
-      kind: "connector",
-      type: "git-markdown",
-      version: "1",
-    });
+    expect(contribution.descriptor).toEqual(gitMarkdownDescriptorReference);
     expect(capabilities.knowledgeSource).toBeDefined();
     expect(create).toHaveBeenCalledOnce();
     expect(secrets.calls).toEqual([]);
@@ -91,6 +89,31 @@ describe("Git/Markdown runtime contribution", () => {
 
     expect(capabilities.knowledgeSource).toBeDefined();
     expect(capabilities.attachmentSource).toBeDefined();
+  });
+
+  it("registers compatible historical descriptor revisions for exact durable pins", async () => {
+    const repository = new FakeGitRepository([
+      { ref: "branch:main", commitSha: fixtureOid("a"), files: [] },
+    ]);
+    const contributions = createGitMarkdownRuntimeContributions({
+      repositoryFactory: { create: () => repository },
+    });
+
+    expect(contributions.map(({ descriptor }) => descriptor.version)).toEqual([
+      "1",
+      "2",
+      "3",
+    ]);
+    const historical = contributions.find(
+      ({ descriptor }) => descriptor.version === "1",
+    );
+    expect(historical).toBeDefined();
+    await expect(
+      historical?.create({
+        configuration: privateConfiguration({ descriptor: { version: "1" } }),
+        secrets: new InMemoryConnectorSecretResolver({ [locator]: token }),
+      }),
+    ).resolves.toMatchObject({ knowledgeSource: expect.anything() });
   });
 
   it("fails closed before repository construction or secret resolution", async () => {

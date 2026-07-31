@@ -143,6 +143,26 @@ describe("PostgreSQL knowledge execution runtime", () => {
     });
   });
 
+  it("atomically creates and claims the initial source execution fence", async () => {
+    const claimed = await executions.claim({
+      workspaceId: workspace,
+      sourceId: source,
+      mode: "incremental",
+      leaseMs: 30_000,
+    });
+
+    expect(claimed).toMatchObject({ fence: { value: "1" } });
+    expect(claimed).not.toHaveProperty("cursor");
+    await expect(
+      executions.claim({
+        workspaceId: workspace,
+        sourceId: source,
+        mode: "incremental",
+        leaseMs: 30_000,
+      }),
+    ).resolves.toBeUndefined();
+  });
+
   it("claims cursor and fence atomically, rejects stale commit, and permits the current fence", async () => {
     await pool.query(
       `INSERT INTO knowledge_source_states (

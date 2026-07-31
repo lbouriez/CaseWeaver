@@ -1,5 +1,7 @@
 import { pathToFileURL } from "node:url";
 
+import { runWorkerQueueMigration } from "@caseweaver/worker";
+
 import {
   attachStandaloneShutdownSignals,
   createStandaloneRuntimeFromEnvironment,
@@ -19,7 +21,7 @@ export function runStandaloneCommand(
     output.log('{"status":"ok"}');
     return 0;
   }
-  output.error("Usage: caseweaver-standalone health | start");
+  output.error("Usage: caseweaver-standalone health | migrate-queue | start");
   return 1;
 }
 
@@ -36,12 +38,25 @@ export async function runStandalone(
   createRuntime: (
     environment: NodeJS.ProcessEnv,
   ) => Promise<StandaloneHostRuntime> = createStandaloneRuntimeFromEnvironment,
+  migrateQueue: (
+    environment: NodeJS.ProcessEnv,
+  ) => Promise<void> = runWorkerQueueMigration,
 ): Promise<number> {
   if (arguments_.length === 1 && arguments_[0] === "health") {
     return runStandaloneCommand(arguments_, output);
   }
   if (arguments_.length !== 1 || arguments_[0] !== "start") {
-    output.error("Usage: caseweaver-standalone health | start");
+    if (arguments_.length === 1 && arguments_[0] === "migrate-queue") {
+      try {
+        await migrateQueue(environment);
+        output.log("Queue migration completed.");
+        return 0;
+      } catch {
+        output.error("Queue migration failed.");
+        return 1;
+      }
+    }
+    output.error("Usage: caseweaver-standalone health | migrate-queue | start");
     return 1;
   }
   let runtime: StandaloneHostRuntime | undefined;

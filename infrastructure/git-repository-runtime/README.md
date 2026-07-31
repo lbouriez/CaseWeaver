@@ -21,6 +21,11 @@ configuration, Markdown parsing, discovery policy, and secret-reference resoluti
   composition. The adapter never checks out a remote worktree.
 - Local paths and every configured root are canonicalized again at runtime. The resolved
   Git worktree must remain within an allowed root, including after symlink resolution.
+- A deployment may configure `CASEWEAVER_GIT_TRUSTED_LOCAL_ROOTS_JSON` as a bounded
+  JSON array of absolute mounted worktree roots. Only those roots are passed to Git's
+  `safe.directory` configuration, which permits a non-root runtime to read a bind mount
+  with host ownership. Connector-form roots remain a second containment check and never
+  widen this deployment trust boundary.
 - Discovery resolves a branch/tag to a full commit, or verifies an administrator-selected
   full commit object ID directly. Text, binary, and diff reads verify and use that exact
   commit SHA, never a mutable ref. Binary reads keep their private

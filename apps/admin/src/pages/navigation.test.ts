@@ -19,7 +19,7 @@ describe("permission-aware navigation", () => {
       "Integrations",
       "AI",
       "Repository analysis",
-      "Access",
+      "Access & security",
       "Platform",
     ]);
   });

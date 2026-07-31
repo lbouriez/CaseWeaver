@@ -32,4 +32,35 @@ describe("runtime descriptor registrations", () => {
       "vault:jitbit/support",
     ]);
   });
+
+  it("keeps OpenAI-compatible catalog selection protocol-owned rather than catalog-label-owned", () => {
+    const registration = runtimeDescriptorRegistration(
+      "aiProvider",
+      "openai-compatible",
+    );
+    const supports = registration?.supportsCatalogBinding;
+    expect(supports).toBeDefined();
+
+    // The catalog label may name a routed provider. It is provenance, not a
+    // shared Administration switch; only the adapter's declared protocol and
+    // the catalog's role decide this candidate.
+    expect(
+      supports?.({
+        role: "embedding",
+        wireApi: "embeddings",
+        catalogProvider: "openrouter",
+        supportedRoles: ["embedding"],
+        capabilities: [],
+      }),
+    ).toBe(true);
+    expect(
+      supports?.({
+        role: "embedding",
+        wireApi: "chatCompletions",
+        catalogProvider: "synthetic-routed-provider",
+        supportedRoles: ["embedding"],
+        capabilities: [],
+      }),
+    ).toBe(false);
+  });
 });

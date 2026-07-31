@@ -377,24 +377,65 @@ export class PostgresAdministrationResourceReadStore
           orderBy: { id: "asc" },
           take,
           ...cursor,
-          select: { id: true, lifecycle: true, updatedAt: true },
+          // The locator is selected only inside this server-private adapter to
+          // calculate active dependency counts. It is never placed in the DTO.
+          select: {
+            id: true,
+            lifecycle: true,
+            updatedAt: true,
+            secretReference: true,
+          },
         });
-        // The opaque external reference is intentionally never selected here.
-        return rows.map((row) =>
+        const activeConfigurations =
+          await this.client.administrationConfiguration.findMany({
+            where: {
+              workspaceId,
+              lifecycle: "active",
+              currentVersionId: { not: null },
+            },
+            select: { currentVersionId: true },
+          });
+        const currentVersionIds = activeConfigurations.flatMap(
+          (configuration) =>
+            configuration.currentVersionId === null
+              ? []
+              : [configuration.currentVersionId],
+        );
+        const counts = await Promise.all(
+          rows.map(async (row) => {
+            if (currentVersionIds.length === 0) return 0;
+            return this.client.administrationConfigurationVersion.count({
+              where: {
+                workspaceId,
+                id: { in: currentVersionIds },
+                secretReferences: { array_contains: [row.secretReference] },
+              },
+            });
+          }),
+        );
+        return rows.map((row, index) =>
           item({
             id: row.id,
             label: `Secret reference ${row.id}`,
             status: row.lifecycle,
             updatedAt: row.updatedAt,
-            summary:
-              "Reference metadata only; secret material is never returned.",
+            summary: `${counts[index] ?? 0} active configuration dependenc${
+              (counts[index] ?? 0) === 1 ? "y" : "ies"
+            }; secret material is never returned.`,
           }),
         );
       }
       case "connector-instances":
       case "ai-provider-instances": {
         const rows = await this.client.administrationConfiguration.findMany({
-          where: { workspaceId, resourceType: input.resource },
+          // A discarded draft remains in immutable configuration history and
+          // audit, but it is not an operational configuration and must not
+          // clutter a normal provider/connector inventory.
+          where: {
+            workspaceId,
+            resourceType: input.resource,
+            lifecycle: { not: "discarded" },
+          },
           orderBy: { id: "asc" },
           take,
           ...cursor,

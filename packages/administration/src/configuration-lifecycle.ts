@@ -25,7 +25,7 @@ export interface ConfigurationTransitionCommand {
   readonly secretReferenceIds: readonly string[];
   readonly descriptor?: ConfigurationDescriptorReference;
   readonly displayName?: string;
-  readonly lifecycle?: "active" | "disabled";
+  readonly lifecycle?: "active" | "disabled" | "discarded";
   readonly beforeHash?: string;
   readonly mutation: MutationIdentity;
 }
@@ -94,7 +94,7 @@ export interface ConfigurationLifecycleStore {
       readonly secretReferenceIds: readonly string[];
       readonly descriptor?: ConfigurationDescriptorReference;
       readonly displayName?: string;
-      readonly lifecycle?: "active" | "disabled";
+      readonly lifecycle?: "active" | "disabled" | "discarded";
     }>,
   ): Promise<
     | Readonly<{

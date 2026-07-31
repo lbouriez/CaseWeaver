@@ -441,7 +441,12 @@ export interface RepositoryAnalysisTransitionResolver {
 export interface RepositoryAnalysisConfigurationDto {
   readonly id: string;
   readonly versionId: string;
-  readonly lifecycle: "draft" | "active" | "disabled" | "superseded";
+  readonly lifecycle:
+    | "draft"
+    | "active"
+    | "disabled"
+    | "discarded"
+    | "superseded";
   readonly revision: number;
   readonly idempotency: "created" | "replayed";
 }

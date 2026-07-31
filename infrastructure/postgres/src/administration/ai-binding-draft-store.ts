@@ -46,8 +46,7 @@ export class PostgresAiBindingDraftStore {
     if (
       provider === null ||
       provider.lifecycle !== "active" ||
-      catalog === null ||
-      catalog.provider !== provider.providerType
+      catalog === null
     ) {
       return undefined;
     }
@@ -66,6 +65,19 @@ export class PostgresAiBindingDraftStore {
       },
     });
     if (version === null) return undefined;
+    const inventory =
+      await this.client.aiProviderModelInventorySnapshot.findFirst({
+        where: {
+          workspaceId: input.workspaceId,
+          providerInstanceId: input.providerInstanceId,
+          providerInstanceVersionId: version.id,
+          catalogSnapshotId: input.catalogSnapshotId,
+        },
+        select: { id: true },
+      });
+    // A LiteLLM entry is pricing metadata only. It may be selected only after
+    // this exact provider version discovered it in a durable inventory.
+    if (inventory === null) return undefined;
     const prices = await this.client.aiCatalogPriceComponent.findMany({
       where: { catalogModelId: catalog.id },
       orderBy: { id: "asc" },
@@ -133,6 +145,112 @@ export class PostgresAiBindingDraftStore {
       ...(input.maximumOutputTokens === undefined
         ? {}
         : { maximumOutputTokens: input.maximumOutputTokens }),
+    });
+  }
+
+  /**
+   * Safe server-side candidate projection for a binding form. Only the newest
+   * immutable inventory discovered from the selected active provider version is
+   * eligible; a global pricing catalog never supplies availability by itself.
+   */
+  public async listOptions(
+    input: Readonly<{
+      readonly workspaceId: string;
+      readonly providerInstanceId: string;
+      readonly role: string;
+      readonly search?: string;
+    }>,
+  ): Promise<
+    | Readonly<{
+        readonly providerType: string;
+        readonly wireApi: string;
+        readonly models: readonly Readonly<{
+          readonly catalogSnapshotId: string;
+          readonly canonicalModel: string;
+          readonly catalogProvider: string;
+          readonly supportedRoles: readonly string[];
+          readonly capabilities: readonly string[];
+        }>[];
+      }>
+    | undefined
+  > {
+    const provider = await this.client.aiProviderInstance.findUnique({
+      where: {
+        workspaceId_id: {
+          workspaceId: input.workspaceId,
+          id: input.providerInstanceId,
+        },
+      },
+      select: { providerType: true, lifecycle: true },
+    });
+    if (provider === null || provider.lifecycle !== "active") return undefined;
+    const version = await this.client.aiProviderInstanceVersion.findFirst({
+      where: {
+        workspaceId: input.workspaceId,
+        providerInstanceId: input.providerInstanceId,
+      },
+      orderBy: { version: "desc" },
+      select: { id: true, wireApi: true },
+    });
+    if (version === null) return undefined;
+    const inventory =
+      await this.client.aiProviderModelInventorySnapshot.findFirst({
+        where: {
+          workspaceId: input.workspaceId,
+          providerInstanceId: input.providerInstanceId,
+          providerInstanceVersionId: version.id,
+        },
+        orderBy: [{ discoveredAt: "desc" }, { id: "desc" }],
+        select: { catalogSnapshotId: true },
+      });
+    if (inventory === null) {
+      return Object.freeze({
+        providerType: provider.providerType,
+        wireApi: version.wireApi,
+        models: Object.freeze([]),
+      });
+    }
+    const models = await this.client.aiCatalogModel.findMany({
+      where: {
+        catalogSnapshotId: inventory.catalogSnapshotId,
+        supportedRoles: { array_contains: [input.role] },
+        ...(input.search === undefined
+          ? {}
+          : {
+              canonicalModel: {
+                contains: input.search,
+                mode: "insensitive",
+              },
+            }),
+      },
+      orderBy: { canonicalModel: "asc" },
+      // Provider inventories are bounded at acquisition (2,000) and the
+      // binding form needs to expose a real multi-provider catalog, not an
+      // arbitrary first 200 alphabetical entries. Keep a defensive 1,000-item
+      // response bound; the optional server-side search narrows further.
+      take: 1_000,
+      select: {
+        catalogSnapshotId: true,
+        canonicalModel: true,
+        provider: true,
+        supportedRoles: true,
+        capabilities: true,
+      },
+    });
+    return Object.freeze({
+      providerType: provider.providerType,
+      wireApi: version.wireApi,
+      models: Object.freeze(
+        models.map((model) =>
+          Object.freeze({
+            catalogSnapshotId: model.catalogSnapshotId,
+            canonicalModel: model.canonicalModel,
+            catalogProvider: model.provider,
+            supportedRoles: stringArray(model.supportedRoles),
+            capabilities: stringArray(model.capabilities),
+          }),
+        ),
+      ),
     });
   }
 

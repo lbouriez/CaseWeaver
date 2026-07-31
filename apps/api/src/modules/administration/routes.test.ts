@@ -85,6 +85,14 @@ function createOperations(): AdministrationRouteOperations {
       status: "active",
       fields: {},
     })),
+    secretReferenceDependencies: vi.fn(async () => ({
+      items: [
+        {
+          configurationId: "provider-configuration-1",
+          resourceType: "ai-provider-instances",
+        },
+      ],
+    })),
     createKnowledgeSourceDraft: vi.fn(async () => ({
       id: "source-1",
       label: "Support knowledge",
@@ -110,6 +118,29 @@ function createOperations(): AdministrationRouteOperations {
       label: "AI binding binding-1",
       status: "draft",
       version: "3",
+      fields: {},
+    })),
+    aiBindingOptions: vi.fn(async () => ({
+      items: [
+        {
+          catalogSnapshotId: "catalog-1",
+          canonicalModel: "provider/model-1",
+          catalogProvider: "provider",
+        },
+      ],
+    })),
+    refreshAiCatalog: vi.fn(async () => ({
+      id: "litellm-safe-hash",
+      label: "Trusted model catalog",
+      status: "pinned",
+      version: "safe-hash",
+      fields: {},
+    })),
+    refreshAiProviderModels: vi.fn(async () => ({
+      id: "provider-inventory-1",
+      label: "Provider model inventory",
+      status: "refreshed",
+      summary: "1 available model; 1 with trusted pricing",
       fields: {},
     })),
     transitionKnowledgeSource: vi.fn(async () => ({
@@ -372,7 +403,7 @@ describe("administration API routes", () => {
     await built.app.close();
   });
 
-  it("rejects bodies for bodyless auth and administration commands with payload-free audits", async () => {
+  it("rejects data-bearing bodies for bodyless auth and administration commands with payload-free audits", async () => {
     const operations = createOperations();
     operations.requestDiagnosticExport = vi.fn(async () => ({
       id: "diagnostic-export-1",
@@ -399,12 +430,22 @@ describe("administration API routes", () => {
       headers,
       payload: { unexpected: "body-value-must-not-be-audited" },
     });
+    const emptyNull = await built.app.inject({
+      method: "POST",
+      url: "/v1/admin/ai/catalog-snapshots/refresh",
+      headers: {
+        ...headers,
+        "content-type": "application/json",
+      },
+      payload: "null",
+    });
 
     expect([
       logout.statusCode,
       preview.statusCode,
       diagnosticExport.statusCode,
     ]).toEqual([400, 400, 400]);
+    expect(emptyNull.statusCode).toBe(200);
     expect(built.operations.logout).not.toHaveBeenCalled();
     expect(
       built.operations.previewProviderCapabilityTest,
@@ -686,6 +727,30 @@ describe("administration API routes", () => {
     await built.app.close();
   });
 
+  it("inspects active secret-reference dependencies through a dedicated audited read without a locator", async () => {
+    const built = createApp();
+    const response = await built.app.inject({
+      method: "GET",
+      url: "/v1/admin/secret-references/credential-1/dependencies",
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      items: [
+        {
+          configurationId: "provider-configuration-1",
+          resourceType: "ai-provider-instances",
+        },
+      ],
+    });
+    expect(response.body).not.toMatch(/env:|vault:|secret[-_ ]?value|token/iu);
+    expect(built.operations.secretReferenceDependencies).toHaveBeenCalledWith(
+      "credential-1",
+      context,
+    );
+    await built.app.close();
+  });
+
   it("creates resource-owned source and schedule drafts through bounded, idempotent routes", async () => {
     const built = createApp();
     const source = await built.app.inject({
@@ -702,6 +767,7 @@ describe("administration API routes", () => {
         chunkingProfileVersion: "chunking-v1",
         embeddingBatchSize: 16,
         embeddingBudgetPolicyId: "budget-1",
+        attachmentStage: { mode: "disabled" },
         synchronizationPolicy: { trigger: "manual" },
         deletionBehavior: "tombstone",
       },
@@ -1048,6 +1114,76 @@ describe("administration API routes", () => {
     );
     expect(`${preview.body}${execution.body}`).not.toMatch(
       /example\.test|secret-registration|repository|settings|token/iu,
+    );
+    await built.app.close();
+  });
+
+  it("uses typed server-owned provider inventory refresh and binding routes without accepting provider data", async () => {
+    const built = createApp();
+    const options = await built.app.inject({
+      method: "GET",
+      url: "/v1/admin/ai/binding-options?providerInstanceId=provider-1&role=embedding&search=text%20embedding",
+    });
+    const refresh = await built.app.inject({
+      method: "POST",
+      url: "/v1/admin/ai/catalog-snapshots/refresh",
+      headers: { "idempotency-key": "catalog-refresh-idempotency-key" },
+    });
+    const providerInventory = await built.app.inject({
+      method: "POST",
+      url: "/v1/admin/ai/provider-instances/provider-1/models/refresh",
+      headers: { "idempotency-key": "provider-inventory-refresh-key" },
+    });
+
+    expect(options.statusCode).toBe(200);
+    expect(options.json()).toEqual({
+      items: [
+        {
+          catalogSnapshotId: "catalog-1",
+          canonicalModel: "provider/model-1",
+          catalogProvider: "provider",
+        },
+      ],
+    });
+    expect(refresh.statusCode).toBe(200);
+    expect(refresh.body).not.toMatch(/raw|url|token|secret|locator/iu);
+    expect(providerInventory.statusCode).toBe(200);
+    expect(providerInventory.body).not.toMatch(
+      /raw|url|token|secret|locator|endpoint/iu,
+    );
+    expect(built.operations.aiBindingOptions).toHaveBeenCalledWith(
+      {
+        providerInstanceId: "provider-1",
+        role: "embedding",
+        search: "text embedding",
+      },
+      context,
+    );
+    expect(built.operations.refreshAiCatalog).toHaveBeenCalledWith(context);
+    expect(built.operations.refreshAiProviderModels).toHaveBeenCalledWith(
+      "provider-1",
+      context,
+    );
+    await built.app.close();
+  });
+
+  it("fails closed with a redacted unavailable result when trusted catalog acquisition fails", async () => {
+    const operations = createOperations();
+    operations.refreshAiCatalog = vi.fn(async () => {
+      throw new AdministrationUnavailableError();
+    });
+    const built = createApp(operations);
+
+    const response = await built.app.inject({
+      method: "POST",
+      url: "/v1/admin/ai/catalog-snapshots/refresh",
+      headers: { "idempotency-key": "catalog-refresh-unavailable-key" },
+    });
+
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({ code: "service.unavailable" });
+    expect(response.body).not.toMatch(
+      /github|raw|catalog|source|token|secret|locator/iu,
     );
     await built.app.close();
   });

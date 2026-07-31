@@ -411,7 +411,7 @@ export class PostgresSourceScheduleConfigurationStore
             id: input.collection.embeddingBindingVersionId,
           },
         },
-        select: { maximumInputTokens: true, capabilities: true },
+        select: { modelBindingId: true, maximumInputTokens: true },
       }),
       database.aiBudgetPolicy.findUnique({
         where: {
@@ -429,11 +429,23 @@ export class PostgresSourceScheduleConfigurationStore
         },
       }),
     ]);
+    const embeddingBinding =
+      binding === null
+        ? null
+        : await database.aiModelBinding.findUnique({
+            where: {
+              workspaceId_id: {
+                workspaceId: input.workspaceId,
+                id: binding.modelBindingId,
+              },
+            },
+            select: { role: true },
+          });
     if (
       binding === null ||
       binding.maximumInputTokens === null ||
       binding.maximumInputTokens < 1 ||
-      !hasEmbeddingCapability(binding.capabilities) ||
+      embeddingBinding?.role !== "embedding" ||
       budget === null ||
       !budget.active ||
       !budget.hard ||
@@ -557,10 +569,6 @@ function collectionRuntimeId(
     .update(`${workspaceId}:${sourceConfigurationVersionId}`, "utf8")
     .digest("hex")
     .slice(0, 48)}`;
-}
-
-function hasEmbeddingCapability(value: unknown): boolean {
-  return Array.isArray(value) && value.includes("embedding");
 }
 
 function jsonObject(

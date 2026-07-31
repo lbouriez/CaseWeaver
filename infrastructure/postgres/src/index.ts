@@ -78,17 +78,21 @@ import {
   type ProviderCapabilityTestTemplateLookup,
 } from "./administration/provider-capability-test-store.js";
 import {
+  PostgresProviderModelInventoryConfigurationStore,
+  PostgresProviderModelInventoryStore,
+} from "./administration/provider-model-inventory-store.js";
+import {
   type AdministrationReadStore,
   PostgresAdministrationReadStore,
 } from "./administration/read-store.js";
+import { PostgresRepositoryAnalysisOptionsStore } from "./administration/repository-analysis-options-store.js";
+import { PostgresRepositoryAnalysisTransitionStore } from "./administration/repository-analysis-transition-store.js";
+import { PostgresRepositoryDraftTestStore } from "./administration/repository-draft-test-store.js";
 import {
   type AdministrationResourceReadStore,
   PostgresAdministrationResourceReadStore,
 } from "./administration/resource-read-store.js";
 import { PostgresRuntimeConnectorConfigurationResolver } from "./administration/runtime-connector-configuration-resolver.js";
-import { PostgresRepositoryAnalysisOptionsStore } from "./administration/repository-analysis-options-store.js";
-import { PostgresRepositoryAnalysisTransitionStore } from "./administration/repository-analysis-transition-store.js";
-import { PostgresRepositoryDraftTestStore } from "./administration/repository-draft-test-store.js";
 import { PostgresWebhookEndpointRuntimeStore } from "./administration/webhook-endpoint-runtime-store.js";
 import { PostgresWorkspaceRoleAssignmentStore } from "./administration/workspace-role-assignment-store.js";
 import { PostgresAiBindingResolver } from "./ai/postgres-ai-binding-resolver.js";
@@ -96,6 +100,7 @@ import {
   PostgresAnalysisExecutionStore,
   PostgresCaseSnapshotTombstoneStore,
 } from "./analysis/index.js";
+import { PostgresAttachmentPolicyResolver } from "./attachments/policy-resolver.js";
 import { PostgresKnowledgeSourceCommandStore } from "./knowledge/source-command-store.js";
 import { PostgresOperationsStore } from "./operations/index.js";
 import {
@@ -103,17 +108,17 @@ import {
   PostgresPublicationIntentStore,
   PostgresVerifiedWebhookEventStore,
 } from "./publication/index.js";
+import { PostgresRepositoryAnalysisRuntimeConfigurationResolver } from "./repository-runtime/repository-analysis-runtime-configuration-resolver.js";
 import { PostgresCaseDiscoveryStateStore } from "./triggers/case-discovery-state-store.js";
 import { PostgresRepositoryAnalysisExecutionInputStore } from "./triggers/repository-analysis-execution-input-store.js";
-import { PostgresRepositoryAnalysisRuntimeConfigurationResolver } from "./repository-runtime/repository-analysis-runtime-configuration-resolver.js";
-import { PostgresAttachmentPolicyResolver } from "./attachments/policy-resolver.js";
 
 export * from "./administration/platform-link-configuration-store.js";
+export * from "./administration/provider-model-inventory-store.js";
 export * from "./administration/webhook-endpoint-configuration-store.js";
 export * from "./administration/webhook-endpoint-runtime-store.js";
 export * from "./administration/workspace-role-assignment-store.js";
-export * from "./retrieval/index.js";
 export * from "./attachments/policy-resolver.js";
+export * from "./retrieval/index.js";
 
 type PrismaTransaction = Prisma.TransactionClient;
 
@@ -833,6 +838,9 @@ export interface PostgresPersistence {
   /** Immutable AI administration aggregates and the fail-closed runtime resolver. */
   readonly aiConfigurationStore: PostgresAiConfigurationStore;
   readonly aiBindingDraftStore: PostgresAiBindingDraftStore;
+  /** Server-private provider discovery configuration and durable inventories. */
+  readonly providerModelInventoryConfigurationStore: PostgresProviderModelInventoryConfigurationStore;
+  readonly providerModelInventoryStore: PostgresProviderModelInventoryStore;
   readonly aiBindingResolver: PostgresAiBindingResolver;
   /** Public-webhook routing state is opaque and contains no secret material. */
   readonly webhookEndpointRuntimeStore: PostgresWebhookEndpointRuntimeStore;
@@ -924,6 +932,11 @@ export function createPostgresPersistence(
     ),
     aiConfigurationStore: new PostgresAiConfigurationStore(client),
     aiBindingDraftStore: new PostgresAiBindingDraftStore(client),
+    providerModelInventoryConfigurationStore:
+      new PostgresProviderModelInventoryConfigurationStore(client),
+    providerModelInventoryStore: new PostgresProviderModelInventoryStore(
+      client,
+    ),
     aiBindingResolver: new PostgresAiBindingResolver(client),
     webhookEndpointRuntimeStore: new PostgresWebhookEndpointRuntimeStore(
       client,
@@ -971,8 +984,8 @@ export * from "./administration/publication-profile-configuration-store.js";
 export * from "./administration/read-store.js";
 export * from "./administration/repository-analysis-configuration-store.js";
 export * from "./administration/repository-analysis-options-store.js";
-export * from "./administration/repository-analysis-transition-store.js";
 export * from "./administration/repository-analysis-resource-read-store.js";
+export * from "./administration/repository-analysis-transition-store.js";
 export * from "./administration/repository-draft-test-store.js";
 export * from "./administration/resource-read-store.js";
 export * from "./administration/runtime-connector-configuration-resolver.js";

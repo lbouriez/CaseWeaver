@@ -10,7 +10,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useApiClient } from "../api/context.js";
 import type { AdminDetail, AdminListItem } from "../api/contracts.js";
 import { ApiFailure } from "../components/api-failure.js";
@@ -25,12 +25,27 @@ const roles = [
   "reranker",
   "chat",
 ] as const;
+const workspaceBudgetScopeKey = "all";
 
 type AiRole = (typeof roles)[number];
+
+/**
+ * Pricing requirements are properties of CaseWeaver operation kinds, rather
+ * than a provider or model name.  A provider inventory model can be bound to
+ * more than one role, so the selected role is the narrowest browser-safe
+ * context available while creating an explicit override.
+ */
+function needsOutputTokenPrice(role: AiRole): boolean {
+  return role !== "embedding" && role !== "reranker";
+}
+
+function needsImageUnitPrice(role: AiRole): boolean {
+  return role === "vision";
+}
+
 type Lists = Readonly<{
   readonly providers: readonly AdminListItem[];
   readonly snapshots: readonly AdminListItem[];
-  readonly models: readonly AdminListItem[];
   readonly bindings: readonly AdminListItem[];
   readonly defaults: readonly AdminListItem[];
   readonly budgets: readonly AdminListItem[];
@@ -45,6 +60,16 @@ function active(items: readonly AdminListItem[]): readonly AdminListItem[] {
   return items.filter((item) => item.status === "active");
 }
 
+/** Budget history stays visible in the resource list, but a replacement must
+ * start from the one active policy for its scope. Selecting a superseded row
+ * would intentionally fail optimistic concurrency and is not useful form
+ * input. */
+function activeBudgetPolicies(
+  items: readonly AdminListItem[],
+): readonly AdminListItem[] {
+  return items.filter((item) => item.status !== "disabled");
+}
+
 /**
  * Resource-specific AI controls. Every select is populated by API read models;
  * the browser never receives endpoint, wire API, parameters, pricing rules,
@@ -52,11 +77,13 @@ function active(items: readonly AdminListItem[]): readonly AdminListItem[] {
  */
 export function AiConfigurationAuthoring({
   bindingsEnabled,
+  catalogRefreshEnabled = false,
   rolesEnabled,
   pricingEnabled,
   budgetsEnabled,
 }: {
   readonly bindingsEnabled: boolean;
+  readonly catalogRefreshEnabled?: boolean;
   readonly rolesEnabled: boolean;
   readonly pricingEnabled: boolean;
   readonly budgetsEnabled: boolean;
@@ -70,6 +97,8 @@ export function AiConfigurationAuthoring({
   const [providerId, setProviderId] = useState("");
   const [snapshotId, setSnapshotId] = useState("");
   const [model, setModel] = useState("");
+  const [modelSearch, setModelSearch] = useState("");
+  const [inventoryRefresh, setInventoryRefresh] = useState(0);
   const [role, setRole] = useState<AiRole>("analysis");
   const [inputTokens, setInputTokens] = useState("");
   const [outputTokens, setOutputTokens] = useState("");
@@ -77,12 +106,14 @@ export function AiConfigurationAuthoring({
   const [defaultRole, setDefaultRole] = useState<AiRole>("analysis");
   const [priceModel, setPriceModel] = useState("");
   const [priceAmount, setPriceAmount] = useState("0.001");
+  const [priceOutputAmount, setPriceOutputAmount] = useState("");
+  const [priceImageAmount, setPriceImageAmount] = useState("");
   const [priceCurrency, setPriceCurrency] = useState("USD");
   const [budgetId, setBudgetId] = useState("");
   const [budgetScope, setBudgetScope] = useState<
     "operation" | "analysis" | "day" | "workspace"
   >("workspace");
-  const [budgetScopeKey, setBudgetScopeKey] = useState("workspace");
+  const [budgetScopeKey, setBudgetScopeKey] = useState(workspaceBudgetScopeKey);
   const [budgetAmount, setBudgetAmount] = useState("10");
   const [budgetCurrency, setBudgetCurrency] = useState("USD");
   const [budgetHard, setBudgetHard] = useState(true);
@@ -99,14 +130,22 @@ export function AiConfigurationAuthoring({
         readonly impact: string;
       }>
     >();
+  const [bindingOptions, setBindingOptions] =
+    useState<
+      readonly Readonly<{
+        readonly catalogSnapshotId: string;
+        readonly canonicalModel: string;
+        readonly catalogProvider: string;
+      }>[]
+    >();
+  const [bindingOptionsError, setBindingOptionsError] = useState<unknown>();
 
   const reload = useCallback(
     async (signal?: AbortSignal) => {
-      const [providers, snapshots, models, bindings, defaults, budgets] =
+      const [providers, snapshots, bindings, defaults, budgets] =
         await Promise.all([
           client.list("ai-provider-instances", { limit: 200 }, { signal }),
           client.list("ai-catalog-snapshots", { limit: 200 }, { signal }),
-          client.list("ai-models", { limit: 200 }, { signal }),
           client.list("ai-bindings", { limit: 200 }, { signal }),
           client.list("ai-role-defaults", { limit: 200 }, { signal }),
           client.list("ai-budgets", { limit: 200 }, { signal }),
@@ -114,7 +153,6 @@ export function AiConfigurationAuthoring({
       const next = Object.freeze({
         providers: providers.items,
         snapshots: snapshots.items,
-        models: models.items,
         bindings: bindings.items,
         defaults: defaults.items,
         budgets: budgets.items,
@@ -131,21 +169,6 @@ export function AiConfigurationAuthoring({
           ? current
           : (availableProviders[0]?.id ?? ""),
       );
-      setSnapshotId((current) =>
-        next.snapshots.some((item) => item.id === current)
-          ? current
-          : (next.snapshots[0]?.id ?? ""),
-      );
-      setModel((current) =>
-        next.models.some((item) => item.label === current)
-          ? current
-          : (next.models[0]?.label ?? ""),
-      );
-      setPriceModel((current) =>
-        next.models.some((item) => item.label === current)
-          ? current
-          : (next.models[0]?.label ?? ""),
-      );
     },
     [client],
   );
@@ -159,11 +182,108 @@ export function AiConfigurationAuthoring({
     return () => controller.abort();
   }, [reload]);
 
-  const chosenPriceModel = useMemo(
-    () => lists?.models.find((item) => item.label === priceModel),
-    [lists?.models, priceModel],
+  const latestInventoryRefresh = useRef(inventoryRefresh);
+  useEffect(() => {
+    latestInventoryRefresh.current = inventoryRefresh;
+  }, [inventoryRefresh]);
+
+  useEffect(() => {
+    if (providerId.length === 0 || role.length === 0) {
+      setBindingOptions(undefined);
+      setSnapshotId("");
+      setModel("");
+      return;
+    }
+    const controller = new AbortController();
+    const requestedInventoryRefresh = inventoryRefresh;
+    setBindingOptionsError(undefined);
+    void client
+      .aiBindingOptions(
+        {
+          providerInstanceId: providerId,
+          role,
+          ...(modelSearch.trim().length === 0
+            ? {}
+            : { search: modelSearch.trim() }),
+        },
+        controller.signal,
+      )
+      .then((result) => {
+        if (
+          controller.signal.aborted ||
+          latestInventoryRefresh.current !== requestedInventoryRefresh
+        ) {
+          return;
+        }
+        setBindingOptions(result.items);
+      })
+      .catch((nextError: unknown) => {
+        if (
+          !controller.signal.aborted &&
+          latestInventoryRefresh.current === requestedInventoryRefresh
+        ) {
+          setBindingOptions(undefined);
+          setBindingOptionsError(nextError);
+        }
+      });
+    return () => controller.abort();
+  }, [client, inventoryRefresh, modelSearch, providerId, role]);
+
+  useEffect(() => {
+    if (bindingOptions === undefined) return;
+    const first = bindingOptions[0];
+    const selectedSnapshot = bindingOptions.some(
+      (item) => item.catalogSnapshotId === snapshotId,
+    )
+      ? snapshotId
+      : (first?.catalogSnapshotId ?? "");
+    if (selectedSnapshot !== snapshotId) {
+      setSnapshotId(selectedSnapshot);
+      return;
+    }
+    if (
+      !bindingOptions.some(
+        (item) =>
+          item.catalogSnapshotId === selectedSnapshot &&
+          item.canonicalModel === model,
+      )
+    ) {
+      setModel(
+        bindingOptions.find(
+          (item) => item.catalogSnapshotId === selectedSnapshot,
+        )?.canonicalModel ?? "",
+      );
+    }
+    setPriceModel((current) =>
+      bindingOptions.some((item) => item.canonicalModel === current)
+        ? current
+        : (bindingOptions.find(
+            (item) => item.catalogSnapshotId === selectedSnapshot,
+          )?.canonicalModel ?? ""),
+    );
+  }, [bindingOptions, model, snapshotId]);
+
+  const chosenPriceModel = bindingOptions?.find(
+    (item) => item.canonicalModel === priceModel,
   );
+  const outputPriceRequired = needsOutputTokenPrice(role);
+  const imagePriceRequired = needsImageUnitPrice(role);
+  const priceIsComplete =
+    priceAmount.trim().length > 0 &&
+    (!outputPriceRequired || priceOutputAmount.trim().length > 0) &&
+    (!imagePriceRequired || priceImageAmount.trim().length > 0);
   const selectedBudget = lists?.budgets.find((item) => item.id === budgetId);
+
+  useEffect(() => {
+    if (budgetId === "") return;
+    if (
+      !activeBudgetPolicies(lists?.budgets ?? []).some(
+        (item) => item.id === budgetId,
+      )
+    ) {
+      setBudgetId("");
+    }
+  }, [budgetId, lists?.budgets]);
 
   const submit = async (operation: () => Promise<string>) => {
     setBusy(true);
@@ -221,7 +341,13 @@ export function AiConfigurationAuthoring({
     }
   };
 
-  if (!bindingsEnabled && !rolesEnabled && !pricingEnabled && !budgetsEnabled) {
+  if (
+    !bindingsEnabled &&
+    !catalogRefreshEnabled &&
+    !rolesEnabled &&
+    !pricingEnabled &&
+    !budgetsEnabled
+  ) {
     return null;
   }
   return (
@@ -229,6 +355,49 @@ export function AiConfigurationAuthoring({
       {loadError === undefined ? null : <ApiFailure error={loadError} />}
       {error === undefined ? null : <ApiFailure error={error} />}
       {result === undefined ? null : <Alert severity="success">{result}</Alert>}
+      {active(lists?.providers ?? []).length > 0 ? null : (
+        <Alert severity="info">
+          Setup order: register an external secret reference in Access &
+          security, save and activate a provider above, refresh its available
+          models, then create an immutable binding. Refresh the trusted LiteLLM
+          catalog separately when you want price enrichment. Provider drafts are
+          intentionally excluded until activation.
+        </Alert>
+      )}
+      {catalogRefreshEnabled ? (
+        <Paper
+          component="section"
+          elevation={0}
+          sx={{ border: "1px solid", borderColor: "divider", p: 2 }}
+        >
+          <Stack spacing={2}>
+            <Box>
+              <Typography variant="overline">Trusted model catalog</Typography>
+              <Typography variant="h5">
+                Refresh the trusted model catalog
+              </Typography>
+              <Typography color="text.secondary" variant="body2">
+                Refreshes deployment-owned LiteLLM pricing and capability
+                metadata. It does not decide what a provider endpoint offers;
+                refresh provider models below for that inventory. The browser
+                never chooses a URL or receives downloaded catalog data.
+              </Typography>
+            </Box>
+            <Button
+              disabled={busy}
+              onClick={() =>
+                void submit(async () => {
+                  const refreshed = await client.refreshAiCatalog();
+                  return `${refreshed.label} was refreshed. Matching provider inventory models can now receive trusted price enrichment.`;
+                })
+              }
+              variant="outlined"
+            >
+              Refresh trusted model catalog
+            </Button>
+          </Stack>
+        </Paper>
+      ) : null}
       {bindingsEnabled ? (
         <Paper
           component="section"
@@ -242,9 +411,10 @@ export function AiConfigurationAuthoring({
               </Typography>
               <Typography variant="h5">Create a model binding draft</Typography>
               <Typography color="text.secondary" variant="body2">
-                Provider and catalog identifiers are selected from audited read
-                models. The server resolves all runtime-only values and
-                validates provider/model compatibility.
+                The model list comes from the selected provider's server-side
+                inventory, not from a global pricing catalog. LiteLLM enriches
+                matching prices only. The server resolves runtime-only values
+                and validates the immutable provider/model pairing.
               </Typography>
             </Box>
             <TextField
@@ -262,38 +432,104 @@ export function AiConfigurationAuthoring({
                 </MenuItem>
               ))}
             </TextField>
+            <Paper
+              elevation={0}
+              sx={{ border: "1px solid", borderColor: "divider", p: 2 }}
+            >
+              <Stack spacing={1}>
+                <Typography variant="subtitle2">
+                  Models available from this provider
+                </Typography>
+                <Typography color="text.secondary" variant="body2">
+                  CaseWeaver asks the configured provider endpoint for its model
+                  inventory from the server, using its retained external
+                  credential. The browser receives only safe model metadata.
+                  LiteLLM is used afterward for exact price enrichment, never as
+                  the source of provider availability.
+                </Typography>
+                <Alert severity="info">
+                  Registering an external reference is not enough by itself: the
+                  referenced value must be present in the API deployment
+                  environment. For the local stack, set the host environment
+                  variable and recreate the API container before refreshing.
+                </Alert>
+                <Box>
+                  <Button
+                    disabled={busy || providerId.length === 0}
+                    onClick={() =>
+                      void submit(async () => {
+                        const refreshed =
+                          await client.refreshAiProviderModels(providerId);
+                        setInventoryRefresh((current) => current + 1);
+                        return `${refreshed.label} was refreshed. ${refreshed.summary ?? "The latest provider inventory is ready for selection."}`;
+                      })
+                    }
+                    variant="outlined"
+                  >
+                    Refresh models available from provider
+                  </Button>
+                </Box>
+              </Stack>
+            </Paper>
             <TextField
-              label="Catalog snapshot"
+              helperText="Filters the server-discovered models available from this provider. This does not submit a model name; select a returned result below."
+              label="Filter provider models"
+              onChange={(event) => setModelSearch(event.target.value)}
+              slotProps={{ htmlInput: { maxLength: 120 } }}
+              value={modelSearch}
+            />
+            <TextField
+              label="Provider inventory snapshot"
               onChange={(event) => setSnapshotId(event.target.value)}
               select
               value={snapshotId}
             >
               <MenuItem disabled value="">
-                Select a catalog snapshot
+                Select a provider inventory snapshot
               </MenuItem>
-              {(lists?.snapshots ?? []).map((item) => (
-                <MenuItem key={item.id} value={item.id}>
-                  {item.label}
+              {[
+                ...new Set(
+                  (bindingOptions ?? []).map((item) => item.catalogSnapshotId),
+                ),
+              ].map((id) => (
+                <MenuItem key={id} value={id}>
+                  {id}
                 </MenuItem>
               ))}
             </TextField>
             <TextField
-              label="Catalog model"
+              label="Model available from provider"
               onChange={(event) => setModel(event.target.value)}
               select
               value={model}
             >
               <MenuItem disabled value="">
-                Select a catalog model
+                Select a provider model
               </MenuItem>
-              {(lists?.models ?? []).map((item) => (
-                <MenuItem key={item.id} value={item.label}>
-                  {item.label}
-                </MenuItem>
-              ))}
+              {(bindingOptions ?? [])
+                .filter((item) => item.catalogSnapshotId === snapshotId)
+                .map((item) => (
+                  <MenuItem
+                    key={`${item.catalogSnapshotId}:${item.canonicalModel}`}
+                    value={item.canonicalModel}
+                  >
+                    {item.canonicalModel}
+                  </MenuItem>
+                ))}
             </TextField>
+            {bindingOptionsError === undefined ? null : (
+              <ApiFailure error={bindingOptionsError} />
+            )}
+            {bindingOptions !== undefined && bindingOptions.length === 0 ? (
+              <Alert severity="info">
+                This provider inventory has no compatible models for the
+                selected role and API capability. Refresh models available from
+                this provider, or use a provider instance with the matching API
+                capability.
+              </Alert>
+            ) : null}
             <AuthoringFieldLabel
-              description="A CaseWeaver role describes the capability this immutable binding may serve. The API validates the selected server-discovered provider, catalog model, and role together."
+              description="A CaseWeaver role describes the capability this immutable binding may serve. The API validates the selected server-discovered provider inventory model and role together."
               label="Binding role"
             />
             <TextField
@@ -548,18 +784,30 @@ export function AiConfigurationAuthoring({
             <Typography variant="h5">
               Add a workspace pricing override
             </Typography>
+            <Typography color="text.secondary" variant="body2">
+              Select only a model returned by the active provider inventory
+              above. This explicit override can price a provider-owned model
+              that has no exact LiteLLM price match; it never makes a global
+              catalog model available at this endpoint. Prices must cover each
+              usage unit needed by the selected CaseWeaver role: embeddings and
+              reranking need input tokens; generated responses also need output
+              tokens; vision work also needs image units.
+            </Typography>
             <TextField
-              label="Catalog model"
+              label="Provider inventory model"
               onChange={(event) => setPriceModel(event.target.value)}
               select
               value={priceModel}
             >
               <MenuItem disabled value="">
-                Select a catalog model
+                Select a provider inventory model
               </MenuItem>
-              {(lists?.models ?? []).map((item) => (
-                <MenuItem key={item.id} value={item.label}>
-                  {item.label}
+              {(bindingOptions ?? []).map((item) => (
+                <MenuItem
+                  key={`${item.catalogSnapshotId}:${item.canonicalModel}`}
+                  value={item.canonicalModel}
+                >
+                  {item.canonicalModel}
                 </MenuItem>
               ))}
             </TextField>
@@ -572,6 +820,32 @@ export function AiConfigurationAuthoring({
               onChange={(event) => setPriceAmount(event.target.value)}
               value={priceAmount}
             />
+            {!outputPriceRequired ? null : (
+              <>
+                <AuthoringFieldLabel
+                  description="Enter the price for one generated output token. Chat, analysis, and repository-agent work needs both input and output prices before a hard-budget test can run. Use the provider's published rate; CaseWeaver will not silently assume zero."
+                  label="Output token price"
+                />
+                <TextField
+                  label="Output price amount"
+                  onChange={(event) => setPriceOutputAmount(event.target.value)}
+                  value={priceOutputAmount}
+                />
+              </>
+            )}
+            {!imagePriceRequired ? null : (
+              <>
+                <AuthoringFieldLabel
+                  description="Enter the price for one image unit. Vision requests can consume both tokens and image units, so all three prices are required before a hard-budget test can run."
+                  label="Image unit price"
+                />
+                <TextField
+                  label="Image price amount"
+                  onChange={(event) => setPriceImageAmount(event.target.value)}
+                  value={priceImageAmount}
+                />
+              </>
+            )}
             <AuthoringFieldLabel
               description="Use the three-letter currency code that matches the entered price. The API validates the policy before it becomes effective."
               examples={["USD", "CAD"]}
@@ -585,12 +859,14 @@ export function AiConfigurationAuthoring({
               value={priceCurrency}
             />
             <Button
-              disabled={busy || chosenPriceModel === undefined}
+              disabled={
+                busy || chosenPriceModel === undefined || !priceIsComplete
+              }
               onClick={() =>
                 void submit(async () => {
                   const saved = await client.createAiPriceOverride({
                     scope: "workspace",
-                    provider: chosenPriceModel?.summary ?? "",
+                    provider: chosenPriceModel?.catalogProvider ?? "",
                     canonicalModel: priceModel,
                     effectiveFrom: new Date().toISOString(),
                     components: [
@@ -600,6 +876,26 @@ export function AiConfigurationAuthoring({
                         amount: priceAmount,
                         currency: priceCurrency,
                       },
+                      ...(outputPriceRequired
+                        ? [
+                            {
+                              kind: "output" as const,
+                              unit: "token" as const,
+                              amount: priceOutputAmount,
+                              currency: priceCurrency,
+                            },
+                          ]
+                        : []),
+                      ...(imagePriceRequired
+                        ? [
+                            {
+                              kind: "image" as const,
+                              unit: "image" as const,
+                              amount: priceImageAmount,
+                              currency: priceCurrency,
+                            },
+                          ]
+                        : []),
                     ],
                   });
                   return `${saved.label} was created.`;
@@ -627,7 +923,7 @@ export function AiConfigurationAuthoring({
               value={budgetId}
             >
               <MenuItem value="">Create a policy</MenuItem>
-              {(lists?.budgets ?? []).map((item) => (
+              {activeBudgetPolicies(lists?.budgets ?? []).map((item) => (
                 <MenuItem key={item.id} value={item.id}>
                   {item.label}
                 </MenuItem>
@@ -639,9 +935,13 @@ export function AiConfigurationAuthoring({
             />
             <TextField
               label="Scope"
-              onChange={(event) =>
-                setBudgetScope(event.target.value as typeof budgetScope)
-              }
+              onChange={(event) => {
+                const nextScope = event.target.value as typeof budgetScope;
+                setBudgetScope(nextScope);
+                setBudgetScopeKey(
+                  nextScope === "workspace" ? workspaceBudgetScopeKey : "",
+                );
+              }}
               select
               value={budgetScope}
             >
@@ -654,10 +954,11 @@ export function AiConfigurationAuthoring({
               )}
             </TextField>
             <AuthoringFieldLabel
-              description="The scope key identifies the server-owned subject within the selected budget scope. It is a budget-policy key, never an authorization grant."
+              description="For a workspace policy this is automatically ‘all’, covering every CaseWeaver AI operation in the workspace. Other scopes require the stable CaseWeaver identifier for the operation, analysis, or UTC day they govern; it is never an authorization grant."
               label="Budget scope key"
             />
             <TextField
+              disabled={budgetScope === "workspace"}
               label="Scope key"
               onChange={(event) => setBudgetScopeKey(event.target.value)}
               value={budgetScopeKey}

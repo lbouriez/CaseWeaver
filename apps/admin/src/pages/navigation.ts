@@ -50,9 +50,9 @@ export const navigationSections: readonly NavigationSection[] = [
   },
   {
     path: "/access",
-    label: "Access",
+    label: "Access & security",
     kicker: "06 / authority",
-    permissions: ["workspace.manage", "identity.manage"],
+    permissions: ["workspace.manage", "identity.manage", "credential.manage"],
   },
   {
     path: "/platform",

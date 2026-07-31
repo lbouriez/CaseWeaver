@@ -23,6 +23,7 @@ import {
 /** Server-owned action codes. Browser input never selects an action or permission. */
 export const aiConfigurationActions = {
   catalogImport: "admin.aiCatalog.import",
+  providerModelInventoryRefresh: "admin.aiProviderModelInventory.refresh",
   bindingDraftCreate: "admin.aiBinding.draft.create",
   bindingVersionDraftCreate: "admin.aiBinding.version.draft.create",
   bindingActivate: "admin.aiBinding.activate",
@@ -31,6 +32,13 @@ export const aiConfigurationActions = {
   priceOverrideCreate: "admin.aiPriceOverride.create",
   budgetPolicyReplace: "admin.aiBudgetPolicy.replace",
 } as const;
+
+/**
+ * The execution gateway attributes a workspace-wide reservation to this one
+ * aggregate scope. It is not an operator-selected identifier, so accepting a
+ * different value would create a policy that can never govern execution.
+ */
+export const workspaceBudgetScopeKey = "all";
 
 export type AiConfigurationAction =
   (typeof aiConfigurationActions)[keyof typeof aiConfigurationActions];
@@ -146,6 +154,39 @@ export interface AiBudgetPolicySummary {
 export interface ImportAiCatalogSnapshotCommand {
   readonly import: LiteLlmImportInput;
   readonly mutation: AiConfigurationMutation;
+}
+
+/**
+ * Deployment-owned catalog acquisition boundary. The browser can request a
+ * refresh but cannot choose a URL, revision, bytes, or credentials. Adapters
+ * return a pinned LiteLLM artifact only after applying their own trust policy.
+ */
+export interface TrustedAiCatalogSource {
+  load(signal?: AbortSignal): Promise<LiteLlmImportInput>;
+}
+
+/**
+ * Fetches a deployment-trusted catalog outside the database transaction, then
+ * delegates immutable import, idempotency, cache invalidation, and audit to
+ * the existing PBI-003 use case.
+ */
+export class RefreshTrustedAiCatalog {
+  public constructor(
+    private readonly source: TrustedAiCatalogSource,
+    private readonly importer: ImportAiCatalogSnapshot,
+  ) {}
+
+  public async execute(
+    command: Readonly<{ readonly mutation: AiConfigurationMutation }>,
+    context: TrustedAiConfigurationContext,
+    signal?: AbortSignal,
+  ) {
+    const artifact = await this.source.load(signal);
+    return this.importer.execute(
+      { import: artifact, mutation: command.mutation },
+      context,
+    );
+  }
 }
 
 export interface CreateAiModelBindingDraftCommand {
@@ -708,6 +749,12 @@ function validatedBudgetPolicy(
     )
       throw new Error();
     validateIdentifier(input.scopeKey);
+    if (
+      input.scope === "workspace" &&
+      input.scopeKey !== workspaceBudgetScopeKey
+    ) {
+      throw new Error();
+    }
     if (
       typeof input.limitAmount !== "string" ||
       !/^\d+(?:\.\d+)?$/u.test(input.limitAmount)

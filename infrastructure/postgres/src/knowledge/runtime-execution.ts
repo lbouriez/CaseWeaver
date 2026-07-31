@@ -145,21 +145,27 @@ export class PostgresKnowledgeSourceExecutionStore
   ): Promise<KnowledgeSourceExecutionLease | undefined> {
     assertLeaseMs(input.leaseMs);
     const result = await this.pool.query<LeaseRow>(
-      `WITH ensured AS (
-         INSERT INTO knowledge_source_states (workspace_id, knowledge_source_id)
-         VALUES ($1, $2)
-         ON CONFLICT (workspace_id, knowledge_source_id) DO NOTHING
-       ), claimed AS (
-         UPDATE knowledge_source_states
-            SET execution_fence = execution_fence + 1,
-                execution_lease_expires_at = NOW() + ($3::bigint * interval '1 millisecond'),
-                last_execution_mode = $4,
-                updated_at = NOW()
-          WHERE workspace_id = $1
-            AND knowledge_source_id = $2
-            AND (execution_lease_expires_at IS NULL OR execution_lease_expires_at <= NOW())
-          RETURNING cursor_version, cursor_value, execution_fence, execution_lease_expires_at
-       ) SELECT * FROM claimed`,
+      `INSERT INTO knowledge_source_states (
+         workspace_id,
+         knowledge_source_id,
+         execution_fence,
+         execution_lease_expires_at,
+         last_execution_mode
+       ) VALUES (
+         $1,
+         $2,
+         1,
+         NOW() + ($3::bigint * interval '1 millisecond'),
+         $4
+       )
+       ON CONFLICT (workspace_id, knowledge_source_id) DO UPDATE
+          SET execution_fence = knowledge_source_states.execution_fence + 1,
+              execution_lease_expires_at = NOW() + ($3::bigint * interval '1 millisecond'),
+              last_execution_mode = $4,
+              updated_at = NOW()
+        WHERE knowledge_source_states.execution_lease_expires_at IS NULL
+           OR knowledge_source_states.execution_lease_expires_at <= NOW()
+       RETURNING cursor_version, cursor_value, execution_fence, execution_lease_expires_at`,
       [input.workspaceId, input.sourceId, input.leaseMs, input.mode],
     );
     const row = result.rows[0];

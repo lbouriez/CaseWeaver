@@ -430,7 +430,12 @@ export type RepositoryAnalysisDraftRevisionInput =
 export interface RepositoryAnalysisConfiguration {
   readonly id: string;
   readonly versionId: string;
-  readonly lifecycle: "draft" | "active" | "disabled" | "superseded";
+  readonly lifecycle:
+    | "draft"
+    | "active"
+    | "disabled"
+    | "discarded"
+    | "superseded";
   readonly revision: number;
   readonly idempotency: "created" | "replayed";
 }
@@ -440,7 +445,13 @@ export const repositoryAnalysisConfigurationSchema: z.ZodType<RepositoryAnalysis
     .object({
       id: identifierSchema,
       versionId: identifierSchema,
-      lifecycle: z.enum(["draft", "active", "disabled", "superseded"]),
+      lifecycle: z.enum([
+        "draft",
+        "active",
+        "disabled",
+        "discarded",
+        "superseded",
+      ]),
       revision: z.number().int().positive(),
       idempotency: z.enum(["created", "replayed"]),
     })
@@ -534,7 +545,12 @@ const configurationVersionSummarySchema: z.ZodType<ConfigurationVersionSummary> 
 export interface ConfigurationInspection {
   readonly id: string;
   readonly resourceType: string;
-  readonly lifecycle: "draft" | "active" | "disabled" | "superseded";
+  readonly lifecycle:
+    | "draft"
+    | "active"
+    | "disabled"
+    | "discarded"
+    | "superseded";
   readonly revision: number;
   readonly updatedAt: string;
   readonly currentVersionId?: string;
@@ -546,7 +562,13 @@ export const configurationInspectionSchema: z.ZodType<ConfigurationInspection> =
     .object({
       id: identifierSchema,
       resourceType: identifierSchema,
-      lifecycle: z.enum(["draft", "active", "disabled", "superseded"]),
+      lifecycle: z.enum([
+        "draft",
+        "active",
+        "disabled",
+        "discarded",
+        "superseded",
+      ]),
       revision: z.number().int().positive(),
       updatedAt: z.string().datetime({ offset: true }),
       currentVersionId: identifierSchema.optional(),
@@ -561,7 +583,12 @@ export interface PlatformLinkConfiguration {
   readonly configurationId: string;
   readonly configurationVersionId: string;
   readonly revision: number;
-  readonly lifecycle: "draft" | "active" | "disabled" | "superseded";
+  readonly lifecycle:
+    | "draft"
+    | "active"
+    | "disabled"
+    | "discarded"
+    | "superseded";
   readonly settings: Readonly<{
     readonly apiPublicBaseUrl: string;
     readonly webhookPublicBaseUrl: string;
@@ -593,6 +620,58 @@ export interface AiBindingDraftRequest {
   readonly maximumInputTokens?: number;
   readonly maximumOutputTokens?: number;
 }
+
+/** Browser-safe binding candidates already filtered by the server-selected
+ * provider adapter and immutable protocol mode. */
+export interface AiBindingOptions {
+  readonly items: readonly Readonly<{
+    readonly catalogSnapshotId: string;
+    readonly canonicalModel: string;
+    /** Safe provider identity selected by the server-owned inventory. */
+    readonly catalogProvider: string;
+  }>[];
+}
+
+export const aiBindingOptionsSchema: z.ZodType<AiBindingOptions> = z
+  .object({
+    items: z
+      .array(
+        z
+          .object({
+            catalogSnapshotId: identifierSchema,
+            canonicalModel: nonSensitiveTextSchema,
+            catalogProvider: identifierSchema,
+          })
+          .strict(),
+      )
+      .max(1000),
+  })
+  .strict();
+
+/** Safe impact-only view shown before changing an external secret reference.
+ * It deliberately has neither a locator nor any secret material. */
+export interface SecretReferenceDependencies {
+  readonly items: readonly Readonly<{
+    readonly configurationId: string;
+    readonly resourceType: string;
+  }>[];
+}
+
+export const secretReferenceDependenciesSchema: z.ZodType<SecretReferenceDependencies> =
+  z
+    .object({
+      items: z
+        .array(
+          z
+            .object({
+              configurationId: identifierSchema,
+              resourceType: identifierSchema,
+            })
+            .strict(),
+        )
+        .max(20),
+    })
+    .strict();
 
 /** A collection is a permanent workspace vector space. The selected binding
  * is an aggregate ID only; the API pins its active immutable version. */
@@ -834,7 +913,13 @@ export const platformLinkConfigurationSchema: z.ZodType<PlatformLinkConfiguratio
       configurationId: identifierSchema,
       configurationVersionId: identifierSchema,
       revision: z.number().int().positive(),
-      lifecycle: z.enum(["draft", "active", "disabled", "superseded"]),
+      lifecycle: z.enum([
+        "draft",
+        "active",
+        "disabled",
+        "discarded",
+        "superseded",
+      ]),
       settings: z
         .object({
           apiPublicBaseUrl: z.string().url().max(2_000),
@@ -910,6 +995,7 @@ export interface ConfigurationSurface {
     | "source.synchronize"
     | "source.fullRescan"
     | "publication.approve"
+    | "catalog.refresh"
   )[];
 }
 
@@ -932,9 +1018,10 @@ export const configurationSurfacesSchema: z.ZodType<{
                   "source.synchronize",
                   "source.fullRescan",
                   "publication.approve",
+                  "catalog.refresh",
                 ]),
               )
-              .max(3),
+              .max(4),
           })
           .strict(),
       )
@@ -1210,6 +1297,7 @@ export const actionNames = [
   "provider.disable",
   "diagnostics.export",
   "secret.rotate",
+  "secret.reconcile",
   "secret.revoke",
   "publication.approve",
 ] as const;

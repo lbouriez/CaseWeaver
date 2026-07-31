@@ -11,9 +11,11 @@ import {
 import { useState } from "react";
 
 import type { CaseWeaverApiClient } from "../api/api-client.js";
+import type { AdminDetail } from "../api/contracts.js";
 import { ApiFailure } from "./api-failure.js";
 
 type LifecycleResource = "knowledge-sources" | "schedules";
+type LifecycleTarget = "active" | "disabled";
 
 /**
  * A resource-specific lifecycle confirmation. It never receives connector,
@@ -36,12 +38,16 @@ export function SourceScheduleLifecycleControl({
   readonly resource: LifecycleResource;
   readonly resourceId: string;
   readonly status?: string;
-  readonly onCompleted: () => Promise<void> | void;
+  readonly onCompleted: (result: AdminDetail) => Promise<void> | void;
 }) {
-  const targetLifecycle = status === "enabled" ? "disabled" : "active";
-  const actionLabel = targetLifecycle === "active" ? "Activate" : "Disable";
+  const defaultTargetLifecycle: LifecycleTarget =
+    status === "enabled" ? "disabled" : "active";
+  const defaultActionLabel =
+    defaultTargetLifecycle === "active" ? "Activate" : "Disable";
   const subject = resource === "knowledge-sources" ? "source" : "schedule";
   const [open, setOpen] = useState(false);
+  const [dialogTargetLifecycle, setDialogTargetLifecycle] =
+    useState<LifecycleTarget>(defaultTargetLifecycle);
   const [revision, setRevision] = useState<number>();
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -50,6 +56,7 @@ export function SourceScheduleLifecycleControl({
 
   const show = async () => {
     setOpen(true);
+    setDialogTargetLifecycle(defaultTargetLifecycle);
     setRevision(undefined);
     setCompleted(undefined);
     setError(undefined);
@@ -71,28 +78,29 @@ export function SourceScheduleLifecycleControl({
     try {
       const input = {
         expectedRevision: revision,
-        lifecycle: targetLifecycle,
+        lifecycle: dialogTargetLifecycle,
       } as const;
-      if (resource === "knowledge-sources") {
-        await client.transitionKnowledgeSource(resourceId, input);
-      } else {
-        await client.transitionKnowledgeSchedule(resourceId, input);
-      }
+      const result =
+        resource === "knowledge-sources"
+          ? await client.transitionKnowledgeSource(resourceId, input)
+          : await client.transitionKnowledgeSchedule(resourceId, input);
       setCompleted(
-        `${actionLabel}d ${subject}. The API created a successor immutable configuration version.`,
+        `${dialogActionLabel}d ${subject}. The API created a successor immutable configuration version.`,
       );
-      await onCompleted();
+      await onCompleted(result);
     } catch (nextError) {
       setError(nextError);
     } finally {
       setSubmitting(false);
     }
   };
+  const dialogActionLabel =
+    dialogTargetLifecycle === "active" ? "Activate" : "Disable";
 
   return (
     <>
       <Button onClick={() => void show()} size="small" variant="outlined">
-        {actionLabel}
+        {defaultActionLabel}
       </Button>
       <Dialog
         aria-describedby={`${resourceId}-lifecycle-description`}
@@ -102,12 +110,12 @@ export function SourceScheduleLifecycleControl({
         open={open}
       >
         <DialogTitle>
-          {actionLabel} {subject}
+          {dialogActionLabel} {subject}
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ pt: 1 }}>
             <Typography id={`${resourceId}-lifecycle-description`}>
-              {targetLifecycle === "active"
+              {dialogTargetLifecycle === "active"
                 ? "This enables the current immutable configuration. Existing work continues to reference its captured versions."
                 : "This stops future work from this configuration without deleting its history or changing work that already captured a version."}
             </Typography>
@@ -131,7 +139,7 @@ export function SourceScheduleLifecycleControl({
             onClick={() => void transition()}
             variant="contained"
           >
-            {submitting ? `${actionLabel}ing…` : actionLabel}
+            {submitting ? `${dialogActionLabel}ing…` : dialogActionLabel}
           </Button>
         </DialogActions>
       </Dialog>

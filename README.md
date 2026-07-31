@@ -89,18 +89,17 @@ orchestrator prompt for beginning implementation with independent subagents.
 ## Status
 
 PBI-013 production operations, PBI-016’s operator console, and PBI-020’s repository-
-assisted analysis and attachment-intelligence workflow are accepted. The current local
-Docker topology runs the real control plane, Admin UI, webhook ingress, scheduler,
-durable worker, isolated attachment processor, migrations, and PostgreSQL; it is the
-supported way to evaluate the integrated system. PBI-017 release hardening is still in
+assisted analysis and attachment-intelligence workflow are accepted. The supported local
+Docker topology has three persistent services: PostgreSQL, the standalone backend, and
+the Admin frontend. API, webhook ingress, scheduler, durable worker, and outbox relay
+remain reusable modules, but run inside that one backend process. PBI-017 release hardening is still in
 progress: production TLS, release-profile runtime exercise, backup/restore,
 image-vulnerability policy, and provenance/attestation verification are not yet claimed
 complete. Detailed contracts in `.features` remain authoritative.
 
 ## Quick Docker evaluation
 
-The fastest way to start the complete disposable solution—database, migrations, queue
-migration, API, Admin UI, edge, webhook, scheduler, and worker—is:
+The fastest way to start the complete disposable solution is:
 
 ```powershell
 docker compose -f deploy\docker\compose.local.yml up --build --wait
@@ -108,17 +107,94 @@ docker compose -f deploy\docker\compose.local.yml up --build --wait
 
 Open `http://localhost:8080` and sign in as `admin` / `admin`. These credentials exist
 only in the loopback-only development Compose stack; they are not a production default.
-The only published port is the edge; PostgreSQL, scheduler, worker, and webhook remain
-private inside the Compose network. The command is deliberately disposable:
+The frontend publishes the only loopback port and proxies same-origin traffic to the
+backend. PostgreSQL and the backend's internal API/webhook ports stay private. Two short
+migration jobs run before the persistent services start. The command is deliberately
+disposable:
 
 ```powershell
 docker compose -f deploy\docker\compose.local.yml down -v
 ```
 
 It exercises real image builds, PostgreSQL/queue migrations, API readiness, same-origin
-cookie sessions, the browser artifact, and all durable process roles. See [the Docker
+cookie sessions, the browser artifact, and all durable backend modules. See [the Docker
 guide](deploy/docker/README.md) for the difference between the local, test, Admin bridge,
 and production Compose files, plus OIDC and digest-pinned image setup.
+
+## Automated provider and knowledge E2E test
+
+Run the isolated acceptance journey without an OpenRouter key or a local repository:
+
+```powershell
+pnpm test:e2e:compose
+```
+
+It layers `compose.e2e.yml` over the local topology under a unique Docker project,
+creates disposable PostgreSQL and fixture volumes, starts a private HTTPS
+OpenAI-compatible provider with an ephemeral test certificate, and seeds a tiny Git
+repository. Chromium then signs in through the Admin UI and performs the whole
+operator path: secret-reference registration, provider activation, provider-owned model
+discovery, immutable binding/default, explicit price and hard budget, metered provider
+test, collection, Git connector test, source activation, and source synchronization.
+The runner confirms the resulting active knowledge document and embedding allocation in
+the isolated database, then removes the stack and volumes. The fixture credential is
+deterministic test data, never an OpenRouter key, and is never sent to the browser.
+
+Set `CASEWEAVER_E2E_KEEP_STACK=true` only while diagnosing a failed run. The separate
+OpenRouter instructions below remain the optional live-provider acceptance check.
+
+## OpenRouter and local documentation knowledge test
+
+To run a real, bounded knowledge synchronization against a local Git/Docusaurus
+repository, keep the provider key in the host environment and mount the repository
+read-only into the standalone backend. `env:CASEWEAVER_OPENROUTER_KEY` is the opaque
+CaseWeaver reference entered in Admin; PowerShell's `$env:CASEWEAVER_OPENROUTER_KEY`
+is only how the host supplies its value to Compose.
+
+```powershell
+$env:CASEWEAVER_DOCUMENTATION_REPOSITORY = "C:/GIT/Documentation"
+$env:CASEWEAVER_OPENROUTER_KEY = "<OpenRouter key>"
+docker compose -f deploy\docker\compose.local.yml -f deploy\docker\compose.local.documentation.yml up --build --wait
+```
+
+Sign in at `http://localhost:8080` and complete this order in the Admin console:
+
+1. **Access & security**: register `env:CASEWEAVER_OPENROUTER_KEY`. This saves only
+   an opaque reference ID; refreshing the browser will never display it again.
+2. **AI configuration**: create an inactive **OpenAI-compatible** provider with endpoint
+   `https://openrouter.ai/api/v1`, select that reference, choose **embeddings**, and
+   use **Review and activate provider** after the server shows its impact. Then use
+   **Refresh models available from provider**. This server-side request discovers the
+   endpoint's actual model inventory; no browser calls OpenRouter. **Refresh trusted
+   model catalog** is optional pricing enrichment, not the list of models this endpoint
+   is allowed to use.
+3. Still in **AI configuration**, create and activate an **embedding** binding from
+   the server-filtered provider inventory choices. Use **Filter provider models** to
+   narrow the server-provided list (for example, `text-embedding`); it is a filter, not
+   a manually entered model identity. An exact LiteLLM match contributes trusted
+   pricing; otherwise configure an explicit non-zero price override before setting a
+   small hard budget. A capability test is deliberately denied until those guards are
+   in place.
+4. **Knowledge & Analysis**: create an immutable collection using that binding. The
+   bundled PostgreSQL retrieval store supports 1536-dimensional production vectors;
+   select an embedding model configured to return 1536 values and use a stable profile
+   label such as `embedding-v1`.
+5. **Integrations**: create and activate the Git/Markdown connector with local path
+   `/mnt/caseweaver/repositories/documentation`, allowed root
+   `/mnt/caseweaver/repositories`, and the branch/tag to read. The mounted host
+   directory must be the Git worktree root, not the `Cloud` application subfolder. For
+   this Docusaurus site, use one exact repository-relative document for the first
+   metered smoke test, for example
+   `Cloud/docs/AllAnswered/development/pages/automation/automation-test-knowledge-base/autoit.md`.
+   The broader `Cloud/docs/**/*.md` and `Cloud/docs/**/*.mdx` patterns select roughly
+   1,600 documents in the current worktree and are a deliberate full import, not a
+   small test. Create and enable a source that selects the collection and hard
+   embedding budget, then use **Synchronize**. Inspect its job, cost, and audit
+   records in **Operations**.
+
+The complete Docker instructions, including how to keep the PostgreSQL volume or remove
+it, are in [the Docker guide](deploy/docker/README.md). Neither the source mount nor
+the OpenRouter key is exposed to the Admin browser.
 
 ## Run from source
 

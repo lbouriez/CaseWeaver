@@ -12,6 +12,7 @@ import {
   type GitProcessResult,
   type GitProcessRunner,
   NodeGitProcessRunner,
+  parseTrustedLocalRootsJson,
 } from "./index.js";
 
 const commit = "a".repeat(40);
@@ -177,9 +178,7 @@ describe("GitCliRepository", () => {
         }),
       ).resolves.toMatchObject({ commitSha: commit });
 
-      const fetch = runner.calls.find(
-        (call) => commandName(call) === "fetch",
-      );
+      const fetch = runner.calls.find((call) => commandName(call) === "fetch");
       expect(fetch?.arguments).toContain(
         `+${commit}:refs/caseweaver/commits/${commit}`,
       );
@@ -352,6 +351,68 @@ describe("GitCliRepository", () => {
     } finally {
       await rm(temporaryDirectory, { recursive: true, force: true });
     }
+  });
+
+  it("trusts bind-mounted local worktrees only through a deployment-owned root", async () => {
+    const temporaryDirectory = await mkdtemp(
+      join(tmpdir(), "caseweaver-git-test-"),
+    );
+    const trustedRoot = join(temporaryDirectory, "trusted");
+    const repositoryPath = join(trustedRoot, "repository");
+    await mkdir(repositoryPath, { recursive: true });
+    const runner: GitProcessRunner = {
+      run: vi.fn(async (input: GitProcessRequest) => {
+        if (input.arguments.includes("--is-inside-work-tree")) {
+          return result(0, "true\n");
+        }
+        if (input.arguments.includes("--show-toplevel")) {
+          return result(0, `${repositoryPath}\n`);
+        }
+        if (input.arguments.includes("rev-parse")) {
+          return result(0, `${commit}\n`);
+        }
+        if (input.arguments.includes("ls-tree")) {
+          return result(0, `100644 blob ${blob}\tdocs/pinned.md\0`);
+        }
+        throw new Error("Unexpected command");
+      }),
+    };
+    try {
+      const repository = new GitCliRepository({
+        runner,
+        temporaryDirectory,
+        trustedLocalRoots: [trustedRoot],
+      });
+
+      await expect(
+        repository.inspect({
+          repository: { kind: "local", path: repositoryPath },
+          allowedLocalRoots: [trustedRoot],
+          ref: { kind: "branch", name: "main" },
+          authentication: { kind: "none" },
+          signal: new AbortController().signal,
+        }),
+      ).resolves.toEqual({
+        commitSha: commit,
+        files: [{ path: "docs/pinned.md", blobOid: blob }],
+      });
+      const arguments_ = (runner.run as ReturnType<typeof vi.fn>).mock.calls
+        .flatMap(([input]: [GitProcessRequest]) => input.arguments)
+        .join(" ");
+      expect(arguments_).toContain(`safe.directory=${trustedRoot}`);
+      expect(arguments_).toContain(`safe.directory=${trustedRoot}/*`);
+    } finally {
+      await rm(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects malformed deployment-owned local root configuration", () => {
+    expect(() => parseTrustedLocalRootsJson('{"root":"/repo"}')).toThrow(
+      "Trusted Git local roots configuration is invalid.",
+    );
+    expect(() => parseTrustedLocalRootsJson('["relative"]')).toThrow(
+      "Trusted Git local roots configuration is invalid.",
+    );
   });
 });
 

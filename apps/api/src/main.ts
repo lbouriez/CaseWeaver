@@ -3,6 +3,8 @@ import { pathToFileURL } from "node:url";
 import {
   ActivateAiModelBinding,
   AdministrationConflictError,
+  AdministrationNotFoundError,
+  AdministrationUnavailableError,
   type ConfigurationDescriptor,
   CreateAiModelBindingDraft,
   CreateAiModelBindingVersionDraft,
@@ -11,6 +13,7 @@ import {
   canonicalizeConfiguration,
   DisableAiModelBinding,
   IdempotencyConflictError,
+  ImportAiCatalogSnapshot,
   ListRepositoryAnalysisOptions,
   ManageKnowledgeScheduleConfiguration,
   ManageKnowledgeSourceConfiguration,
@@ -20,6 +23,8 @@ import {
   ManageWebhookEndpointConfiguration,
   PreviewProviderCapabilityTest,
   PreviewRepositoryDraftTest,
+  RefreshProviderModelInventory,
+  RefreshTrustedAiCatalog,
   ReplaceAiBudgetPolicy,
   ReplaceWorkspacePrincipalRoles,
   RunProviderCapabilityTest,
@@ -28,6 +33,7 @@ import {
   sha256Base64Url,
   TransitionConfigurationVersion,
 } from "@caseweaver/administration";
+import { GitHubLiteLlmCatalogSource } from "@caseweaver/ai-catalog-source";
 import { DefaultAiExecutionGateway } from "@caseweaver/ai-execution";
 import {
   type ApplicationTransaction,
@@ -71,11 +77,12 @@ import { buildApi } from "./app.js";
 import { parseApiConfig } from "./config.js";
 import { createDatabaseReadiness } from "./database-readiness.js";
 import { ConfiguredApiExecutionContextResolver } from "./execution-context.js";
-import { createLogger } from "./logger.js";
+import { type AppLogger, createLogger } from "./logger.js";
 import {
   EnvironmentSecretResolver,
   providerCapabilityTestTemplates,
   registeredAiProviderDispatcher,
+  registeredAiProviderModelDiscovery,
 } from "./modules/administration/ai-runtime.js";
 import { PostgresDescriptorConfigurationLifecycle } from "./modules/administration/configuration-lifecycle-action.js";
 import { createConnectorDraftTestRegistrations } from "./modules/administration/connector-draft-tests.js";
@@ -124,6 +131,112 @@ function createIds(): IdGenerator {
 const clock: Clock = {
   now: () => utcInstant(new Date()),
 };
+
+/**
+ * The AI-configuration use case stores SHA-256 digests as fixed-width hex.
+ * Keep this command construction at the API composition boundary so a browser
+ * idempotency key never crosses into persistence and the trusted refresh has
+ * the same replay semantics as other configuration commands.
+ */
+export function createTrustedAiCatalogRefreshMutation(idempotencyKey: string) {
+  return Object.freeze({
+    keyDigest: digestIdempotencyKey(idempotencyKey),
+    requestDigest: digestIdempotencyKey("trusted-litellm-catalog-refresh-v1"),
+  });
+}
+
+/**
+ * Forms the server-owned idempotency request identity for a binding draft.
+ * Optional limits are omitted rather than serialized as JavaScript
+ * `undefined`: the administration canonicalizer correctly rejects values that
+ * cannot cross a JSON boundary, while an absent limit is valid API input.
+ */
+export function aiBindingDraftRequestIdentity(
+  input: Readonly<{
+    readonly providerInstanceId: string;
+    readonly catalogSnapshotId: string;
+    readonly canonicalModel: string;
+    /** New bindings select a role; a version preserves the existing role. */
+    readonly role?: string;
+    readonly requiredCapabilities?: readonly string[];
+    readonly maximumInputTokens?: number;
+    readonly maximumOutputTokens?: number;
+  }>,
+) {
+  return Object.freeze({
+    providerInstanceId: input.providerInstanceId,
+    catalogSnapshotId: input.catalogSnapshotId,
+    canonicalModel: input.canonicalModel,
+    ...(input.role === undefined ? {} : { role: input.role }),
+    requiredCapabilities: input.requiredCapabilities ?? [],
+    ...(input.maximumInputTokens === undefined
+      ? {}
+      : { maximumInputTokens: input.maximumInputTokens }),
+    ...(input.maximumOutputTokens === undefined
+      ? {}
+      : { maximumOutputTokens: input.maximumOutputTokens }),
+  });
+}
+
+/**
+ * Forms the JSON-safe identity for an immutable pricing override. A workspace
+ * override deliberately has no binding or end date; omission distinguishes
+ * that valid absence from an invalid JavaScript `undefined` value.
+ */
+export function aiPriceOverrideRequestIdentity(
+  input: Readonly<{
+    readonly scope: "workspace" | "binding";
+    readonly provider: string;
+    readonly canonicalModel: string;
+    readonly bindingVersionId?: string;
+    readonly effectiveFrom: string;
+    readonly effectiveTo?: string;
+    readonly components: readonly Readonly<{
+      readonly kind: string;
+      readonly unit: string;
+      readonly amount: string;
+      readonly currency: string;
+      readonly conditions?: Readonly<Record<string, unknown>>;
+    }>[];
+  }>,
+) {
+  return Object.freeze({
+    scope: input.scope,
+    provider: input.provider,
+    canonicalModel: input.canonicalModel,
+    effectiveFrom: input.effectiveFrom,
+    components: input.components,
+    ...(input.bindingVersionId === undefined
+      ? {}
+      : { bindingVersionId: input.bindingVersionId }),
+    ...(input.effectiveTo === undefined
+      ? {}
+      : { effectiveTo: input.effectiveTo }),
+  });
+}
+
+function createProviderModelInventoryRefreshMutation(
+  providerInstanceId: string,
+  idempotencyKey: string,
+) {
+  return Object.freeze({
+    keyDigest: digestIdempotencyKey(idempotencyKey),
+    requestDigest: digestIdempotencyKey(
+      `provider-model-inventory-refresh-v1:${providerInstanceId}`,
+    ),
+  });
+}
+
+/** Safe operational category only; never emit an upstream error message or URL. */
+export function trustedAiCatalogRefreshFailureKind(
+  error: unknown,
+): "source" | "persistence" | "validation" | "unknown" {
+  if (!(error instanceof Error)) return "unknown";
+  if (error.name === "TrustedAiCatalogSourceError") return "source";
+  if (error.name === "AdministrationValidationError") return "validation";
+  if (error.name.startsWith("Prisma")) return "persistence";
+  return "unknown";
+}
 
 export interface ApiRuntimeBootstrapOptions {
   /** Standalone owns one process-wide telemetry lifecycle. */
@@ -318,6 +431,7 @@ export async function createApiRuntimeFromEnvironment(
       providerCapabilityTests,
     },
     env,
+    logger,
   );
   const app = buildApi({
     config,
@@ -399,6 +513,7 @@ async function createAdministrationOperations(
     }>;
   }>,
   environment: NodeJS.ProcessEnv,
+  logger: AppLogger,
 ): Promise<AdministrationApiOperations> {
   const oidc =
     config.oidc === undefined
@@ -464,6 +579,163 @@ async function createAdministrationOperations(
       PostgresTransactionLookup,
     auditStore: persistence.auditStore,
   });
+  const trustedAiCatalogSource = new GitHubLiteLlmCatalogSource({
+    ...(config.trustedAiCatalogPinnedCommitSha === undefined
+      ? {}
+      : { pinnedCommitSha: config.trustedAiCatalogPinnedCommitSha }),
+  });
+  const refreshAiCatalog = async (
+    input: Readonly<{
+      readonly workspaceId: string;
+      readonly context: import("./modules/administration/routes.js").AdminRequestContext;
+    }>,
+  ) => {
+    let result: Awaited<ReturnType<RefreshTrustedAiCatalog["execute"]>>;
+    try {
+      result = await new RefreshTrustedAiCatalog(
+        trustedAiCatalogSource,
+        new ImportAiCatalogSnapshot(persistence.aiConfigurationStore),
+      ).execute(
+        {
+          mutation: createTrustedAiCatalogRefreshMutation(
+            input.context.idempotencyKey ?? input.context.requestId,
+          ),
+        },
+        aiConfigurationContext(input.context),
+      );
+    } catch (error) {
+      // Catalog acquisition failures are deployment/upstream conditions, not
+      // invalid browser input. Preserve the redacted typed API response and
+      // never expose a source URL, raw content, or error detail.
+      logger.warn(
+        { failureKind: trustedAiCatalogRefreshFailureKind(error) },
+        "Trusted AI catalog refresh is unavailable.",
+      );
+      throw new AdministrationUnavailableError();
+    }
+    return Object.freeze({
+      id: result.summary.id,
+      revision: result.summary.sha256,
+      importedAt: result.summary.fetchedAt,
+      modelCount: result.summary.modelCount,
+    });
+  };
+  const providerModelDiscovery =
+    registeredAiProviderModelDiscovery(environment);
+  const refreshAiProviderModels = async (
+    input: Readonly<{
+      readonly workspaceId: string;
+      readonly providerInstanceId: string;
+      readonly context: import("./modules/administration/routes.js").AdminRequestContext;
+    }>,
+  ) => {
+    const configuration =
+      await persistence.providerModelInventoryConfigurationStore.load({
+        workspaceId: input.workspaceId,
+        providerInstanceId: input.providerInstanceId,
+      });
+    if (configuration === undefined) throw new AdministrationNotFoundError();
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    let models: Awaited<ReturnType<typeof providerModelDiscovery.discover>>;
+    try {
+      models = await providerModelDiscovery.discover({
+        providerType: configuration.providerType,
+        endpoint: configuration.endpoint,
+        wireApi: configuration.wireApi,
+        secretReference: configuration.secretReference,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      logger.warn(
+        {
+          providerType: configuration.providerType,
+          failureKind:
+            error instanceof Error && error.name === "AiProviderError"
+              ? "provider"
+              : "configuration",
+        },
+        "Provider model inventory refresh is unavailable.",
+      );
+      throw new AdministrationUnavailableError();
+    } finally {
+      clearTimeout(timeout);
+    }
+    const result = await new RefreshProviderModelInventory(
+      persistence.providerModelInventoryStore,
+    ).execute(
+      {
+        providerInstanceId: input.providerInstanceId,
+        providerInstanceVersionId: configuration.providerInstanceVersionId,
+        providerType: configuration.providerType,
+        wireApi: configuration.wireApi,
+        models,
+        mutation: createProviderModelInventoryRefreshMutation(
+          input.providerInstanceId,
+          input.context.idempotencyKey ?? input.context.requestId,
+        ),
+      },
+      aiConfigurationContext(input.context),
+    );
+    return result.summary;
+  };
+  const aiBindingOptions = async (
+    input: Readonly<{
+      readonly workspaceId: string;
+      readonly providerInstanceId: string;
+      readonly role: string;
+      readonly search?: string;
+      readonly context: import("./modules/administration/routes.js").AdminRequestContext;
+    }>,
+  ) => {
+    const candidate = await persistence.aiBindingDraftStore.listOptions(input);
+    if (candidate === undefined) throw new Error("resource.notFound");
+    const registration = runtimeDescriptorRegistration(
+      "aiProvider",
+      candidate.providerType,
+    );
+    if (registration?.supportsCatalogBinding === undefined) {
+      throw new Error("resource.notFound");
+    }
+    return Object.freeze({
+      items: Object.freeze(
+        candidate.models
+          .filter((model) =>
+            registration.supportsCatalogBinding?.({
+              role: input.role,
+              wireApi: candidate.wireApi,
+              catalogProvider: model.catalogProvider,
+              supportedRoles: model.supportedRoles,
+              capabilities: model.capabilities,
+            }),
+          )
+          .map((model) =>
+            Object.freeze({
+              catalogSnapshotId: model.catalogSnapshotId,
+              canonicalModel: model.canonicalModel,
+              catalogProvider: model.catalogProvider,
+            }),
+          ),
+      ),
+    });
+  };
+  const isRuntimeCompatibleBinding = (
+    binding: import("@caseweaver/administration").AiBindingDraftInput,
+  ): boolean => {
+    const registration = runtimeDescriptorRegistration(
+      "aiProvider",
+      binding.providerType,
+    );
+    return (
+      registration?.supportsCatalogBinding?.({
+        role: binding.role,
+        wireApi: binding.wireApi,
+        catalogProvider: binding.catalogModel.provider,
+        supportedRoles: [...binding.catalogModel.supportedRoles],
+        capabilities: [...binding.catalogModel.capabilities],
+      }) ?? false
+    );
+  };
   const createKnowledgeCollection = async (
     input: Readonly<{
       readonly workspaceId: string;
@@ -511,9 +783,13 @@ async function createAdministrationOperations(
             id: input.embeddingBindingId,
           },
         },
-        select: { lifecycle: true, activeVersionId: true },
+        select: { lifecycle: true, role: true, activeVersionId: true },
       });
-      if (binding?.lifecycle !== "active" || binding.activeVersionId === null)
+      if (
+        binding?.lifecycle !== "active" ||
+        binding.role !== "embedding" ||
+        binding.activeVersionId === null
+      )
         throw new Error("resource.notFound");
       const version = await database.aiModelBindingVersion.findUnique({
         where: {
@@ -522,15 +798,9 @@ async function createAdministrationOperations(
             id: binding.activeVersionId,
           },
         },
-        select: { capabilities: true },
+        select: { id: true },
       });
-      if (
-        version === null ||
-        !Array.isArray(version.capabilities) ||
-        !version.capabilities.includes("embedding")
-      ) {
-        throw new Error("resource.notFound");
-      }
+      if (version === null) throw new Error("resource.notFound");
       await database.knowledgeCollection.create({
         data: {
           id: input.collectionId,
@@ -1377,6 +1647,9 @@ async function createAdministrationOperations(
         : { maximumOutputTokens: input.maximumOutputTokens }),
     });
     if (binding === undefined) throw new Error("resource.notFound");
+    if (!isRuntimeCompatibleBinding(binding)) {
+      throw new Error("binding.incompatible");
+    }
     const result = await new CreateAiModelBindingDraft(
       persistence.aiConfigurationStore,
     ).execute(
@@ -1385,15 +1658,7 @@ async function createAdministrationOperations(
         mutation: {
           keyDigest,
           requestDigest: digestIdempotencyKey(
-            canonicalizeConfiguration({
-              providerInstanceId: input.providerInstanceId,
-              catalogSnapshotId: input.catalogSnapshotId,
-              canonicalModel: input.canonicalModel,
-              role: input.role,
-              requiredCapabilities: input.requiredCapabilities ?? [],
-              maximumInputTokens: input.maximumInputTokens,
-              maximumOutputTokens: input.maximumOutputTokens,
-            }),
+            canonicalizeConfiguration(aiBindingDraftRequestIdentity(input)),
           ),
         },
       },
@@ -1435,6 +1700,9 @@ async function createAdministrationOperations(
         : { maximumOutputTokens: input.maximumOutputTokens }),
     });
     if (binding === undefined) throw new Error("resource.notFound");
+    if (!isRuntimeCompatibleBinding(binding)) {
+      throw new Error("binding.incompatible");
+    }
     const result = await new CreateAiModelBindingVersionDraft(
       persistence.aiConfigurationStore,
     ).execute(
@@ -1449,12 +1717,7 @@ async function createAdministrationOperations(
             canonicalizeConfiguration({
               bindingId: input.bindingId,
               expectedRevision: input.expectedRevision,
-              providerInstanceId: input.providerInstanceId,
-              catalogSnapshotId: input.catalogSnapshotId,
-              canonicalModel: input.canonicalModel,
-              requiredCapabilities: input.requiredCapabilities ?? [],
-              maximumInputTokens: input.maximumInputTokens,
-              maximumOutputTokens: input.maximumOutputTokens,
+              ...aiBindingDraftRequestIdentity(input),
             }),
           ),
         },
@@ -1588,15 +1851,7 @@ async function createAdministrationOperations(
         mutation: {
           keyDigest,
           requestDigest: digestIdempotencyKey(
-            canonicalizeConfiguration({
-              scope: input.scope,
-              provider: input.provider,
-              canonicalModel: input.canonicalModel,
-              bindingVersionId: input.bindingVersionId,
-              effectiveFrom: input.effectiveFrom,
-              effectiveTo: input.effectiveTo,
-              components: input.components,
-            }),
+            canonicalizeConfiguration(aiPriceOverrideRequestIdentity(input)),
           ),
         },
       },
@@ -1620,6 +1875,10 @@ async function createAdministrationOperations(
     const keyDigest = digestIdempotencyKey(
       input.context.idempotencyKey ?? input.context.requestId,
     );
+    // Budget policies are immutable versions.  A replacement preserves its
+    // history by generating a new policy identity; `expectedRevision` is the
+    // optimistic-concurrency proof for the active scope selected by the
+    // operator, rather than an instruction to overwrite the prior row.
     const policyId = `ai-budget-${keyDigest.slice(0, 47)}`;
     const result = await new ReplaceAiBudgetPolicy(
       persistence.aiConfigurationStore,
@@ -1913,6 +2172,9 @@ async function createAdministrationOperations(
     transitionWebhookEndpoint,
     platformLinks,
     savePlatformLinks,
+    refreshAiCatalog,
+    refreshAiProviderModels,
+    aiBindingOptions,
     createAiBindingDraft,
     createAiBindingVersionDraft,
     transitionAiBinding,
@@ -2168,10 +2430,12 @@ async function resolveRegisteredSecretReferences(
       select: { id: true, secretReference: true },
     });
   const references = new Map(
-    registrations.map((registration) => [
-      registration.id,
-      registration.secretReference,
-    ]),
+    registrations.map(
+      (registration: Readonly<{ id: string; secretReference: string }>) => [
+        registration.id,
+        registration.secretReference,
+      ],
+    ),
   );
   if (references.size !== identifiers.length) {
     throw new Error("secretReference.invalid");
@@ -2216,7 +2480,12 @@ async function resolveRegisteredSecretReferenceLocators(
     throw new Error("secretReference.invalid");
   }
   const byId = new Map(
-    registrations.map((entry) => [entry.id, entry.secretReference]),
+    registrations.map(
+      (entry: Readonly<{ id: string; secretReference: string }>) => [
+        entry.id,
+        entry.secretReference,
+      ],
+    ),
   );
   const resolved = ids.map((id) => byId.get(id));
   if (resolved.some((value) => value === undefined)) {

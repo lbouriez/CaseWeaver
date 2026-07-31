@@ -94,9 +94,8 @@ describe("PostgreSQL source and schedule administration projections", () => {
             attachment_stage_mode: "optional",
             attachment_policy_configuration_version_id:
               "attachment-policy-a-v1",
-            attachment_access_policy_hash: expect.stringMatching(
-              /^[a-f0-9]{64}$/u,
-            ),
+            attachment_access_policy_hash:
+              expect.stringMatching(/^[a-f0-9]{64}$/u),
           },
         ],
       });
@@ -979,7 +978,7 @@ async function seedWorkspace(
        id, workspace_id, model_binding_id, version, provider_instance_version_id,
        catalog_snapshot_id, catalog_model_id, canonical_model, wire_api,
        parameters, capabilities, maximum_input_tokens, secret_reference
-     ) VALUES ($1, $2, $3, 1, $4, $5, $6, 'embedding', 'embeddings', '{}'::jsonb, '["embedding"]'::jsonb, 8192, 'vault:test')`,
+     ) VALUES ($1, $2, $3, 1, $4, $5, $6, 'embedding', 'embeddings', '{}'::jsonb, '[]'::jsonb, 8192, 'vault:test')`,
     [bindingVersion, workspace, binding, providerVersion, catalog, model],
   );
   await pool.query(

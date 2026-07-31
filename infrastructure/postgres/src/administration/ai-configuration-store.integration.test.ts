@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
 
 import type { AiConfigurationAuditRecord } from "@caseweaver/administration";
-import { AdministrationConflictError } from "@caseweaver/administration";
+import {
+  AdministrationConflictError,
+  AdministrationNotFoundError,
+} from "@caseweaver/administration";
 import {
   createImmutableBinding,
   importLiteLlmCatalog,
@@ -10,8 +13,9 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@prisma/client";
 import { Pool } from "pg";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
-
+import { PostgresAiBindingDraftStore } from "./ai-binding-draft-store.js";
 import { PostgresAiConfigurationStore } from "./ai-configuration-store.js";
+import { PostgresProviderModelInventoryStore } from "./provider-model-inventory-store.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (
@@ -113,7 +117,11 @@ async function seedBase(database: PrismaClient): Promise<void> {
   });
 }
 
-function binding(snapshot: ReturnType<typeof catalog>, version = 1) {
+function binding(
+  snapshot: ReturnType<typeof catalog>,
+  inventorySnapshotId: string,
+  version = 1,
+) {
   const model = snapshot.models[0];
   if (model === undefined)
     throw new Error("Catalog fixture did not contain its model.");
@@ -128,10 +136,53 @@ function binding(snapshot: ReturnType<typeof catalog>, version = 1) {
     canonicalModel: "test-provider/model-a",
     wireApi: "chatCompletions",
     secretReference: "secret-ref-a",
-    catalogModel: model,
+    catalogModel: { ...model, snapshotId: inventorySnapshotId },
     maximumInputTokens: 100,
     maximumOutputTokens: 50,
   });
+}
+
+async function refreshProviderInventory(
+  database: PrismaClient,
+  mutationCharacter: string,
+): Promise<string> {
+  const inventoryStore = new PostgresProviderModelInventoryStore(database);
+  const storedMutation = mutation(mutationCharacter);
+  const recorded = await inventoryStore.refreshAndRecord({
+    workspaceId: "ai-workspace-a",
+    providerInstanceId: "provider-a",
+    providerInstanceVersionId: "provider-a:1",
+    providerType: "test-provider",
+    wireApi: "chatCompletions",
+    models: [
+      {
+        canonicalModel: "test-provider/model-a",
+        supportedRoles: ["analysis", "chat", "keywordExtraction"],
+        capabilities: [],
+        maximumInputTokens: 100,
+        maximumOutputTokens: 50,
+      },
+    ],
+    mutation: storedMutation,
+    audit: audit(
+      "admin.aiProviderModelInventory.refresh",
+      "ai-provider-instance",
+      "provider-a",
+      storedMutation.keyDigest,
+    ),
+  });
+  const inventory = await database.aiProviderModelInventorySnapshot.findUnique({
+    where: {
+      workspaceId_id: {
+        workspaceId: "ai-workspace-a",
+        id: recorded.summary.id,
+      },
+    },
+    select: { catalogSnapshotId: true },
+  });
+  if (inventory === null)
+    throw new Error("Provider inventory was not recorded.");
+  return inventory.catalogSnapshotId;
 }
 
 beforeEach(async () => {
@@ -145,6 +196,128 @@ afterAll(async () => {
 });
 
 describe("PostgreSQL AI configuration authoring", () => {
+  it("returns a bounded server-side catalog filter rather than relying on a first model page", async () => {
+    const database = client();
+    try {
+      const configuration = new PostgresAiConfigurationStore(database);
+      const bindings = new PostgresAiBindingDraftStore(database);
+      await seedBase(database);
+      const imported = catalog();
+      const catalogMutation = mutation("0");
+      await configuration.importCatalogAndRecord({
+        workspaceId: "ai-workspace-a",
+        catalog: imported,
+        mutation: catalogMutation,
+        audit: audit(
+          "admin.aiCatalog.import",
+          "ai-catalog-snapshot",
+          imported.id,
+          catalogMutation.keyDigest,
+        ),
+      });
+      await expect(
+        bindings.listOptions({
+          workspaceId: "ai-workspace-a",
+          providerInstanceId: "provider-a",
+          role: "analysis",
+        }),
+      ).resolves.toMatchObject({ models: [] });
+      const unverifiedBindingMutation = mutation("y");
+      await expect(
+        configuration.createBindingDraftAndRecord({
+          binding: binding(imported, imported.id),
+          mutation: unverifiedBindingMutation,
+          audit: audit(
+            "admin.aiBinding.draft.create",
+            "ai-model-binding",
+            "binding-a",
+            unverifiedBindingMutation.keyDigest,
+          ),
+        }),
+      ).rejects.toBeInstanceOf(AdministrationNotFoundError);
+      const inventorySnapshotId = await refreshProviderInventory(database, "z");
+
+      await expect(
+        bindings.listOptions({
+          workspaceId: "ai-workspace-a",
+          providerInstanceId: "provider-a",
+          role: "analysis",
+          search: "MODEL-A",
+        }),
+      ).resolves.toMatchObject({
+        wireApi: "chatCompletions",
+        models: [
+          {
+            catalogSnapshotId: inventorySnapshotId,
+            canonicalModel: "test-provider/model-a",
+          },
+        ],
+      });
+      await expect(
+        bindings.listOptions({
+          workspaceId: "ai-workspace-a",
+          providerInstanceId: "provider-a",
+          role: "analysis",
+          search: "absent-model",
+        }),
+      ).resolves.toMatchObject({ models: [] });
+    } finally {
+      await database.$disconnect();
+    }
+  });
+
+  it("records a same-content trusted refresh without duplicate models, prices, or cache invalidation", async () => {
+    const database = client();
+    try {
+      const store = new PostgresAiConfigurationStore(database);
+      await seedBase(database);
+      const imported = catalog();
+      const firstMutation = mutation("1");
+      const secondMutation = mutation("2");
+
+      await store.importCatalogAndRecord({
+        workspaceId: "ai-workspace-a",
+        catalog: imported,
+        mutation: firstMutation,
+        audit: audit(
+          "admin.aiCatalog.import",
+          "ai-catalog-snapshot",
+          imported.id,
+          firstMutation.keyDigest,
+        ),
+      });
+      const refreshed = await store.importCatalogAndRecord({
+        workspaceId: "ai-workspace-a",
+        catalog: imported,
+        mutation: secondMutation,
+        audit: audit(
+          "admin.aiCatalog.import",
+          "ai-catalog-snapshot",
+          imported.id,
+          secondMutation.keyDigest,
+        ),
+      });
+
+      expect(refreshed).toMatchObject({
+        idempotency: "created",
+        summary: { id: imported.id, modelCount: 1 },
+      });
+      await expect(
+        Promise.all([
+          database.aiCatalogSnapshot.count(),
+          database.aiCatalogModel.count(),
+          database.aiCatalogPriceComponent.count(),
+          database.administrationAiConfigurationChangeOutbox.count(),
+          database.auditEvent.count({
+            where: { action: "admin.aiCatalog.import" },
+          }),
+        ]),
+      ).resolves.toEqual([1, 1, 2, 1, 2]);
+    } finally {
+      await database.$disconnect();
+    }
+  });
+
   it("commits a pinned catalog, immutable binding draft, idempotency result, audit, and cache invalidation atomically", async () => {
     const database = client();
     try {
@@ -169,9 +342,10 @@ describe("PostgreSQL AI configuration authoring", () => {
           catalogMutation.keyDigest,
         ),
       });
+      const inventorySnapshotId = await refreshProviderInventory(database, "k");
       const draftMutation = mutation("b");
       const created = await store.createBindingDraftAndRecord({
-        binding: binding(imported),
+        binding: binding(imported, inventorySnapshotId),
         mutation: draftMutation,
         audit: audit(
           "admin.aiBinding.draft.create",
@@ -190,7 +364,7 @@ describe("PostgreSQL AI configuration authoring", () => {
       });
       await expect(
         store.createBindingDraftAndRecord({
-          binding: binding(imported),
+          binding: binding(imported, inventorySnapshotId),
           mutation: draftMutation,
           audit: audit(
             "admin.aiBinding.draft.create",
@@ -266,9 +440,10 @@ describe("PostgreSQL AI configuration authoring", () => {
           catalogMutation.keyDigest,
         ),
       });
+      const inventorySnapshotId = await refreshProviderInventory(database, "l");
       const draftMutation = mutation("d");
       await store.createBindingDraftAndRecord({
-        binding: binding(imported),
+        binding: binding(imported, inventorySnapshotId),
         mutation: draftMutation,
         audit: audit(
           "admin.aiBinding.draft.create",
@@ -306,7 +481,7 @@ describe("PostgreSQL AI configuration authoring", () => {
         ),
       });
       const versionDraftMutation = mutation("f");
-      const secondVersion = binding(imported, 2);
+      const secondVersion = binding(imported, inventorySnapshotId, 2);
       await store.createBindingVersionDraftAndRecord({
         binding: secondVersion,
         expectedRevision: 2,

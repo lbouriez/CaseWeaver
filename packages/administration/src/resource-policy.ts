@@ -347,6 +347,11 @@ const actionPolicies: Readonly<
     actionCode: "admin.secretReference.rotate",
     target: "secret-references",
   },
+  "secret.reconcile": {
+    permission: "credential.manage",
+    actionCode: "admin.secretReference.reconcile",
+    target: "secret-references",
+  },
   "secret.revoke": {
     permission: "credential.manage",
     actionCode: "admin.secretReference.revoke",

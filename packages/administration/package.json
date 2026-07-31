@@ -15,6 +15,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@caseweaver/ai-sdk": "workspace:*",
     "@caseweaver/ai-config": "workspace:*",
     "@caseweaver/ai-execution": "workspace:*",
     "@caseweaver/domain": "workspace:*",

@@ -31,6 +31,7 @@ export const configurationInspectionLifecycles = [
   "draft",
   "active",
   "disabled",
+  "discarded",
   "superseded",
 ] as const;
 export type ConfigurationInspectionLifecycle =
@@ -70,6 +71,7 @@ export const configurationSurfaceOperationalActions = [
   "source.synchronize",
   "source.fullRescan",
   "publication.approve",
+  "catalog.refresh",
 ] as const;
 export type ConfigurationSurfaceOperationalAction =
   (typeof configurationSurfaceOperationalActions)[number];

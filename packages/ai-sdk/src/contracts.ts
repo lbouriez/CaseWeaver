@@ -55,6 +55,39 @@ export interface SecretResolver {
   resolve(reference: string, signal: AbortSignal): Promise<AiSecret>;
 }
 
+/**
+ * Safe, provider-advertised model metadata. This is deliberately separate
+ * from the LiteLLM price catalog: it answers which model identities a
+ * configured provider endpoint currently offers, without exposing the raw
+ * response, endpoint, or credential.
+ */
+export interface ProviderDiscoveredModel {
+  readonly canonicalModel: string;
+  readonly supportedRoles: readonly AiRole[];
+  readonly capabilities: readonly AiCapability[];
+  readonly maximumInputTokens?: number;
+  readonly maximumOutputTokens?: number;
+}
+
+/** Server-only input for a provider's metadata discovery request. */
+export interface ProviderModelDiscoveryInvocation {
+  readonly endpoint: string;
+  readonly wireApi: AiWireApi;
+  readonly secret: AiSecret;
+  readonly signal: AbortSignal;
+}
+
+/**
+ * Provider-owned discovery of models available from a configured endpoint.
+ * This is metadata retrieval, not an AI inference call; application features
+ * still invoke models exclusively through the metered execution gateway.
+ */
+export interface ProviderModelDiscoverer {
+  discoverModels(
+    invocation: ProviderModelDiscoveryInvocation,
+  ): Promise<readonly ProviderDiscoveredModel[]>;
+}
+
 export interface NormalizedUsage {
   readonly inputTokens?: number;
   readonly outputTokens?: number;

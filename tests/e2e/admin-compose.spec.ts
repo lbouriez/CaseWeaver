@@ -2,9 +2,10 @@ import { expect, test } from "@playwright/test";
 
 /**
  * This is deliberately not a fixture test.  It targets the disposable Docker
- * topology through the same-origin edge, including the real API, cookie
- * session, PostgreSQL audit store and baked Admin artifact.  It is opt-in for
- * developers but is enabled by the container workflow after Compose is ready.
+ * topology through the same-origin frontend proxy, including the real standalone
+ * backend API, cookie session, PostgreSQL audit store and baked Admin artifact.
+ * It is opt-in for developers but is enabled by the container workflow after
+ * Compose is ready.
  */
 const composeOrigin = process.env.CASEWEAVER_E2E_COMPOSE_ORIGIN;
 
@@ -56,6 +57,45 @@ test.describe("disposable Compose operator journey", () => {
     expect(serializedStorage).not.toContain("id_token");
     expect(serializedStorage).not.toContain("caseweaver-session");
     expect(serializedStorage).not.toContain("admin");
+
+    // The trusted catalog acquisition runs through the same real API/session
+    // boundary. Chromium supplies neither a source URL nor catalog bytes.
+    await page.getByRole("link", { name: /AI$/u }).click();
+    await expect(
+      page.getByRole("heading", { name: "Configure an AI provider" }),
+    ).toBeVisible();
+    await expect(
+      page.getByText("The control-plane API returned an invalid response."),
+    ).toHaveCount(0);
+    await page
+      .getByRole("button", { name: "Refresh trusted model catalog" })
+      .click();
+    await expect(
+      page.getByText(
+        /was refreshed\. Matching provider inventory models can now receive trusted price enrichment/u,
+      ),
+    ).toBeVisible({ timeout: 30_000 });
+    await expect(
+      page.getByRole("heading", {
+        name: "Models available from this provider",
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", {
+        name: "Refresh models available from provider",
+      }),
+    ).toBeVisible();
+    await expect(page.getByLabel("Filter provider models")).toBeVisible();
+    const afterCatalogRefresh = await page.evaluate(() =>
+      JSON.stringify({
+        local: Object.entries(localStorage),
+        session: Object.entries(sessionStorage),
+        location: location.href,
+      }).toLowerCase(),
+    );
+    expect(afterCatalogRefresh).not.toMatch(
+      /raw|githubusercontent|access_token|secret|locator/iu,
+    );
 
     await page.getByRole("link", { name: /Integrations/u }).click();
     await expect(

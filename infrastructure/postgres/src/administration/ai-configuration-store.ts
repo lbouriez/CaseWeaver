@@ -20,6 +20,10 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 
 type Database = PrismaClient | Prisma.TransactionClient;
 
+/** Keeps a trusted catalog import below PostgreSQL's parameter budget while
+ * avoiding one interactive-transaction round trip per upstream model. */
+const catalogInsertBatchSize = 250;
+
 /**
  * PostgreSQL persistence for immutable AI catalog/binding configuration. It uses
  * the PBI-003 runtime tables and the dedicated AI configuration relay. Explicit
@@ -63,6 +67,23 @@ export class PostgresAiConfigurationStore implements AiConfigurationStore {
       if (existing !== null && existing.sha256 !== input.catalog.sha256) {
         throw new AdministrationConflictError();
       }
+      if (existing !== null) {
+        // The SHA-addressed snapshot already contains these exact immutable
+        // bytes. Record the operator's refresh and idempotency result, but do
+        // not duplicate models/prices or publish a needless cache change.
+        await recordMutation(
+          database,
+          input.workspaceId,
+          input.audit.action,
+          input.mutation,
+          input.catalog.id,
+        );
+        await appendAudit(database, input.audit, this.nextId);
+        return Object.freeze({
+          summary: await catalogSummary(database, input.catalog.id),
+          idempotency: "created" as const,
+        });
+      }
       if (existing === null) {
         await database.aiCatalogSnapshot.create({
           data: {
@@ -74,40 +95,55 @@ export class PostgresAiConfigurationStore implements AiConfigurationStore {
             rawEntries: input.catalog.rawEntries as Prisma.InputJsonObject,
           },
         });
-        for (const model of input.catalog.models) {
-          await database.aiCatalogModel.create({
-            data: {
-              id: model.id,
-              catalogSnapshotId: input.catalog.id,
-              canonicalModel: model.canonicalModel,
-              provider: model.provider,
-              supportedRoles: [...model.supportedRoles],
-              capabilities: [...model.capabilities],
-              maximumInputTokens: model.maximumInputTokens,
-              maximumOutputTokens: model.maximumOutputTokens,
-              rawEntry: model.rawEntry as Prisma.InputJsonObject,
-            },
+        const models = input.catalog.models.map((model) => ({
+          id: model.id,
+          catalogSnapshotId: input.catalog.id,
+          canonicalModel: model.canonicalModel,
+          provider: model.provider,
+          supportedRoles: [...model.supportedRoles],
+          capabilities: [...model.capabilities],
+          maximumInputTokens: model.maximumInputTokens,
+          maximumOutputTokens: model.maximumOutputTokens,
+          rawEntry: model.rawEntry as Prisma.InputJsonObject,
+        }));
+        for (
+          let offset = 0;
+          offset < models.length;
+          offset += catalogInsertBatchSize
+        ) {
+          await database.aiCatalogModel.createMany({
+            data: models.slice(offset, offset + catalogInsertBatchSize),
           });
-          for (const component of model.priceComponents) {
-            await database.aiCatalogPriceComponent.create({
-              data: {
-                id: component.id,
-                catalogModelId: model.id,
-                componentKind: component.kind,
-                billingUnit: component.unit,
-                amount: component.amount,
-                currency: component.currency,
-                effectiveFrom: at(component.effectiveFrom),
-                effectiveTo:
-                  component.effectiveTo === undefined
-                    ? undefined
-                    : at(component.effectiveTo),
-                conditions: component.conditions as Prisma.InputJsonObject,
-                sourceRevision: input.catalog.upstreamCommitSha,
-                rawEntry: model.rawEntry as Prisma.InputJsonObject,
-              },
-            });
-          }
+        }
+        const priceComponents = input.catalog.models.flatMap((model) =>
+          model.priceComponents.map((component) => ({
+            id: component.id,
+            catalogModelId: model.id,
+            componentKind: component.kind,
+            billingUnit: component.unit,
+            amount: component.amount,
+            currency: component.currency,
+            effectiveFrom: at(component.effectiveFrom),
+            effectiveTo:
+              component.effectiveTo === undefined
+                ? undefined
+                : at(component.effectiveTo),
+            conditions: component.conditions as Prisma.InputJsonObject,
+            sourceRevision: input.catalog.upstreamCommitSha,
+            rawEntry: model.rawEntry as Prisma.InputJsonObject,
+          })),
+        );
+        for (
+          let offset = 0;
+          offset < priceComponents.length;
+          offset += catalogInsertBatchSize
+        ) {
+          await database.aiCatalogPriceComponent.createMany({
+            data: priceComponents.slice(
+              offset,
+              offset + catalogInsertBatchSize,
+            ),
+          });
         }
       }
       await recordMutation(
@@ -828,9 +864,24 @@ async function requireProviderAndCatalog(
         canonicalModel: binding.canonicalModel,
       },
     },
+    select: { id: true, provider: true },
+  });
+  if (model === null || model.provider !== provider.providerType) {
+    throw new AdministrationNotFoundError();
+  }
+  const inventory = await database.aiProviderModelInventorySnapshot.findFirst({
+    where: {
+      workspaceId: binding.workspaceId,
+      providerInstanceId: providerVersion.providerInstanceId,
+      providerInstanceVersionId: binding.providerInstanceVersionId,
+      catalogSnapshotId: binding.catalogSnapshotId,
+    },
     select: { id: true },
   });
-  if (model === null) throw new AdministrationNotFoundError();
+  // A provider model can only be bound when the exact active immutable
+  // provider version supplied it. A pricing catalog is never an availability
+  // authority, including for callers that bypass the authoring read model.
+  if (inventory === null) throw new AdministrationNotFoundError();
 }
 
 async function createBindingVersion(

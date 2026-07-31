@@ -13,17 +13,24 @@ const context = {
   requestMode: "user" as const,
 };
 
-function preflight(privacyTargets?: {
-  exists: (input: {
-    readonly workspaceId: string;
-    readonly caseSnapshotId: string;
-  }) => Promise<boolean>;
-}) {
+function preflight(
+  input?: Readonly<{
+    readonly privacyTargets?: {
+      exists: (input: {
+        readonly workspaceId: string;
+        readonly caseSnapshotId: string;
+      }) => Promise<boolean>;
+    };
+    readonly reads?: Readonly<Record<string, unknown>>;
+  }>,
+) {
   return new ExistingOperationsPreflight({
     unitOfWork: {},
     operations: {},
-    reads: {},
-    ...(privacyTargets === undefined ? {} : { privacyTargets }),
+    reads: input?.reads ?? {},
+    ...(input?.privacyTargets === undefined
+      ? {}
+      : { privacyTargets: input.privacyTargets }),
   } as never);
 }
 
@@ -43,7 +50,7 @@ describe("ExistingOperationsPreflight privacy purge", () => {
   it("uses only a workspace-scoped existence check and does not disclose the reason", async () => {
     const exists = vi.fn(async () => true);
     const reason = "Verified data-subject deletion request";
-    const result = await preflight({ exists }).preview({
+    const result = await preflight({ privacyTargets: { exists } }).preview({
       command: mapPrivacyPurge({ caseSnapshotId: "snapshot-1", reason })
         .command,
       context,
@@ -55,5 +62,34 @@ describe("ExistingOperationsPreflight privacy purge", () => {
     });
     expect(result).toMatchObject({ canConfirm: true });
     expect(JSON.stringify(result)).not.toContain(reason);
+  });
+});
+
+describe("ExistingOperationsPreflight draft discard", () => {
+  it("describes a draft removal as a terminal, audit-preserving discard", async () => {
+    const configuration = vi.fn(async () => ({
+      id: "provider-1",
+      resourceType: "ai-provider-instances",
+      lifecycle: "draft",
+    }));
+    const result = await preflight({ reads: { configuration } }).preview({
+      command: {
+        action: "configuration.disable",
+        target: { resource: "configuration", id: "provider-1" },
+        parameters: { resourceType: "ai-provider-instances" },
+      },
+      context,
+    } as never);
+
+    expect(configuration).toHaveBeenCalledWith({
+      workspaceId: "workspace-1",
+      id: "provider-1",
+    });
+    expect(result).toMatchObject({
+      canConfirm: true,
+      confirmation: "Remove this inactive draft?",
+    });
+    expect(result.impact).toContain("cannot be reactivated");
+    expect(result.impact).toContain("audit history");
   });
 });

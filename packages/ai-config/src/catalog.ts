@@ -7,7 +7,7 @@ import {
 } from "@caseweaver/ai-sdk";
 import { z } from "zod";
 import type { CatalogModel } from "./bindings.js";
-import { decimal } from "./decimal.js";
+import { storableDecimal } from "./decimal.js";
 import type { PriceComponent, PriceComponentKind } from "./pricing.js";
 
 const unknownRecordSchema = z.record(z.string(), z.unknown());
@@ -42,16 +42,13 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-function asPositiveInteger(value: unknown, field: string): number | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (!Number.isSafeInteger(value) || (value as number) < 1) {
-    throw new AiConfigurationError(
-      `LiteLLM ${field} must be a positive integer.`,
-    );
-  }
-  return value as number;
+function asPositiveInteger(value: unknown): number | undefined {
+  // LiteLLM represents an unavailable limit in several ways (including zero
+  // for moderation endpoints). A missing limit must not make the whole trusted
+  // catalog unusable or be converted into an invented capacity.
+  return Number.isSafeInteger(value) && (value as number) > 0
+    ? (value as number)
+    : undefined;
 }
 
 function rolesFor(
@@ -116,7 +113,12 @@ function componentsFor(
         `LiteLLM ${field} must be a finite decimal price.`,
       );
     }
-    const amount = decimal(raw);
+    const amount = storableDecimal(raw);
+    // LiteLLM may publish a precision below the durable PostgreSQL monetary
+    // representation. Retain the model and raw entry, but deliberately omit
+    // that component: pricing resolves as unknown rather than being rounded or
+    // silently treated as free.
+    if (amount === undefined) continue;
     if (amount.startsWith("-")) {
       throw new AiConfigurationError(`LiteLLM ${field} cannot be negative.`);
     }
@@ -134,6 +136,22 @@ function componentsFor(
     );
   }
   return Object.freeze(components);
+}
+
+/**
+ * A LiteLLM key is a provider-facing display value, not a CaseWeaver resource
+ * identifier. In particular, normal catalog keys contain `/`, and using one
+ * as a database/API ID made the strict Admin client reject an otherwise valid
+ * model list. Keep the original key as `canonicalModel`, while deriving a
+ * bounded, URL-safe immutable identity for storage and administration reads.
+ *
+ * The snapshot is content-addressed, so this remains stable for a given
+ * catalog artifact and cannot collide with the same model name in another
+ * immutable snapshot.
+ */
+function catalogModelId(snapshotId: string, canonicalModel: string): string {
+  const identity = `${snapshotId}:${canonicalModel}`;
+  return `catalog-model-${createHash("sha256").update(identity, "utf8").digest("hex")}`;
 }
 
 export function importLiteLlmCatalog(
@@ -170,7 +188,7 @@ export function importLiteLlmCatalog(
     if (!entry.success) continue;
     const provider = asString(entry.data.litellm_provider);
     if (provider === undefined) continue;
-    const sourceId = `${input.snapshotId}:${canonicalModel}`;
+    const sourceId = catalogModelId(input.snapshotId, canonicalModel);
     models.push(
       Object.freeze({
         id: sourceId,
@@ -179,14 +197,8 @@ export function importLiteLlmCatalog(
         provider,
         supportedRoles: rolesFor(entry.data),
         capabilities: capabilitiesFor(entry.data),
-        maximumInputTokens: asPositiveInteger(
-          entry.data.max_input_tokens,
-          "max_input_tokens",
-        ),
-        maximumOutputTokens: asPositiveInteger(
-          entry.data.max_output_tokens,
-          "max_output_tokens",
-        ),
+        maximumInputTokens: asPositiveInteger(entry.data.max_input_tokens),
+        maximumOutputTokens: asPositiveInteger(entry.data.max_output_tokens),
         priceComponents: componentsFor(entry.data, sourceId),
         rawEntry: Object.freeze({ ...entry.data }),
       }),

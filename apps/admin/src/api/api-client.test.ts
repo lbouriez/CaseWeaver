@@ -849,4 +849,62 @@ describe("CaseWeaverApiClient", () => {
       '"expectedRevision":2',
     );
   });
+
+  it("requests compatible binding identities and a trusted catalog refresh without sending model data or a catalog URL", async () => {
+    const fetchImplementation = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse({
+          items: [
+            {
+              catalogSnapshotId: "catalog-1",
+              canonicalModel: "provider/model-1",
+              catalogProvider: "provider",
+            },
+          ],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: "catalog-1",
+          label: "Trusted model catalog",
+          status: "pinned",
+          version: "safe-hash",
+          fields: {},
+        }),
+      );
+    const client = new CaseWeaverApiClient(
+      { apiBaseUrl: "https://api.example.test", uiTitle: "Control" },
+      { fetchImplementation },
+    );
+
+    await expect(
+      client.aiBindingOptions({
+        providerInstanceId: "provider-1",
+        role: "embedding",
+        search: "text embedding",
+      }),
+    ).resolves.toEqual({
+      items: [
+        {
+          catalogSnapshotId: "catalog-1",
+          canonicalModel: "provider/model-1",
+          catalogProvider: "provider",
+        },
+      ],
+    });
+    await client.refreshAiCatalog();
+
+    expect(fetchImplementation.mock.calls.map((call) => call[0])).toEqual([
+      new URL(
+        "https://api.example.test/v1/admin/ai/binding-options?providerInstanceId=provider-1&role=embedding&search=text+embedding",
+      ),
+      new URL("https://api.example.test/v1/admin/ai/catalog-snapshots/refresh"),
+    ]);
+    const refresh = fetchImplementation.mock.calls[1]?.[1];
+    expect(refresh).toMatchObject({ method: "POST", body: undefined });
+    expect(JSON.stringify(refresh)).not.toMatch(
+      /raw|catalog\.json|token|secret/iu,
+    );
+  });
 });

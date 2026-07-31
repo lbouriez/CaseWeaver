@@ -20,3 +20,8 @@ starts one process-wide OpenTelemetry lifecycle, starts the runtime services in
 durable-worker/scheduler/API/webhook order, and stops ingress before scheduler
 and worker shutdown. The controlled installation job must apply Prisma and
 pg-boss migrations before the standalone service starts.
+
+`caseweaver-standalone migrate-queue` is the controlled pg-boss migration command
+for a standalone image. It performs no long-running work and exits before the
+standalone host is started. This permits a three-service local topology (database,
+standalone backend, and frontend) without using a second durable-worker image.

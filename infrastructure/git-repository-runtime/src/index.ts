@@ -326,6 +326,12 @@ export interface GitCliRepositoryOptions {
   readonly remoteCacheDirectory?: string;
   /** Worker-owned temporary root for empty Git config and short-lived AskPass files. */
   readonly temporaryDirectory?: string;
+  /**
+   * Deployment-owned local worktree roots that Git may trust when a bind mount
+   * presents a different owner to the non-root CaseWeaver process. Browser
+   * supplied connector roots never populate this list.
+   */
+  readonly trustedLocalRoots?: readonly string[];
   readonly executable?: string;
   readonly runner?: GitProcessRunner;
   /** Only non-secret process settings needed to locate Git and validate TLS are retained. */
@@ -337,6 +343,7 @@ interface GitCommandSession {
   readonly directory: string;
   readonly environment: Readonly<NodeJS.ProcessEnv>;
   readonly hooksDirectory: string;
+  readonly trustedLocalRoots: Set<string>;
 }
 
 interface ResolvedRepository {
@@ -355,6 +362,7 @@ export class GitCliRepository implements GitRepository {
   private readonly remoteCacheDirectory?: string;
   private readonly environment: Readonly<NodeJS.ProcessEnv>;
   private readonly limits: GitRepositoryRuntimeLimits;
+  private readonly trustedLocalRoots: readonly string[];
 
   public constructor(options: GitCliRepositoryOptions = {}) {
     this.runner = options.runner ?? new NodeGitProcessRunner();
@@ -366,6 +374,9 @@ export class GitCliRepository implements GitRepository {
         : resolve(options.remoteCacheDirectory);
     this.environment = safeBaseEnvironment(options.environment ?? process.env);
     this.limits = parseLimits(options.limits);
+    this.trustedLocalRoots = normalizeTrustedLocalRoots(
+      options.trustedLocalRoots ?? [],
+    );
     if (
       this.executable.length === 0 ||
       containsControlCharacter(this.executable)
@@ -581,6 +592,7 @@ export class GitCliRepository implements GitRepository {
         directory,
         environment: Object.freeze(environment),
         hooksDirectory,
+        trustedLocalRoots: new Set<string>(),
       });
     } catch (error) {
       if (directory !== undefined) {
@@ -684,6 +696,17 @@ export class GitCliRepository implements GitRepository {
       throw new ConnectorConfigurationError(
         "Git repository runtime configuration is unavailable.",
       );
+    }
+    if (this.trustedLocalRoots.length > 0) {
+      const trustedRoots = await Promise.all(
+        this.trustedLocalRoots.map(canonicalExistingDirectory),
+      );
+      if (!trustedRoots.some((root) => isWithin(root, directory))) {
+        throw new ConnectorConfigurationError(
+          "Git repository runtime configuration is unavailable.",
+        );
+      }
+      for (const root of trustedRoots) session.trustedLocalRoots.add(root);
     }
     const inside = await this.runGit(
       directory,
@@ -1103,6 +1126,12 @@ export class GitCliRepository implements GitRepository {
       "protocol.file.allow=never",
       "-c",
       "protocol.ext.allow=never",
+      ...[...session.trustedLocalRoots].flatMap((root) => [
+        "-c",
+        `safe.directory=${root}`,
+        "-c",
+        `safe.directory=${root}/*`,
+      ]),
       "-C",
       directory,
       ...command,
@@ -1145,6 +1174,41 @@ function safeBaseEnvironment(
     }),
   );
   return Object.freeze(selected);
+}
+
+/** Parses an optional deployment-only JSON array of local worktree roots. */
+export function parseTrustedLocalRootsJson(
+  value: string | undefined,
+): readonly string[] {
+  if (value === undefined || value.trim().length === 0)
+    return Object.freeze([]);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new TypeError("Trusted Git local roots configuration is invalid.");
+  }
+  if (
+    !Array.isArray(parsed) ||
+    parsed.length > 100 ||
+    !parsed.every((item) => typeof item === "string")
+  ) {
+    throw new TypeError("Trusted Git local roots configuration is invalid.");
+  }
+  return normalizeTrustedLocalRoots(parsed);
+}
+
+function normalizeTrustedLocalRoots(
+  values: readonly string[],
+): readonly string[] {
+  const roots = new Set<string>();
+  for (const value of values) {
+    if (!isAbsolute(value) || containsControlCharacter(value)) {
+      throw new TypeError("Trusted Git local roots configuration is invalid.");
+    }
+    roots.add(resolve(value));
+  }
+  return Object.freeze([...roots]);
 }
 
 function qualifiedReference(reference: GitRepositoryReference): string {

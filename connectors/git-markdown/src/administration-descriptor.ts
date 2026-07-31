@@ -2,15 +2,43 @@ import type { ConfigurationDescriptor } from "@caseweaver/administration";
 
 import { gitMarkdownSettingsSchema } from "./config.js";
 
-/** Safe discovery metadata; `gitMarkdownSettingsSchema` remains authoritative. */
-export const gitMarkdownAdministrationDescriptor: ConfigurationDescriptor =
+/**
+ * Immutable descriptor identity shared by administration registration and
+ * trusted runtime composition.  A persisted configuration version is only
+ * executable when both sides recognise this exact descriptor revision.
+ */
+export const gitMarkdownDescriptorReference = Object.freeze({
+  kind: "connector",
+  type: "git-markdown",
+  version: "3",
+} as const);
+
+/**
+ * Runtime-recognized descriptor revisions. The console only authors the
+ * current revision, while a worker keeps these compatible revisions available
+ * to complete exact immutable pins that predate a descriptor-only update.
+ */
+export const gitMarkdownRuntimeDescriptorReferences = Object.freeze([
   Object.freeze({
     kind: "connector",
     type: "git-markdown",
+    version: "1",
+  } as const),
+  Object.freeze({
+    kind: "connector",
+    type: "git-markdown",
+    version: "2",
+  } as const),
+  gitMarkdownDescriptorReference,
+]);
+
+/** Safe discovery metadata; `gitMarkdownSettingsSchema` remains authoritative. */
+export const gitMarkdownAdministrationDescriptor: ConfigurationDescriptor =
+  Object.freeze({
+    ...gitMarkdownDescriptorReference,
     // Descriptor revisions are immutable in PostgreSQL. Versions 1 and 2 are
     // retained for historical configurations. Version 3 adds the explicit
     // attachment-source capability and exact-commit authoring guidance.
-    version: "3",
     displayName: "Git / Markdown",
     description:
       "Indexes Markdown and Docusaurus content from a pinned local or remote Git repository.",

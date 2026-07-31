@@ -24,6 +24,19 @@ export interface RuntimeDescriptorRegistration {
   secretReferenceIds(
     settings: Readonly<Record<string, unknown>>,
   ): readonly string[];
+  /**
+   * Provider-owned compatibility policy for a catalog model and immutable
+   * protocol mode. Shared Admin/API code does not name a provider or model.
+   */
+  supportsCatalogBinding?(
+    input: Readonly<{
+      readonly role: string;
+      readonly wireApi: string;
+      readonly catalogProvider: string;
+      readonly supportedRoles: readonly string[];
+      readonly capabilities: readonly string[];
+    }>,
+  ): boolean;
 }
 
 function reference(value: unknown): readonly string[] {
@@ -69,6 +82,25 @@ export const runtimeDescriptorRegistrations: readonly RuntimeDescriptorRegistrat
       validateSettings: validateOpenAiCompatibleAdministrationSettings,
       secretReferenceIds: (settings: Readonly<Record<string, unknown>>) =>
         reference(settings.secretReference),
+      supportsCatalogBinding: (
+        candidate: Parameters<
+          NonNullable<RuntimeDescriptorRegistration["supportsCatalogBinding"]>
+        >[0],
+      ) => {
+        if (!candidate.supportedRoles.includes(candidate.role)) return false;
+        // An OpenAI-compatible adapter interoperates at the protocol boundary;
+        // catalog provider labels describe catalog provenance, not this adapter.
+        // The selected protocol mode is still strict and endpoint validation is
+        // performed by the metered capability test before operational use.
+        if (candidate.role === "embedding") {
+          return candidate.wireApi === "embeddings";
+        }
+        if (candidate.role === "reranker") return false;
+        return (
+          candidate.wireApi === "chatCompletions" ||
+          candidate.wireApi === "responses"
+        );
+      },
     }),
     Object.freeze({
       descriptor: copilotSdkAgentAdministrationDescriptor,

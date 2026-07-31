@@ -153,7 +153,6 @@ const configurationSurfaces = Object.freeze([
     operationalActions: [] as const,
   },
   ...[
-    "ai-catalog-snapshots",
     "ai-models",
     "ai-bindings",
     "ai-role-defaults",
@@ -177,6 +176,12 @@ const configurationSurfaces = Object.freeze([
       operationalActions: [] as const,
     }),
   ),
+  {
+    surface: "ai-catalog-snapshots",
+    mode: "managed" as const,
+    workflows: ["inspect_history"] as const,
+    operationalActions: ["catalog.refresh"] as const,
+  },
   // The implementation has no editable platform configuration path. These
   // values are deployment bootstrap only and remain explicitly read-only.
   {
@@ -408,6 +413,52 @@ export class AdministrationApiOperations
         }>,
       ) => Promise<
         Readonly<{ readonly id: string; readonly revision: number }>
+      >;
+      aiBindingOptions?: (
+        input: Readonly<{
+          readonly workspaceId: string;
+          readonly providerInstanceId: string;
+          readonly role: string;
+          readonly search?: string;
+          readonly context: AdminRequestContext;
+        }>,
+      ) => Promise<
+        Readonly<{
+          readonly items: readonly Readonly<{
+            readonly catalogSnapshotId: string;
+            readonly canonicalModel: string;
+            readonly catalogProvider: string;
+          }>[];
+        }>
+      >;
+      refreshAiCatalog?: (
+        input: Readonly<{
+          readonly workspaceId: string;
+          readonly context: AdminRequestContext;
+        }>,
+      ) => Promise<
+        Readonly<{
+          readonly id: string;
+          readonly revision: string;
+          readonly importedAt: string;
+          readonly modelCount: number;
+        }>
+      >;
+      refreshAiProviderModels?: (
+        input: Readonly<{
+          readonly workspaceId: string;
+          readonly providerInstanceId: string;
+          readonly context: AdminRequestContext;
+        }>,
+      ) => Promise<
+        Readonly<{
+          readonly id: string;
+          readonly providerInstanceId: string;
+          readonly providerInstanceVersionId: string;
+          readonly discoveredAt: string;
+          readonly modelCount: number;
+          readonly pricedModelCount: number;
+        }>
       >;
       createAiBindingVersionDraft?: (
         input: Readonly<{
@@ -1126,6 +1177,26 @@ export class AdministrationApiOperations
       fields: Object.freeze({}),
     });
   }
+  /** A dedicated safe inspection view used before lifecycle changes. The
+   * locator remains inside the PostgreSQL adapter; this audited response lists
+   * only active immutable configuration identities that would be affected. */
+  public async secretReferenceDependencies(
+    secretReferenceId: string,
+    context: AdminRequestContext,
+  ) {
+    await this.authorizeAndAudit(
+      context,
+      "credential.manage",
+      "admin.secretReference.dependency.read",
+      secretReferenceId,
+    );
+    return Object.freeze({
+      items: await this.dependencies.reads.secretReferenceDependencies({
+        workspaceId: context.workspaceId,
+        secretReferenceId,
+      }),
+    });
+  }
   /**
    * A source draft is a resource-owned immutable configuration, not a generic
    * JSON document.  The feature projection validates the active connector
@@ -1571,6 +1642,150 @@ export class AdministrationApiOperations
       status: "draft",
       version: String(created.revision),
       fields: Object.freeze({}),
+    });
+  }
+  /** Compatible models are filtered server-side by the active provider's
+   * registered adapter policy; catalog source labels never become UI logic. */
+  public async aiBindingOptions(
+    input: Readonly<{
+      readonly providerInstanceId: string;
+      readonly role: string;
+      readonly search?: string;
+    }>,
+    context: AdminRequestContext,
+  ) {
+    await this.authorizeAndAudit(
+      context,
+      "configuration.read",
+      "admin.aiBinding.options.read",
+      input.providerInstanceId,
+    );
+    const options = this.dependencies.aiBindingOptions;
+    if (options === undefined) throw new AdministrationUnavailableError();
+    return options({ workspaceId: context.workspaceId, ...input, context });
+  }
+  /** Browser requests only a refresh. The trusted source and immutable import
+   * own raw bytes, idempotency, caching, and the authoritative success audit. */
+  public async refreshAiCatalog(context: AdminRequestContext) {
+    if (context.idempotencyKey === undefined) {
+      throw new AdministrationUnavailableError();
+    }
+    await this.requireMutationPermission(
+      context,
+      "configuration.manage",
+      "admin.aiCatalog.refresh.denied",
+      "trusted",
+    );
+    const refresh = this.dependencies.refreshAiCatalog;
+    if (refresh === undefined) throw new AdministrationUnavailableError();
+    let result: Awaited<ReturnType<typeof refresh>>;
+    try {
+      result = await refresh({ workspaceId: context.workspaceId, context });
+    } catch (error) {
+      // A trusted-source or durable-import failure is still an operator command
+      // outcome. The failure audit has no source URL, raw catalog, or error
+      // detail; successful imports retain their authoritative atomic audit in
+      // the catalog-import transaction.
+      await this.dependencies.unitOfWork.transaction(async (transaction) =>
+        this.dependencies.auditStore.append(transaction, {
+          id: auditEventId(randomUUID()),
+          workspaceId: workspaceId(context.workspaceId),
+          actorPrincipalId: principalId(context.principalId),
+          action: "admin.aiCatalog.refresh.failed",
+          targetId: "trusted",
+          targetType: "ai_catalog_snapshot",
+          permission: "configuration.manage",
+          outcome: "failed",
+          origin: "admin_ui",
+          occurredAt: utcInstant(new Date()),
+          requestId: context.requestId,
+          correlationId: context.correlationId,
+          ...(context.idempotencyKey === undefined
+            ? {}
+            : {
+                idempotencyKeyDigest: digestIdempotencyKey(
+                  context.idempotencyKey,
+                ),
+              }),
+          ...(context.uiActionId === undefined
+            ? {}
+            : { uiActionId: context.uiActionId }),
+        }),
+      );
+      throw error;
+    }
+    return Object.freeze({
+      id: result.id,
+      label: "Trusted model catalog",
+      status: "pinned",
+      version: result.revision,
+      updatedAt: result.importedAt,
+      summary: `${result.modelCount} models`,
+      fields: Object.freeze({}),
+    });
+  }
+  /**
+   * Refreshes one active provider's server-discovered model inventory. The
+   * dependency owns the external call and the success transaction; failures
+   * receive an equally redacted server-owned audit here.
+   */
+  public async refreshAiProviderModels(
+    providerInstanceId: string,
+    context: AdminRequestContext,
+  ) {
+    if (context.idempotencyKey === undefined) {
+      throw new AdministrationUnavailableError();
+    }
+    const idempotencyKey = context.idempotencyKey;
+    await this.requireMutationPermission(
+      context,
+      "configuration.manage",
+      "admin.aiProviderModelInventory.refresh.denied",
+      providerInstanceId,
+    );
+    const refresh = this.dependencies.refreshAiProviderModels;
+    if (refresh === undefined) throw new AdministrationUnavailableError();
+    let result: Awaited<ReturnType<typeof refresh>>;
+    try {
+      result = await refresh({
+        workspaceId: context.workspaceId,
+        providerInstanceId,
+        context,
+      });
+    } catch (error) {
+      await this.dependencies.unitOfWork.transaction(async (transaction) =>
+        this.dependencies.auditStore.append(transaction, {
+          id: auditEventId(randomUUID()),
+          workspaceId: workspaceId(context.workspaceId),
+          actorPrincipalId: principalId(context.principalId),
+          action: "admin.aiProviderModelInventory.refresh.failed",
+          targetId: providerInstanceId,
+          targetType: "ai_provider_model_inventory",
+          permission: "configuration.manage",
+          outcome: "failed",
+          origin: "admin_ui",
+          occurredAt: utcInstant(new Date()),
+          requestId: context.requestId,
+          correlationId: context.correlationId,
+          idempotencyKeyDigest: digestIdempotencyKey(idempotencyKey),
+          ...(context.uiActionId === undefined
+            ? {}
+            : { uiActionId: context.uiActionId }),
+        }),
+      );
+      throw error;
+    }
+    return Object.freeze({
+      id: result.id,
+      label: "Provider model inventory",
+      status: "pinned",
+      version: result.providerInstanceVersionId,
+      updatedAt: result.discoveredAt,
+      summary: `${result.modelCount} available models; ${result.pricedModelCount} with trusted pricing`,
+      fields: Object.freeze({
+        modelCount: result.modelCount,
+        pricedModelCount: result.pricedModelCount,
+      }),
     });
   }
   public async createAiBindingVersionDraft(

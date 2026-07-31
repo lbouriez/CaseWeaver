@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import {
+  type ConfigurationDescriptorReference,
   canonicalizeConfiguration,
   parseConfigurationDescriptor,
-  type ConfigurationDescriptorReference,
   sha256Base64Url,
   TransitionConfigurationVersion,
 } from "@caseweaver/administration";
@@ -59,6 +59,30 @@ function canonicalHash(value: string): ReturnType<typeof sha256Digest> {
 }
 
 /**
+ * A draft is safe to discard because no runtime projection exists yet. Once a
+ * configuration has been active, the ordinary disable flow preserves its
+ * reversible operational lifecycle instead. Discarded records are terminal
+ * but remain available to immutable history/audit queries.
+ */
+export function descriptorLifecycleTransition(
+  action: "configuration.activate" | "configuration.disable",
+  currentLifecycle: string,
+):
+  | Readonly<{
+      readonly lifecycle: "active" | "disabled" | "discarded";
+      readonly discardDraft: boolean;
+    }>
+  | undefined {
+  if (currentLifecycle === "discarded") return undefined;
+  if (action === "configuration.activate") {
+    return Object.freeze({ lifecycle: "active", discardDraft: false });
+  }
+  return currentLifecycle === "draft"
+    ? Object.freeze({ lifecycle: "discarded", discardDraft: true })
+    : Object.freeze({ lifecycle: "disabled", discardDraft: false });
+}
+
+/**
  * Composition adapter for a descriptor-backed configuration state change.
  * It reads the current immutable version inside the transaction and creates a
  * new version with the requested lifecycle. Existing jobs never observe a
@@ -87,8 +111,6 @@ export class PostgresDescriptorConfigurationLifecycle
   ): Promise<
     Readonly<{ readonly changed: boolean; readonly lifecycle: string }>
   > {
-    const lifecycle =
-      input.action === "configuration.activate" ? "active" : "disabled";
     return this.dependencies.unitOfWork.transaction(async (transaction) => {
       const database = this.dependencies.unitOfWork.get(transaction);
       const configuration =
@@ -114,6 +136,14 @@ export class PostgresDescriptorConfigurationLifecycle
       ) {
         throw new Error("resource.notFound");
       }
+      const lifecycleTransition = descriptorLifecycleTransition(
+        input.action,
+        configuration.lifecycle,
+      );
+      if (lifecycleTransition === undefined) {
+        throw new Error("resource.notFound");
+      }
+      const { lifecycle, discardDraft: discardingDraft } = lifecycleTransition;
       if (configuration.lifecycle === lifecycle) {
         return Object.freeze({ changed: false, lifecycle });
       }
@@ -132,7 +162,9 @@ export class PostgresDescriptorConfigurationLifecycle
       if (
         version === null ||
         !Array.isArray(version.secretReferences) ||
-        !version.secretReferences.every((value) => typeof value === "string")
+        !version.secretReferences.every(
+          (value: unknown) => typeof value === "string",
+        )
       ) {
         throw new Error("resource.notFound");
       }
@@ -175,7 +207,9 @@ export class PostgresDescriptorConfigurationLifecycle
               action:
                 input.action === "configuration.activate"
                   ? "admin.configuration.activated"
-                  : "admin.configuration.disabled",
+                  : discardingDraft
+                    ? "admin.configuration.draft.discarded"
+                    : "admin.configuration.disabled",
               targetId: input.configurationId,
               targetType: input.resourceType,
               permission: audit.permission,
@@ -228,6 +262,7 @@ export class PostgresDescriptorConfigurationLifecycle
         resourceType: input.resourceType,
         lifecycle,
         descriptor,
+        discardDraft: discardingDraft,
         settings: objectSettings(
           JSON.parse(transitioned.version.canonicalSettings) as unknown,
         ),
@@ -255,14 +290,17 @@ export class PostgresDescriptorConfigurationLifecycle
       readonly workspaceId: string;
       readonly configurationId: string;
       readonly resourceType: "connector-instances" | "ai-provider-instances";
-      readonly lifecycle: "active" | "disabled";
+      readonly lifecycle: "active" | "disabled" | "discarded";
       readonly descriptor: ConfigurationDescriptorReference | undefined;
+      /** An inert draft has no runtime projection to tear down. */
+      readonly discardDraft: boolean;
       readonly settings: Readonly<Record<string, unknown>>;
       readonly canonicalSettings: string;
       readonly versionId: string;
       readonly version: number;
     }>,
   ): Promise<void> {
+    if (input.discardDraft) return;
     if (input.descriptor === undefined) {
       throw new Error("Descriptor-backed configuration is invalid.");
     }
@@ -350,7 +388,15 @@ export class PostgresDescriptorConfigurationLifecycle
     }
     const endpoint = input.settings.endpoint;
     const secretReference = input.settings.secretReference;
-    const wireApi = descriptor.supportedWireApis[0];
+    const configuredWireApi = input.settings.wireApi;
+    // Descriptor v1/v2 versions are immutable historical documents. Preserve
+    // their legacy first-supported-mode behavior while v3+ descriptors require
+    // an explicit, adapter-validated mode in the new draft settings.
+    const wireApi =
+      typeof configuredWireApi === "string" &&
+      descriptor.supportedWireApis.includes(configuredWireApi)
+        ? configuredWireApi
+        : descriptor.supportedWireApis[0];
     if (
       typeof endpoint !== "string" ||
       typeof secretReference !== "string" ||

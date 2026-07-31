@@ -19,6 +19,45 @@ function operations(overrides: Record<string, unknown> = {}) {
 }
 
 describe("AdministrationApiOperations audit boundary", () => {
+  it("audits a redacted provider inventory refresh failure without retaining provider details", async () => {
+    const append = vi.fn(async () => undefined);
+    const api = operations({
+      unitOfWork: {
+        transaction: async (work: (transaction: unknown) => Promise<unknown>) =>
+          work({}),
+      },
+      auditStore: { append },
+      refreshAiProviderModels: vi.fn(async () => {
+        throw new Error("provider endpoint and credential detail");
+      }),
+    });
+    const context = {
+      principalId: "principal-1",
+      workspaceId: "workspace-1",
+      sessionId: "session-1",
+      permissions: ["configuration.manage"],
+      requestId: "request-1",
+      correlationId: "correlation-1",
+      requestMode: "user",
+      idempotencyKey: "browser-only-key",
+    } as never;
+
+    await expect(
+      api.refreshAiProviderModels("provider-1", context),
+    ).rejects.toThrow("provider endpoint and credential detail");
+    expect(append).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({
+        action: "admin.aiProviderModelInventory.refresh.failed",
+        targetId: "provider-1",
+        outcome: "failed",
+      }),
+    );
+    expect(JSON.stringify(append.mock.calls)).not.toMatch(
+      /endpoint|credential|browser-only-key/iu,
+    );
+  });
+
   it("returns only the newest immutable descriptor revision for each authoring type", async () => {
     const api = operations({
       descriptors: {
@@ -317,6 +356,46 @@ describe("AdministrationApiOperations audit boundary", () => {
         },
       ),
     ).rejects.toMatchObject({ name: "AdministrationUnavailableError" });
+  });
+
+  it("audits a trusted catalog refresh failure without retaining source data", async () => {
+    const append = vi.fn(async () => undefined);
+    const transaction = {};
+    const api = operations({
+      unitOfWork: {
+        transaction: async (operation: (value: unknown) => unknown) =>
+          operation(transaction),
+      },
+      auditStore: { append },
+      refreshAiCatalog: vi.fn(async () => {
+        throw new Error("upstream catalog body must not be audited");
+      }),
+    });
+    const context = {
+      principalId: "principal-1",
+      workspaceId: "workspace-1",
+      sessionId: "session-1",
+      permissions: ["configuration.manage"],
+      requestId: "request-1",
+      correlationId: "correlation-1",
+      idempotencyKey: "catalog-refresh-idempotency-key",
+      requestMode: "user" as const,
+    };
+
+    await expect(api.refreshAiCatalog(context)).rejects.toThrow("upstream");
+
+    const record = append.mock.calls[0]?.[1];
+    expect(record).toMatchObject({
+      action: "admin.aiCatalog.refresh.failed",
+      targetType: "ai_catalog_snapshot",
+      targetId: "trusted",
+      permission: "configuration.manage",
+      outcome: "failed",
+    });
+    expect(JSON.stringify(record)).not.toContain("upstream catalog body");
+    expect(JSON.stringify(record)).not.toContain(
+      "catalog-refresh-idempotency-key",
+    );
   });
 
   it("records malformed password login without retaining supplied credentials", async () => {

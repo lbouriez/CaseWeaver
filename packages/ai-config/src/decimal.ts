@@ -55,15 +55,30 @@ function format(coefficient: bigint, scale: number): DecimalString {
   return `${negative ? "-" : ""}${normalized}` as DecimalString;
 }
 
-export function decimal(value: string | number): DecimalString {
+/**
+ * Converts an exact decimal only when it fits the PostgreSQL numeric contract.
+ * `undefined` is intentionally distinct from zero: a catalog price that cannot
+ * be represented precisely remains unknown rather than being rounded down.
+ */
+export function storableDecimal(
+  value: string | number,
+): DecimalString | undefined {
   const parsed = parse(value);
   const rendered = format(parsed.coefficient, parsed.scale);
   const [, fraction = ""] = rendered.replace(/^-/, "").split(".");
   const digits = rendered.replace(/[-.]/g, "").replace(/^0+/, "");
   if (fraction.length > 18 || digits.length > 38) {
-    throw new AiPriceError("Price cannot be stored as numeric(38,18).");
+    return undefined;
   }
   return rendered;
+}
+
+export function decimal(value: string | number): DecimalString {
+  const stored = storableDecimal(value);
+  if (stored === undefined) {
+    throw new AiPriceError("Price cannot be stored as numeric(38,18).");
+  }
+  return stored;
 }
 
 export function decimalIsNegative(value: DecimalString): boolean {

@@ -1,34 +1,33 @@
 import { createHash, randomUUID } from "node:crypto";
-
+import {
+  type AdministrationActionPreview,
+  type AdministrationActionPreviewStore,
+  AdministrationDeniedError,
+  type AdministrationOperationCommand,
+  type AdministrationOperationPreflightPort,
+  type AdministrationOperationRequestContext,
+  AdministrationUnavailableError,
+  digestOperationCommand,
+  requiredOperationPermission,
+  type StoredAdministrationActionPreview,
+  validateOperationCommand,
+} from "@caseweaver/administration";
 import type {
   CancelOperationalJob,
-  QueueExpiredRetention,
   PurgeCaseSnapshot,
+  QueueExpiredRetention,
   RecoverExpiredJob,
   RequestKnowledgeSourceSynchronization,
   RetryDeadLetter,
 } from "@caseweaver/application";
 import {
-  type AdministrationActionPreview,
-  type AdministrationActionPreviewStore,
-  type AdministrationOperationCommand,
-  type AdministrationOperationPreflightPort,
-  type AdministrationOperationRequestContext,
-  AdministrationDeniedError,
-  AdministrationUnavailableError,
-  type StoredAdministrationActionPreview,
-  digestOperationCommand,
-  requiredOperationPermission,
-  validateOperationCommand,
-} from "@caseweaver/administration";
-import {
   analysisJobId,
   correlationId,
   principalId,
+  publicationIntentId,
   requestId,
   sha256Digest,
   workspaceId,
-  publicationIntentId,
 } from "@caseweaver/domain";
 
 import type { AdminRequestContext, AdminResource } from "./routes.js";
@@ -49,6 +48,7 @@ type RoutedAction =
   | "privacy.purge"
   | "diagnostics.export"
   | "secret.rotate"
+  | "secret.reconcile"
   | "secret.revoke"
   | "publication.approve";
 
@@ -88,7 +88,11 @@ export interface DescriptorConfigurationLifecycle {
       readonly idempotencyKeyDigest: ReturnType<typeof sha256Digest>;
     }>,
   ): Promise<
-    Readonly<{ readonly changed: boolean; readonly lifecycle: string }>
+    Readonly<{
+      readonly changed: boolean;
+      readonly lifecycle: string;
+      readonly blocked?: boolean;
+    }>
   >;
 }
 
@@ -97,13 +101,17 @@ export interface DescriptorConfigurationLifecycle {
 export interface SecretReferenceLifecycle {
   execute(
     input: Readonly<{
-      readonly action: "secret.rotate" | "secret.revoke";
+      readonly action: "secret.rotate" | "secret.reconcile" | "secret.revoke";
       readonly secretReferenceId: string;
       readonly context: SessionBoundAdminRequestContext;
       readonly idempotencyKeyDigest: ReturnType<typeof sha256Digest>;
     }>,
   ): Promise<
-    Readonly<{ readonly changed: boolean; readonly lifecycle: string }>
+    Readonly<{
+      readonly changed: boolean;
+      readonly lifecycle: string;
+      readonly blocked?: boolean;
+    }>
   >;
 }
 
@@ -175,6 +183,7 @@ export function mapRoutedOperation(
           })
         : Object.freeze({ kind: "unavailable" });
     case "secret.rotate":
+    case "secret.reconcile":
     case "secret.revoke": {
       const id = requiresId("secret-references");
       return id === undefined
@@ -517,6 +526,7 @@ export class AdministrationOperationDispatcher {
         });
       }
       case "secret.rotate":
+      case "secret.reconcile":
       case "secret.revoke": {
         const lifecycle = this.dependencies.secretReferences;
         if (lifecycle === undefined) throw new AdministrationUnavailableError();
@@ -529,9 +539,13 @@ export class AdministrationOperationDispatcher {
         return Object.freeze({
           operationId: requiredId(valid),
           outcome: "completed" as const,
-          message: result.changed
-            ? `Secret reference lifecycle is now ${result.lifecycle}.`
-            : `Secret reference was already ${result.lifecycle}.`,
+          message: result.blocked
+            ? "Secret reference revocation is blocked by active configuration dependencies."
+            : valid.action === "secret.reconcile" && result.changed
+              ? "Secret reference metadata is active after external rotation reconciliation."
+              : result.changed
+                ? `Secret reference lifecycle is now ${result.lifecycle}.`
+                : `Secret reference was already ${result.lifecycle}.`,
         });
       }
       case "publication.approve": {
@@ -600,6 +614,7 @@ function isRoutable(
   | "knowledgeSource.fullRescan"
   | "privacy.purge"
   | "secret.rotate"
+  | "secret.reconcile"
   | "secret.revoke"
   | "publication.approve"
   | "configuration.activate"
@@ -614,7 +629,9 @@ function isRoutable(
       requestKnowledgeSourceSynchronization !== undefined) ||
     (action === "privacy.purge" && purgeCaseSnapshot !== undefined) ||
     action === "publication.approve" ||
-    ((action === "secret.rotate" || action === "secret.revoke") &&
+    ((action === "secret.rotate" ||
+      action === "secret.reconcile" ||
+      action === "secret.revoke") &&
       secretReferences !== undefined) ||
     ((action === "configuration.activate" ||
       action === "configuration.disable") &&

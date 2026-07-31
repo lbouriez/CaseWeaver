@@ -70,12 +70,16 @@ exact commit rather than a mutable branch or tag. Chunking and embedding remain 
 
 ## Production runtime contribution
 
-`createGitMarkdownRuntimeContribution` is the connector-owned contribution for trusted
-worker composition. It accepts one exact, immutable server-private descriptor-backed
-configuration plus the runtime registry's server-side secret resolver. Before it creates
-the source or repository port it checks the descriptor revision, connector instance,
-connector-owned settings, and the optional opaque token locator. It does not resolve a
-secret while it is constructed.
+`createGitMarkdownRuntimeContribution` is the connector-owned current-revision
+contribution for trusted composition. Production hosts use
+`createGitMarkdownRuntimeContributions`, which additionally registers compatible
+historical descriptor revisions so exact durable pins queued before a descriptor-only
+revision can complete. The console still authors only the current revision. Each
+contribution accepts one exact, immutable server-private descriptor-backed configuration
+plus the runtime registry's server-side secret resolver. Before it creates the source or
+repository port it checks the descriptor revision, connector instance, connector-owned
+settings, and the optional opaque token locator. It does not resolve a secret while it is
+constructed.
 
 When trusted composition also supplies a locator codec, the contribution declares the
 connector's repository-file `attachmentSource`; deployment composition may wrap that

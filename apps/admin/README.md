@@ -91,6 +91,10 @@ responses or an explicit unavailable/denied state; it never substitutes sample r
   Every provider, catalog, model, role, and operation is discovered from bounded API
   read models; the browser never supplies an endpoint, wire API, secret, or price/budget
   decision for a test.
+- After a provider is activated, `POST /v1/admin/ai/provider-instances/:id/models/refresh`
+  obtains its model inventory server-side. The console displays only that safe,
+  workspace-scoped projection in binding selectors; it does not call a provider or
+  receive an endpoint, credential, raw response, or account model metadata.
 - External-secret metadata registration: `POST /v1/admin/secret-references`.
   The console submits an opaque secret-backend locator once, receives only its
   generated registration ID, and uses that ID in generic descriptor selectors.
@@ -128,6 +132,41 @@ audit writes, and outcome reconciliation.
   asks the operator for that deployment's documented immutable compatibility
   profile and vector dimensions; the console intentionally does not assume a
   provider, model, or dimension.
+- **Access & security** is the canonical home for external secret-reference
+  registration and lifecycle. The registry shows only a generated ID, lifecycle,
+  timestamps, and active-configuration dependency count. **Mark rotation required**
+  does not change a secret; after rotating it in the external backend the operator uses
+  **Confirm rotation**. **Revoke** is previewed and blocked when active configuration
+  still depends on the reference. Descriptor forms only select a redacted registration
+  and link to this registry.
+- The AI configuration screen treats provider inventory and pricing as separate facts.
+  After activation, **Refresh models available from provider** performs the server-owned
+  inventory lookup. Binding selectors then filter only that immutable inventory; a
+  manual model identity is never accepted. **Refresh trusted model catalog** is optional
+  pricing/capability enrichment and never makes a model available. Exact canonical-name
+  price matches are copied into the provider inventory; unknown pricing remains unknown.
+  An explicit pricing override likewise selects from that provider inventory rather than
+  from a paginated global catalog, so it can price an otherwise unknown provider model
+  without making any unrelated catalog model executable. The form requires all usage
+  components for the selected CaseWeaver role: input tokens for embeddings/reranking,
+  input plus output tokens for generated responses, and image units for vision. This
+  prevents an apparently configured hard-budget test from failing later due to a missing
+  price component.
+  The budget editor exposes only the current active version as a replacement candidate;
+  superseded versions remain visible in the general resource history but cannot
+  accidentally be used as an optimistic-concurrency base.
+  The OpenAI-compatible form requires an explicit embeddings/chat/responses mode, and
+  its metered capability test uses the matching probe after an active compatible binding,
+  known price, and hard budget are configured.
+- Saving an AI provider creates an inert, server-validated configuration. The same
+  panel immediately offers a separate server-reviewed **Review and activate provider**
+  action; only then does its safe identity appear in binding selectors. This makes the
+  lifecycle explicit without allowing the browser to call a provider or infer
+  readiness from a draft.
+- An inactive connector/provider draft can be removed from normal operator lists through
+  the guarded **Remove draft** action. This is a terminal discard, not physical deletion:
+  its immutable version and append-only audit history remain preserved, it is excluded
+  from selectors and normal lists, and it cannot be reactivated.
 - Small circular information controls expose descriptor-owned help and safe
   examples without hiding input meaning. The same reusable control explains
   non-routine authoring decisions—policy JSON, AI token/cost/budget limits,

@@ -8,6 +8,7 @@ import {
   EnvironmentAiSecretResolver,
   RegisteredAiModelTokenizerResolver,
   RegisteredAiProviderDispatcher,
+  RegisteredAiProviderModelDiscovery,
 } from "./index.js";
 
 const binding = {
@@ -90,6 +91,44 @@ describe("EnvironmentAiSecretResolver", () => {
       message: "The configured AI credential is unavailable.",
     });
     expect(JSON.stringify(failure)).not.toContain("MISSING_KEY");
+  });
+});
+
+describe("RegisteredAiProviderModelDiscovery", () => {
+  it("resolves an opaque secret only in trusted composition and routes to the registered adapter", async () => {
+    const discoverModels = vi.fn(async () => [
+      {
+        canonicalModel: "provider/model",
+        supportedRoles: ["analysis"] as const,
+        capabilities: [] as const,
+      },
+    ]);
+    const discovery = new RegisteredAiProviderModelDiscovery(
+      [{ providerType: "test-provider", discoverer: { discoverModels } }],
+      new EnvironmentAiSecretResolver({ PROVIDER_KEY: "secret" }),
+    );
+
+    await expect(
+      discovery.discover({
+        providerType: "test-provider",
+        endpoint: "https://provider.example/v1",
+        wireApi: "chatCompletions",
+        secretReference: "env:PROVIDER_KEY",
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toEqual([
+      {
+        canonicalModel: "provider/model",
+        supportedRoles: ["analysis"],
+        capabilities: [],
+      },
+    ]);
+    expect(discoverModels).toHaveBeenCalledWith(
+      expect.objectContaining({ endpoint: "https://provider.example/v1" }),
+    );
+    expect(JSON.stringify(discoverModels.mock.calls)).not.toContain(
+      "env:PROVIDER_KEY",
+    );
   });
 });
 

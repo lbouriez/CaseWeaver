@@ -7,6 +7,7 @@ import { SourceScheduleDrafts } from "./source-schedule-drafts.js";
 
 describe("source and schedule drafts", () => {
   it("discovers scoped records and submits resource-specific immutable drafts", async () => {
+    const onCompleted = vi.fn();
     const client = {
       list: vi.fn(async (resource: string) => ({
         items:
@@ -83,7 +84,11 @@ describe("source and schedule drafts", () => {
     };
     render(
       <ApiClientProvider client={client as never}>
-        <SourceScheduleDrafts scheduleEnabled sourceEnabled />
+        <SourceScheduleDrafts
+          onCompleted={onCompleted}
+          scheduleEnabled
+          sourceEnabled
+        />
       </ApiClientProvider>,
     );
 
@@ -134,6 +139,7 @@ describe("source and schedule drafts", () => {
         }),
       ),
     );
+    await waitFor(() => expect(onCompleted).toHaveBeenCalledTimes(1));
     expect(
       JSON.stringify(client.createKnowledgeSourceDraft.mock.calls),
     ).not.toMatch(/secret|token|password/iu);

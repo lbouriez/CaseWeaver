@@ -7,7 +7,10 @@ import {
   testJitbitAdministrationSettings,
 } from "@caseweaver/connector-jitbit";
 import { EnvironmentConnectorSecretResolver } from "@caseweaver/connector-runtime";
-import { GitCliRepository } from "@caseweaver/git-repository-runtime";
+import {
+  GitCliRepository,
+  parseTrustedLocalRootsJson,
+} from "@caseweaver/git-repository-runtime";
 
 /** Safe composition registry. Connector-specific code stays in its adapter;
  * administration routes select an entry by the descriptor identity only. */
@@ -25,7 +28,13 @@ export function createConnectorDraftTestRegistrations(
   environment: NodeJS.ProcessEnv,
 ): readonly ConnectorDraftTestRegistration[] {
   const secrets = new EnvironmentConnectorSecretResolver(environment);
-  const gitRepository = new GitCliRepository({ environment });
+  const trustedLocalRoots = parseTrustedLocalRootsJson(
+    environment.CASEWEAVER_GIT_TRUSTED_LOCAL_ROOTS_JSON,
+  );
+  const gitRepository = new GitCliRepository({
+    environment,
+    ...(trustedLocalRoots.length === 0 ? {} : { trustedLocalRoots }),
+  });
   return Object.freeze([
     Object.freeze({
       descriptorType: "git-markdown",

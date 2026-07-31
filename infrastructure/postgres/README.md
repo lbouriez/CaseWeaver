@@ -1,6 +1,6 @@
 # PostgreSQL infrastructure
 
-**PBIs:** 002, 003, 004, 009, 013, 016, 020
+**PBIs:** 002, 003, 004, 009, 013, 016, 020, 021
 
 Migrations, typed repositories, transactions, outbox, pgvector/full-text queries,
 workspace filtering, leases, audit records, AI operation ledger, and budget reservations.
@@ -194,6 +194,39 @@ for callback validation. No credential or browser token column exists.
 The migration also expands audit-event metadata and prevents audit/configuration-version
 updates or deletes at the database boundary.
 
+`20260718120000_pbi_021_discarded_draft_lifecycle` adds the terminal `discarded`
+lifecycle to those configuration aggregates. It is used only for an inert
+descriptor-backed draft removed through the guarded Admin action. The configuration,
+its immutable versions, configuration-change records, and audit evidence are retained;
+normal connector/provider read models exclude discarded aggregates and no runtime
+projection is created.
+
+## PBI-021 catalog identifier repair
+
+`20260717150000_pbi_021_safe_catalog_model_ids` rewrites only the durable
+internal identity of existing immutable LiteLLM catalog models to the safe
+SHA-256 identity now emitted by `@caseweaver/ai-config`. It updates the two
+foreign-key references in price components and immutable binding versions in
+the same forward migration, then restores the original restrictive foreign
+keys and append-only triggers. Canonical model names, snapshot content,
+prices, settings, secret references, operation history, and audit data remain
+unchanged. The migration requires the existing `pgcrypto` extension supplied
+by the prior administration migration.
+
+## PBI-021 provider-owned model inventory
+
+`20260717160000_pbi_021_provider_model_inventory` adds the workspace-scoped,
+immutable link between an active provider version and the safe catalog projection of
+models that provider actually reported. Refresh persistence writes the projection,
+exact trusted-price copies where available, mapping row, idempotency result, success
+audit, and cache-invalidation outbox record in one transaction. It never stores a raw
+provider `/models` response, endpoint, credential, or account metadata.
+
+Binding persistence and its authoring read model require this mapping for the exact
+active provider-version/catalog snapshot. A global LiteLLM snapshot may supply trusted
+pricing metadata but can never make a model selectable or bypass provider availability;
+unmatched pricing remains unknown.
+
 PBI-016 descriptor revisions are immutable safe catalog snapshots registered by trusted
 backend composition. Descriptor-backed configuration drafts create an immutable version
 immediately and atomically append a configuration-change outbox record. The relay claims
@@ -244,6 +277,29 @@ binding-version pin resolves that retained version after rotation rather than
 substituting the current version. It collects
 catalog, installation, workspace, and binding price components without reading
 or logging a secret value.
+
+## PBI-021 catalog refresh and shared secret-reference protection
+
+The existing immutable `ai_catalog_snapshots`/model/price records are also the durable
+target of trusted catalog refresh. A SHA-addressed snapshot already present for the
+same bytes records the new idempotency/audit result without duplicating models, prices,
+or a cache-invalidation notice. A new snapshot, its models/prices, idempotency result,
+cache change, and authoritative audit commit atomically; catalog acquisition is outside
+that transaction and belongs to `infrastructure/ai-catalog`.
+
+Binding draft loading no longer equates a catalog provider label with a runtime provider
+type. It returns safe candidate metadata to API composition, which asks the registered
+provider adapter whether the current immutable wire API and CaseWeaver role are
+compatible before it persists a binding. The same safe candidate metadata carries the
+inventory provider identity for explicit pricing overrides, so an unmatched provider
+model stays selectable without borrowing availability from an unrelated catalog row.
+
+Secret-reference read models calculate only active/current configuration dependency
+counts. Locator values are selected solely inside server-private transaction checks.
+Revocation repeats the dependency check in the lifecycle transaction and appends a
+denied audit instead of breaking active configuration. Rotation reconciliation can move
+only `rotation_required` metadata back to `active`; it cannot read, verify, or mutate an
+external secret.
 
 Publication-profile administration bridges the generic immutable administration
 configuration aggregate to the existing PBI-012 `publication_profiles` and

@@ -13,19 +13,27 @@ import { useEffect, useState } from "react";
 
 import { useApiClient } from "../api/context.js";
 import type {
+  AdminDetail,
   AdminListItem,
   ConfigurationDescriptor,
   ConnectorDraftTestOperation,
 } from "../api/contracts.js";
+import { ActionConfirmationDialog } from "../components/action-confirmation-dialog.js";
 import { ApiFailure } from "../components/api-failure.js";
 import { DescriptorForm } from "../components/descriptor-form.js";
 
 export function DescriptorCatalog({
   kind,
   title,
+  onCreated,
+  onActivated,
 }: {
   readonly kind: ConfigurationDescriptor["kind"];
   readonly title: string;
+  /** Lets a nearby resource-specific authoring panel refresh its safe read models. */
+  readonly onCreated?: () => void;
+  /** Used only by the AI flow after the separate, server-reviewed activation. */
+  readonly onActivated?: () => void;
 }) {
   const client = useApiClient();
   const [descriptors, setDescriptors] =
@@ -36,6 +44,7 @@ export function DescriptorCatalog({
   const [displayName, setDisplayName] = useState("");
   const [error, setError] = useState<unknown>();
   const [saved, setSaved] = useState<string>();
+  const [createdDraft, setCreatedDraft] = useState<AdminDetail>();
   const [testOperations, setTestOperations] =
     useState<readonly ConnectorDraftTestOperation[]>();
   const [testUnavailable, setTestUnavailable] = useState(false);
@@ -101,6 +110,7 @@ export function DescriptorCatalog({
     setSelectedType(type);
     setDisplayName(next?.displayName ?? "");
     setSaved(undefined);
+    setCreatedDraft(undefined);
   };
 
   return (
@@ -114,8 +124,9 @@ export function DescriptorCatalog({
           <Typography variant="overline">Descriptor registry</Typography>
           <Typography variant="h5">{title}</Typography>
           <Typography color="text.secondary" variant="body2">
-            Registered types are read from the control plane. This form never
-            requests a plaintext credential.
+            {kind === "ai-provider"
+              ? "Choose a registered provider type, save its inactive configuration, then review and activate it before it can be used for a model binding. This form never requests a plaintext credential."
+              : "Registered types are read from the control plane. This form never requests a plaintext credential."}
           </Typography>
         </Box>
         <Divider />
@@ -159,6 +170,36 @@ export function DescriptorCatalog({
             {saved === undefined ? null : (
               <Alert severity="success">{saved}</Alert>
             )}
+            {kind !== "ai-provider" || createdDraft === undefined ? null : (
+              <Stack
+                direction={{ xs: "column", sm: "row" }}
+                spacing={1}
+                sx={{ alignItems: { sm: "center" } }}
+              >
+                <Typography color="text.secondary" variant="body2">
+                  Activation is a separate audited operation. It makes this
+                  provider eligible for model bindings; it does not call the
+                  provider or reveal its credential.
+                </Typography>
+                <ActionConfirmationDialog
+                  action="provider.activate"
+                  client={client}
+                  label="Review and activate provider"
+                  onCompleted={(outcome) => {
+                    if (outcome.outcome === "outcome_unknown") return;
+                    setCreatedDraft(undefined);
+                    setSaved(
+                      `Provider ${createdDraft.label} is active. Continue with the trusted model catalog and create a binding below.`,
+                    );
+                    onActivated?.();
+                  }}
+                  target={{
+                    resource: "ai-provider-instances",
+                    id: createdDraft.id,
+                  }}
+                />
+              </Stack>
+            )}
             {testUnavailable ? (
               <Alert severity="info">
                 Connector configuration tests are unavailable until the server
@@ -178,7 +219,17 @@ export function DescriptorCatalog({
                   displayName: displayName.trim(),
                   settings,
                 });
-                setSaved(`Draft ${draft.label} is awaiting server validation.`);
+                if (kind === "ai-provider") {
+                  setCreatedDraft(draft);
+                  setSaved(
+                    `Provider ${draft.label} was saved inactive. Review and activate it before selecting models.`,
+                  );
+                } else {
+                  setSaved(
+                    `Connector ${draft.label} was saved inactive. Activate it from Connector instances when you are ready to use it.`,
+                  );
+                }
+                onCreated?.();
               }}
               {...(kind === "connector" && testOperations !== undefined
                 ? {
@@ -205,7 +256,11 @@ export function DescriptorCatalog({
                       ),
                   }
                 : {})}
-              submitLabel="Create server-validated draft"
+              submitLabel={
+                kind === "ai-provider"
+                  ? "Save inactive provider"
+                  : "Save inactive connector"
+              }
             />
           </>
         )}

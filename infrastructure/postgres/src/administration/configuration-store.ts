@@ -54,6 +54,7 @@ function asConfiguration(row: ConfigurationRow): VersionedConfiguration {
     row.lifecycle !== "draft" &&
     row.lifecycle !== "active" &&
     row.lifecycle !== "disabled" &&
+    row.lifecycle !== "discarded" &&
     row.lifecycle !== "superseded"
   ) {
     throw new Error(
@@ -327,7 +328,7 @@ export class PostgresConfigurationLifecycleStore
       readonly secretReferenceIds: readonly string[];
       readonly descriptor?: ConfigurationDescriptorReference;
       readonly displayName?: string;
-      readonly lifecycle?: "active" | "disabled";
+      readonly lifecycle?: "active" | "disabled" | "discarded";
     }>,
   ): Promise<
     | Readonly<{

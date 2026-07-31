@@ -1,7 +1,15 @@
+import type { ConfigurationDescriptorReference } from "./descriptor.js";
+
 export type ConfigurationLifecycle =
   | "draft"
   | "active"
   | "disabled"
+  /**
+   * A deliberately abandoned inert draft. It is excluded from normal
+   * operator lists and can never be reactivated, but its immutable versions
+   * and audit trail remain available for governance and investigation.
+   */
+  | "discarded"
   | "superseded";
 
 export interface VersionedConfiguration {
@@ -103,4 +111,3 @@ function canonicalize(value: unknown): unknown {
   }
   throw new TypeError("Configuration must be JSON-compatible.");
 }
-import type { ConfigurationDescriptorReference } from "./descriptor.js";

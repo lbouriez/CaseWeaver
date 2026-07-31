@@ -68,6 +68,11 @@ workspace-neutral descriptor revisions; descriptor-backed configuration versions
 only their descriptor identity, canonical settings, display metadata, and secret
 reference identities.
 
+An inert descriptor-backed draft may be terminally discarded through an explicit
+server-owned lifecycle action. Discard never physically deletes the configuration,
+version history, idempotency evidence, or audit records; it only makes the aggregate
+unavailable to normal authoring/read-model selection and forbids reactivation.
+
 Knowledge-source and schedule authoring compose this same lifecycle through
 `ManageKnowledgeSourceConfiguration` and `ManageKnowledgeScheduleConfiguration`.
 Their inputs carry a feature-validated, source-neutral projection plus opaque settings;
@@ -87,6 +92,22 @@ Bindings are validated through `@caseweaver/ai-config` against their immutable c
 model, and pricing overrides are rejected whenever the shared resolver finds an
 incomplete condition or currency. These contracts keep endpoint and opaque secret
 reference values write-only: summaries and audits contain no resolved secret material.
+
+`RefreshTrustedAiCatalog` is the only catalog-refresh use case exposed to the
+administration API. Its `TrustedAiCatalogSource` port is deployment-owned: an operator
+can request a refresh, but the browser cannot provide a remote URL, revision, raw
+catalog content, model names, or source credentials. Adapters fetch and verify a pinned
+artifact outside the transaction; the existing catalog-import use case then records the
+immutable snapshot, idempotency result, cache invalidation, and server-owned audit event.
+
+`RefreshProviderModelInventory` is separate from LiteLLM refresh. Trusted API
+composition performs a provider-owned metadata request outside the database transaction,
+normalizes the result, then this use case persists a workspace-scoped immutable provider
+inventory with an atomic audit/idempotency result. Bindings can use only model identities
+from that inventory. Exact LiteLLM matches enrich pricing; unmatched inventory models
+remain available with unknown pricing and cannot silently pass a hard monetary budget.
+The safe inventory option retains the provider identity for an explicit override on that
+same model; it is not a global catalog availability grant.
 
 Publication-profile authoring composes the generic lifecycle through
 `ManagePublicationProfileConfiguration`. The browser supplies PBI-012 definition

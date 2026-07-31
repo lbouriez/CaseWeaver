@@ -72,6 +72,7 @@ export const administrationActions = [
   "privacy.purge",
   "diagnostics.export",
   "secret.rotate",
+  "secret.reconcile",
   "secret.revoke",
   "publication.approve",
 ] as const;

@@ -1,0 +1,178 @@
+# This overlay is intentionally composed with compose.local.yml by the E2E
+# runner. It adds only deterministic, private fixtures; none of these services
+# are part of the local operator topology or a deployable CaseWeaver runtime.
+
+services:
+  e2e-certificates:
+    image: caseweaver-e2e-fixtures:local
+    build:
+      context: ../../tests/e2e/fixtures
+      dockerfile: Dockerfile
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        if [ -s /certificates/ca.pem ] \
+          && [ -s /certificates/server-key.pem ] \
+          && [ -s /certificates/server.pem ]; then
+          # A running fixture and backend may already trust this CA. Preserve
+          # it during `compose up` reconciliation rather than silently
+          # replacing the trust root underneath them.
+          exit 0
+        fi
+        umask 077
+        # A partial previous initialization can survive an interrupted local
+        # run. Remove only the fixture's own files before issuing a fresh
+        # short-lived CA.
+        rm -f \
+          /certificates/ca-key.pem \
+          /certificates/ca.pem \
+          /certificates/ca.srl \
+          /certificates/server-key.pem \
+          /certificates/server.csr \
+          /certificates/server.ext \
+          /certificates/server.pem
+        openssl req -x509 -newkey rsa:2048 -nodes \
+          -keyout /certificates/ca-key.pem \
+          -out /certificates/ca.pem \
+          -days 1 \
+          -subj '/CN=caseweaver-e2e-ca' \
+          -addext 'basicConstraints=critical,CA:TRUE' \
+          -addext 'keyUsage=critical,keyCertSign,cRLSign'
+        openssl req -new -newkey rsa:2048 -nodes \
+          -keyout /certificates/server-key.pem \
+          -out /certificates/server.csr \
+          -subj '/CN=e2e-openai-provider'
+        printf '%s\n' \
+          'subjectAltName=DNS:e2e-openai-provider' \
+          'extendedKeyUsage=serverAuth' \
+          'keyUsage=critical,digitalSignature,keyEncipherment' \
+          > /certificates/server.ext
+        openssl x509 -req \
+          -in /certificates/server.csr \
+          -CA /certificates/ca.pem \
+          -CAkey /certificates/ca-key.pem \
+          -CAcreateserial \
+          -out /certificates/server.pem \
+          -days 1 \
+          -sha256 \
+          -extfile /certificates/server.ext
+        chown node:node /certificates/ca.pem /certificates/server-key.pem /certificates/server.pem
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp:mode=0700
+    volumes:
+      - caseweaver_e2e_provider_certificates:/certificates
+    # The isolated initializer owns a fresh Docker volume and needs this one
+    # capability to hand the server key to the unprivileged fixture process.
+    # It has no network, application credential, database, or host mount.
+    cap_add:
+      - CHOWN
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    network_mode: none
+
+  e2e-openai-provider:
+    image: caseweaver-e2e-fixtures:local
+    # The certificate initializer is the one and only fixture-image build
+    # service. Avoid concurrent BuildKit exports of this identical local tag.
+    pull_policy: never
+    command: ["node", "/fixtures/openai-compatible-provider.mjs"]
+    environment:
+      CASEWEAVER_E2E_OPENAI_COMPATIBLE_KEY: ${CASEWEAVER_E2E_OPENAI_COMPATIBLE_KEY:-caseweaver-e2e-provider-credential}
+      CASEWEAVER_E2E_PROVIDER_PORT: "8443"
+    depends_on:
+      e2e-certificates:
+        condition: service_completed_successfully
+        required: true
+    user: node
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=0700
+    volumes:
+      - ../../tests/e2e/fixtures/openai-compatible-provider.mjs:/fixtures/openai-compatible-provider.mjs:ro
+      - caseweaver_e2e_provider_certificates:/certificates:ro
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - egress
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          const https = require('node:https'); const request = https.request({ host:
+          '127.0.0.1', port: 8443, path: '/health/ready', rejectUnauthorized:
+          false }, (response) => process.exit(response.statusCode === 200 ? 0 : 1));
+          request.on('error', () => process.exit(1)); request.end();
+      interval: 2s
+      timeout: 3s
+      retries: 15
+      start_period: 2s
+
+  e2e-knowledge-repository:
+    image: caseweaver-e2e-fixtures:local
+    pull_policy: never
+    command:
+      - /bin/sh
+      - -ec
+      - |
+        find /repository -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+        cp -R /fixture/. /repository/
+        git -C /repository init --initial-branch=main
+        git -C /repository config user.email caseweaver-e2e@example.invalid
+        git -C /repository config user.name CaseWeaver E2E
+        git -C /repository add --all
+        git -C /repository commit --quiet -m 'Seed deterministic knowledge fixture'
+        # Keep Git safe-directory protection enabled: the backend runs as
+        # `node`, so this disposable repository must have the same owner.
+        chown -R node:node /repository
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp:mode=0700
+    volumes:
+      - ../../tests/e2e/fixtures/knowledge:/fixture:ro
+      - caseweaver_e2e_knowledge_repository:/repository
+    depends_on:
+      e2e-certificates:
+        condition: service_completed_successfully
+        required: true
+    cap_add:
+      - CHOWN
+      # The disposable repository is handed to the unprivileged backend after
+      # each seed. This initializer needs to clear that node-owned volume on a
+      # later Compose reconciliation before handing it back again. It has no
+      # network, host path, database, or application credential access.
+      - DAC_OVERRIDE
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    network_mode: none
+
+  backend:
+    environment:
+      ADMIN_ALLOWED_ORIGINS: http://127.0.0.1:${CASEWEAVER_E2E_PORT:-18080}
+      CASEWEAVER_E2E_OPENAI_COMPATIBLE_KEY: ${CASEWEAVER_E2E_OPENAI_COMPATIBLE_KEY:-caseweaver-e2e-provider-credential}
+      NODE_EXTRA_CA_CERTS: /run/caseweaver-e2e-provider-ca/ca.pem
+    depends_on:
+      e2e-openai-provider:
+        condition: service_healthy
+        required: true
+      e2e-knowledge-repository:
+        condition: service_completed_successfully
+        required: true
+    volumes:
+      - caseweaver_e2e_provider_certificates:/run/caseweaver-e2e-provider-ca:ro
+      - caseweaver_e2e_knowledge_repository:/mnt/caseweaver/e2e-repository:ro
+
+volumes:
+  caseweaver_e2e_provider_certificates:
+  caseweaver_e2e_knowledge_repository:

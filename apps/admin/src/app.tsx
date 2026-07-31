@@ -41,12 +41,12 @@ import {
   type SessionAuthProvider,
 } from "./auth/auth-provider.js";
 import { visibleNavigation } from "./pages/navigation.js";
+import { RepositoryAnalysisWorkflows } from "./pages/repository-analysis-workflows.js";
 import {
   AdminResourceList,
   AdminResourceShow,
 } from "./pages/resource-pages.js";
 import { SectionPage } from "./pages/section-page.js";
-import { RepositoryAnalysisWorkflows } from "./pages/repository-analysis-workflows.js";
 import type { RuntimeConfig } from "./runtime-config.js";
 import { operatorTheme } from "./theme.js";
 
@@ -734,9 +734,9 @@ function AdminShell({
         <Route
           element={
             <SectionPage
-              lead="Inspect server-resolved workspaces, principals, role assignments, and the effective authority surface."
+              lead="Manage external secret-reference metadata, inspect workspace authority, and review server-resolved identities without exposing secret values."
               section="access"
-              title="Access"
+              title="Access & security"
             />
           }
           path="/access"

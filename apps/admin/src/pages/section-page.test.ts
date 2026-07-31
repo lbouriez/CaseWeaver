@@ -96,6 +96,37 @@ describe("configuration surface actions", () => {
     ).toEqual([]);
   });
 
+  it("offers draft activation as well as terminal removal without presenting removal as a physical delete", () => {
+    expect(
+      itemActions(
+        "ai-provider-instances",
+        item("draft"),
+        surface({
+          surface: "ai-provider-instances",
+          mode: "managed",
+          workflows: ["activate", "disable", "inspect_history"],
+        }),
+      ),
+    ).toEqual([
+      { action: "provider.activate", label: "Activate" },
+      { action: "provider.disable", label: "Remove draft" },
+    ]);
+    expect(
+      itemActions(
+        "connector-instances",
+        item("draft"),
+        surface({
+          surface: "connector-instances",
+          mode: "managed",
+          workflows: ["activate", "disable", "inspect_history"],
+        }),
+      ),
+    ).toEqual([
+      { action: "connector.activate", label: "Activate" },
+      { action: "connector.disable", label: "Remove draft" },
+    ]);
+  });
+
   it("enables policy profile authoring only for an API-advertised managed draft workflow", () => {
     expect(supportsPolicyProfileDraft(undefined)).toBe(false);
     expect(

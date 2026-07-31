@@ -19,6 +19,7 @@
     "@caseweaver/application": "workspace:*",
     "@caseweaver/administration": "workspace:*",
     "@caseweaver/ai-config": "workspace:*",
+    "@caseweaver/ai-catalog-source": "workspace:*",
     "@caseweaver/ai-execution": "workspace:*",
     "@caseweaver/ai-provider-runtime": "workspace:*",
     "@caseweaver/ai-sdk": "workspace:*",

@@ -9,20 +9,24 @@ import type {
 import { ConnectorConfigurationError } from "@caseweaver/connector-sdk";
 
 import {
+  gitMarkdownDescriptorReference,
+  gitMarkdownRuntimeDescriptorReferences,
+} from "./administration-descriptor.js";
+import type { GitMarkdownAttachmentLocatorCodec } from "./attachment-locator.js";
+import {
   type GitMarkdownConfiguration,
   gitMarkdownConfigurationSchema,
   gitMarkdownSettingsSchema,
 } from "./config.js";
-import type { GitMarkdownAttachmentLocatorCodec } from "./attachment-locator.js";
 import { GitMarkdownAttachmentSource } from "./git-markdown-attachment-source.js";
 import { GitMarkdownKnowledgeSource } from "./git-markdown-source.js";
 import type { GitRepository } from "./git-repository.js";
 
-const gitMarkdownRuntimeDescriptor = Object.freeze({
-  kind: "connector",
-  type: "git-markdown",
-  version: "1",
-} as const);
+type GitMarkdownRuntimeDescriptorReference = Readonly<{
+  readonly kind: "connector";
+  readonly type: "git-markdown";
+  readonly version: string;
+}>;
 
 /**
  * The repository implementation is supplied by trusted composition. This keeps the
@@ -49,15 +53,37 @@ export interface CreateGitMarkdownRuntimeContributionOptions {
 export function createGitMarkdownRuntimeContribution(
   options: CreateGitMarkdownRuntimeContributionOptions,
 ): ConnectorRuntimeContribution {
+  return createRuntimeContribution(options, gitMarkdownDescriptorReference);
+}
+
+/**
+ * Production composition registers one contribution for each compatible
+ * immutable descriptor revision. This lets already-queued work use its exact
+ * historical pin without allowing the Admin console to author an old form.
+ */
+export function createGitMarkdownRuntimeContributions(
+  options: CreateGitMarkdownRuntimeContributionOptions,
+): readonly ConnectorRuntimeContribution[] {
+  return Object.freeze(
+    gitMarkdownRuntimeDescriptorReferences.map((descriptor) =>
+      createRuntimeContribution(options, descriptor),
+    ),
+  );
+}
+
+function createRuntimeContribution(
+  options: CreateGitMarkdownRuntimeContributionOptions,
+  descriptor: GitMarkdownRuntimeDescriptorReference,
+): ConnectorRuntimeContribution {
   return Object.freeze({
-    descriptor: gitMarkdownRuntimeDescriptor,
+    descriptor,
     async create({
       configuration,
       secrets,
     }: Parameters<
       ConnectorRuntimeContribution["create"]
     >[0]): Promise<ConnectorRuntimeCapabilities> {
-      const parsed = parseRuntimeConfiguration(configuration);
+      const parsed = parseRuntimeConfiguration(configuration, descriptor);
       const repository = options.repositoryFactory.create();
       const attachmentLocatorCodec = options.attachmentLocatorCodec;
       const knowledgeSource = new GitMarkdownKnowledgeSource({
@@ -85,11 +111,10 @@ export function createGitMarkdownRuntimeContribution(
 
 function parseRuntimeConfiguration(
   configuration: ServerPrivateConnectorConfiguration,
+  descriptor: GitMarkdownRuntimeDescriptorReference,
 ): GitMarkdownConfiguration {
   try {
-    if (
-      !sameDescriptor(configuration.descriptor, gitMarkdownRuntimeDescriptor)
-    ) {
+    if (!sameDescriptor(configuration.descriptor, descriptor)) {
       throw runtimeUnavailable();
     }
     const settings = gitMarkdownSettingsSchema.parse(configuration.settings);
@@ -133,7 +158,7 @@ function parseRuntimeConfiguration(
 
 function sameDescriptor(
   left: ConfigurationDescriptorReference,
-  right: typeof gitMarkdownRuntimeDescriptor,
+  right: GitMarkdownRuntimeDescriptorReference,
 ): boolean {
   return (
     left.kind === right.kind &&
