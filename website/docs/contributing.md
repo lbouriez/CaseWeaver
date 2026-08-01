@@ -1,12 +1,16 @@
 ---
-sidebar_position: 5
-title: Contributing documentation
+sidebar_position: 16
+title: Contributing
 ---
 
-# Contributing documentation
+# Contributing to CaseWeaver
 
-The portal is an independent TypeScript Docusaurus project. Work from the repository
-root and use its own package commands:
+Read `AGENTS.md`, the relevant `.features` guide, the target folder README, and the
+delivery item before editing. Dependencies point inward: applications/adapters depend on
+feature/application code, which depends on the domain. Do not make the domain depend on
+HTTP, PostgreSQL, a connector, or an AI provider.
+
+## Documentation site
 
 ```powershell
 pnpm --dir website install
@@ -15,12 +19,20 @@ pnpm --dir website test
 pnpm --dir website build
 ```
 
-Keep pages concise and task-oriented. Before adding an operator claim, verify it against
-the current implementation, configuration validation, and accepted delivery contract.
-Mark incomplete behavior as unavailable rather than writing a speculative click path.
+English is canonical. French counterparts are authored documentation, never a browser
+translation. Run `pnpm --dir website translations:plan -- --dry-run` after changing
+English; it identifies files that need a reviewer. After documented review—human by
+default, or an owner-authorized AI validation for a named delivery—run
+`pnpm --dir website translations:manifest`. The manifest records the English hash only;
+it neither translates text nor calls an AI provider.
 
-Translations are opt-in authoring work. The locale structure is present now; a human
-review is required before a translated page is published. After editing an English page,
-run `pnpm --dir website translations:status`. Update the locale page, have it reviewed,
-then run `pnpm --dir website translations:manifest` to record the exact English source
-revision that was reviewed. These commands never call an AI provider or read an API key.
+## Product changes
+
+Use focused unit tests for invariants, contract tests for adapter families, real
+PostgreSQL integration tests for persistence behavior, and a small critical E2E set for
+production risks. Use deterministic fakes by default. A live AI test is opt-in,
+budget-capped, and must use `@caseweaver/ai-execution`.
+
+Keep documentation changes concise, safe, and matched in French. Never add a secret,
+credential-bearing URL, production connection string, or browser workaround for a
+missing server capability.

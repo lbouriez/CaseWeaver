@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, relative, resolve } from "node:path";
 
 export const MANIFEST_FILE = ".caseweaver-translations.json";
+const supportedTranslationLocales = ["fr"];
 
 function isDocumentationFile(fileName) {
   return fileName.endsWith(".md") || fileName.endsWith(".mdx");
@@ -145,6 +146,9 @@ export async function runTranslationStatus({
   siteRoot,
   writeManifest,
 }) {
+  if (!supportedTranslationLocales.includes(locale)) {
+    throw new Error(`Unsupported translation locale: ${locale}`);
+  }
   const documentationRoot = resolve(siteRoot, "docs");
   const localeRoot = resolve(siteRoot, "i18n", locale);
   const localeDocumentationRoot = join(
@@ -192,7 +196,7 @@ async function main() {
 
   if (!status.isCurrent) {
     console.error(
-      "Translations need review. Add or review the locale file, then run --write-manifest after human approval.",
+      "Translations need review. Add or review the locale file, then run --write-manifest after documented approval.",
     );
     if (options.check) process.exitCode = 1;
   }

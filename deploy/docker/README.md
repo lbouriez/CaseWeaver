@@ -85,10 +85,75 @@ cost, then widen the source through a reviewed successor configuration when read
 | `compose.e2e.yml` | A private deterministic acceptance overlay. | A temporary HTTPS OpenAI-compatible fixture and a seeded Git repository, layered over `compose.local.yml` only by `pnpm test:e2e:compose`. |
 | `compose.test.yml` | Dependency-only integration-test database. | PostgreSQL/pgvector at port `54329`; applications run on the host test runner. |
 | `compose.admin.yml` | Static UI bridge for an API already hosted elsewhere. | Admin image only; it has no access to a database, queue, secrets, connectors, or providers. |
-| `compose.production.yml` | Operator topology using already-published, digest-pinned images. | Database plus either standalone or distributed runtime roles. It intentionally does not provide TLS, backup/restore, or production secret provisioning. |
+| `compose.production.yml` | Operator topology using already-published, digest-pinned images. | PostgreSQL, one public TLS edge, static Admin, encrypted S3-compatible storage, and exactly one of the standalone or distributed runtime profiles. |
+| `compose.portainer.yml` | Docker Standalone backend for an externally hosted Admin. | PostgreSQL, one standalone backend, a no-network attachment processor, explicit migration jobs, and an API-only TLS edge. The Console is published separately to Cloudflare Pages. |
 
 Only `compose.local.yml` is the simple “start the whole project” command. The other
 files are not alternatives to it.
+
+## Portainer backend with Cloudflare Pages Admin
+
+`compose.portainer.yml` is the external-hosting alternative to the embedded Admin
+topology. It is for a **Docker Standalone** Portainer endpoint, not Swarm: it consumes
+prebuilt `image@sha256:...` releases, does not run a Docker build, does not bind the
+repository checkout, and never starts an Admin/frontend service. PostgreSQL has one
+durable named volume and no host port. The runtime stores objects in the configured
+external S3-compatible service; it does not replace that service with a local test
+container.
+
+Copy [`.env.portainer.example`](.env.portainer.example) to an operator-owned location
+outside the checkout. In Portainer, paste/upload `compose.portainer.yml` as the stack
+definition and enter the same public values as stack environment variables. Every
+`CASEWEAVER_*_FILE` path and `CASEWEAVER_APPLICATION_SECRETS_DIRECTORY` must be an
+absolute path available to the Docker Standalone node. They are host-owned secret files,
+not Git files or Portainer UI text values. Disabled optional features still use an empty,
+restricted file to retain the fixed Docker secret contract.
+
+Set these cross-origin values together before the first migration:
+
+- `ADMIN_ALLOWED_ORIGINS=https://<your-admin-project>.pages.dev` — one exact Pages
+  origin; never a wildcard or a preview URL.
+- `ADMIN_SESSION_COOKIE_SAME_SITE=none` — the separately hosted HTTPS Console needs a
+  `Secure; HttpOnly; SameSite=None` API cookie. Same-origin embedded deployments retain
+  their default `lax` setting.
+- `OIDC_CALLBACK_URL=https://<your-api-host>/v1/auth/callback` — the API remains the
+  Authorization Code + PKCE callback endpoint; this is not a Pages URL.
+- `TRUSTED_PROXY_CIDRS=172.31.0.0/24` (or your chosen fixed `application` subnet) —
+  only the internal API-only edge may supply forwarding headers.
+
+The stack's root/no-network `edge-material` service copies certificate/key secret files
+and generates the fixed Nginx configuration inside a private tmpfs. The non-root edge
+then exposes only `/v1/`, `/health/`, and `/webhooks/`; `/` returns `404`, so it cannot
+accidentally masquerade as the Pages Console. It is safe to use a normal HTTPS API
+hostname behind that edge; do not proxy the Pages application through it.
+
+Run the migration chain once for a new release, then start the standalone profile. The
+following commands are also a useful Docker Standalone preflight before creating the
+Portainer stack:
+
+```powershell
+$envFile = 'C:\CaseWeaver\portainer\caseweaver-portainer.env'
+docker compose --env-file $envFile -f deploy\docker\compose.portainer.yml --profile migrate up --abort-on-container-exit grant-runtime
+if ($LASTEXITCODE -ne 0) { throw 'CaseWeaver migration/grant sequence failed.' }
+docker compose --env-file $envFile -f deploy\docker\compose.portainer.yml --profile standalone up -d --wait
+curl.exe --fail https://api.caseweaver.example/health/live
+curl.exe --fail https://api.caseweaver.example/health/ready
+```
+
+For certificate renewal, recreate `edge-material` and then `edge`; it stages a fresh
+in-memory copy and the public edge never receives a host private-key bind mount. Keep
+the runtime stopped during the existing PostgreSQL/S3 backup and restore procedure—the
+Portainer stack preserves the PBI-017 data/recovery boundary but intentionally does not
+add a second operational helper implementation.
+
+The corresponding Admin Cloudflare Pages artifact is generated by
+`apps/admin/scripts/write-pages-runtime-config.mjs`. Configure the dedicated GitHub
+workflow variables `CASEWEAVER_ADMIN_PAGES_API_ORIGIN`,
+`CASEWEAVER_ADMIN_PAGES_ACCOUNT_ID`, and `CASEWEAVER_ADMIN_PAGES_PROJECT`, plus the
+protected-environment secret `CASEWEAVER_ADMIN_PAGES_API_TOKEN`. See
+[`.github/README.md`](../../.github/README.md#admin-console--verified-cloudflare-pages-artifact)
+for the publish boundary. The API's exact allowed Pages origin must match the project
+that workflow publishes; dynamic pull-request Pages previews are intentionally absent.
 
 ## Automated Compose acceptance
 
@@ -142,56 +207,186 @@ check is bounded and returns only a safe status through the API.
 
 ## Published-image production topology
 
-The `v*` release workflow publishes all eight targets to:
+PBI-017 supports a small, self-hosted **linux/amd64** installation. It is deliberately
+different from the disposable local stack: every application image is an OCI digest,
+only the TLS edge publishes ports, migrations are explicit, and the database/runtime
+roles are separate. Read the [production threat model](THREAT_MODEL.md) before exposing
+the edge to a network.
+
+The `v*` release workflow publishes these eight targets to the registry selected by the
+repository variable (GitHub Container Registry is merely the default):
 
 ```text
-${CASEWEAVER_CONTAINER_REGISTRY:-ghcr.io}/${owner}/caseweaver-{target}
+${CASEWEAVER_CONTAINER_REGISTRY:-ghcr.io}/${owner}/caseweaver-{migration,api,admin,worker,scheduler,webhook,standalone,attachment-processor}
 ```
 
-It builds every final target on pull requests and `main`; a version tag publishes only
-after the local Compose smoke completes, then a clean job pulls each release image.
-Operators must use an immutable `image@sha256:...` reference in production, never a
-mutable release tag.
+The release record contains the exact `image@sha256:...` reference for every target.
+A tag is only a convenient discovery label; it is never a production deployment input.
+The release pipeline builds only linux/amd64, scans the final image and its generated
+SPDX SBOM for HIGH/CRITICAL findings, attaches GitHub provenance and SBOM attestations,
+pulls the published digest in a clean job, verifies both attestations from the OCI
+registry, then creates the release record. There is no unreviewed vulnerability-ignore
+file or severity exception in this initial policy.
 
-Pull-request and `main` image checks load a single local Docker image so they can
-verify the final process identity. They intentionally do not attach SBOM/provenance
-there because Docker's local image exporter cannot load an attested manifest list. The
-tag-gated publishing job pushes the release image with both attestations enabled.
+### Prepare an operator directory
 
-`compose.production.yml` expects explicit pinned values for
-`CASEWEAVER_MIGRATION_IMAGE`, `CASEWEAVER_API_IMAGE`,
-`CASEWEAVER_WORKER_IMAGE`, `CASEWEAVER_SCHEDULER_IMAGE`,
-`CASEWEAVER_WEBHOOK_IMAGE`, `CASEWEAVER_STANDALONE_IMAGE`, and
-`CASEWEAVER_ATTACHMENT_PROCESSOR_IMAGE`. It also requires Docker
-secret files for the database URL and PostgreSQL password, and production API
-configuration such as `API_WORKSPACE_ID`, `API_PRINCIPAL_ID`, and the HTTPS
-`ADMIN_ALLOWED_ORIGINS` value.
-
-Run the migration profile once, wait for it to exit successfully, then choose exactly
-one runtime profile:
+Keep production configuration and secret files outside the checkout. Copy
+`.env.production.example` to an operator-owned location, fill only its public values,
+and use the release record's digest for **every** `CASEWEAVER_*_IMAGE` setting. Its
+`CASEWEAVER_S3_OPERATIONS_IMAGE` value is the pinned generic S3 client used only during
+an explicit backup or restore.
 
 ```powershell
-docker compose -f deploy\docker\compose.production.yml --profile migrate run --rm migrate
-docker compose -f deploy\docker\compose.production.yml --profile distributed up -d
-# or: docker compose -f deploy\docker\compose.production.yml --profile standalone up -d
+$operator = 'C:\CaseWeaver\production'
+New-Item -ItemType Directory -Force -Path $operator, "$operator\secrets", "$operator\application-secrets" | Out-Null
+Copy-Item deploy\docker\.env.production.example "$operator\production.env"
+notepad "$operator\production.env"
 ```
 
-The `distributed` profile also starts the separate no-network `attachment-processor`
-image. It shares an ephemeral Unix-socket jobs volume only with the worker; the volume
-is created with the same unprivileged identity as both processes, so no privileged
-initializer is needed. Neither process receives database, object-storage, Git,
-provider, or connector credentials through that sidecar boundary. The `standalone`
-profile deliberately does not claim that isolated processor boundary yet, so an enabled
-attachment policy fails closed there.
+The environment file is public configuration: public HTTPS origin, selected image
+digests, non-secret database role/name, selected mode's upstreams, S3 endpoint/bucket
+names, and paths to secret files. Never put a password, token, private key, or
+credential-bearing database URL in it. Create restrictive files named by the variables
+in the example (`CASEWEAVER_*_FILE`), including empty files for disabled optional
+features because Docker mounts a fixed secret contract. The helper requires non-empty
+files for PostgreSQL, the migration/runtime URLs, TLS certificate/key, and all required
+S3 encryption/credential material.
 
-Production password login is off by default. Configure OIDC, or explicitly set
-`ADMIN_ENABLE_PASSWORD_AUTHENTICATION=true` with non-default deployment credentials.
-No browser receives those credentials, database URLs, connector/provider secrets, or
-repository checkout material.
+`CASEWEAVER_APPLICATION_SECRETS_DIRECTORY` is a read-only directory of additional
+server-private connector/provider/repository values. Each filename must be a safe
+environment-variable name such as `CASEWEAVER_OPENROUTER_KEY`; its content is the value.
+The API, worker, or standalone host loads it at startup. It never becomes an Admin API
+response, browser value, URL, Compose interpolation value, diagnostic, or log. The
+webhook and scheduler deliberately do not mount it because they only admit/enqueue or
+schedule durable work.
 
-This is deliberately still PBI-017 work in progress: an external TLS edge, managed
-secret integration, backup/restore drill, image vulnerability policy, and provenance/
-attestation verification are not claimed by this reference Compose file.
+Set one exact public origin and matching certificate/identity callback, not a Docker
+hostname. For `standalone`, set `CASEWEAVER_EDGE_API_UPSTREAM=standalone:3000` and
+`CASEWEAVER_EDGE_WEBHOOK_UPSTREAM=standalone:8081`; for `distributed`, set
+`api:3000` and `webhook:8081`. The helper rejects a mismatch and refuses direct values
+where a production secret file is required.
+
+### Verify, migrate, and start
+
+Use the helper rather than ad-hoc profile commands. It validates all digest, secret-file,
+TLS, object-storage, trusted-proxy, and mutually-exclusive-profile inputs before asking
+Docker to render or start anything.
+
+```powershell
+node deploy\docker\production-operations.mjs validate --env-file C:\CaseWeaver\production\production.env
+node deploy\docker\production-operations.mjs migrate --env-file C:\CaseWeaver\production\production.env --mode standalone
+node deploy\docker\production-operations.mjs start --env-file C:\CaseWeaver\production\production.env --mode standalone
+```
+
+The migration sequence starts private PostgreSQL, runs Prisma migrations, runs the
+pg-boss migration, then grants the runtime role. It is forward-only. The migration URL
+belongs only to these bounded jobs; API, worker, scheduler, webhook, and standalone use
+the separate runtime URL, whose role has DML privileges and cannot create tables. After
+starting, browse the configured `ADMIN_ALLOWED_ORIGINS` URL and check:
+
+```powershell
+curl.exe --fail https://caseweaver.example.com/health/live
+curl.exe --fail https://caseweaver.example.com/health/ready
+```
+
+Only `edge` binds HTTP/HTTPS. It redirects HTTP to HTTPS, terminates TLS, replaces
+forwarded headers, serves the static Admin application same-origin, and proxies API,
+health, and webhook paths. `tls-material` is a root/no-network certificate holder that
+copies certificate material to a private memory volume; the public Nginx edge has no
+direct host private-key mount and runs as non-root. Recreate it through `start` after a
+certificate renewal. PostgreSQL is the one documented container-security exception: the
+official image uses root briefly to initialize a new data volume and then drops to its
+own account; it has no published port and joins only the private data network.
+
+`standalone` is the default small installation: one backend process hosts API, webhook,
+scheduler, worker, relay, and the no-network attachment processor. `distributed` keeps
+the same durable PostgreSQL queue/outbox/leases/configuration pins but runs API,
+webhook, scheduler, and worker separately. Never run both profiles. To change mode,
+make a backup, stop the old runtime, re-run `migrate` for the selected release, change
+the two upstream settings, then `start` the new mode. It is a controlled restart, not a
+zero-downtime transition.
+
+### OIDC, password bootstrap, and proxy trust
+
+OIDC is the production default. Put its client secret and ephemeral encryption key in
+their individual secret files; set exact `OIDC_ISSUER`, `OIDC_CLIENT_ID`, HTTPS
+`OIDC_CALLBACK_URL`, a stable bootstrap subject/display name for a fresh deployment,
+and leave password authentication disabled. Remove bootstrap identity values once the
+mapping exists. The API owns Authorization Code + PKCE state/nonce/signature/time
+validation, secure `HttpOnly` sessions, CSRF, workspace switching, authorization, and
+audit events. The browser never receives an OAuth token or client secret.
+
+Password login is an explicit break-glass option only: set
+`ADMIN_ENABLE_PASSWORD_AUTHENTICATION=true`, use unique values in the two password
+secret files, and restrict access while you establish OIDC. Do not reuse the local
+`admin` / `admin` credentials. `TRUSTED_PROXY_CIDRS` must equal the fixed internal
+application subnet because the API must trust forwarding headers only from the edge.
+
+### Backup, recovery, upgrades, and rollback
+
+The helper's backup boundary is intentionally a stopped runtime. It stops the selected
+profile, copies the configured object prefix to a unique prefix in the separate backup
+bucket, writes a PostgreSQL custom-format dump, and creates a non-secret
+`<backup>.manifest.json` beside it. It then leaves the runtime stopped so an operator
+can inspect the artifacts before starting it again:
+
+```powershell
+$backup = 'C:\CaseWeaver\backups\caseweaver-2026-07-31.dump'
+node deploy\docker\production-operations.mjs backup --env-file C:\CaseWeaver\production\production.env --mode standalone --output $backup
+node deploy\docker\production-operations.mjs start --env-file C:\CaseWeaver\production\production.env --mode standalone
+```
+
+For recovery, use a clean or deliberately emptied target object prefix and a matching
+deployment configuration. The helper refuses a manifest whose source bucket/prefix or
+backup bucket does not match, stops the runtime, restores objects without deleting any
+target objects, restores PostgreSQL, and reapplies the controlled migration/grant
+sequence. Start only after restore succeeds:
+
+```powershell
+node deploy\docker\production-operations.mjs restore --env-file C:\CaseWeaver\production\production.env --mode standalone --input C:\CaseWeaver\backups\caseweaver-2026-07-31.dump
+node deploy\docker\production-operations.mjs start --env-file C:\CaseWeaver\production\production.env --mode standalone
+```
+
+The repository's production acceptance test proves this procedure with a private
+S3-compatible store: it writes an object, backs up PostgreSQL and objects, removes the
+original project, restores into an isolated project, checks TLS readiness/audit state,
+and verifies the object. It is not a promise that a large real installation restores in
+the same time. Your RPO is the interval between completed backups and your real RTO is
+the measured time to restore your data/host. Version the backup bucket, protect it from
+the runtime identity, and run a measured drill after material data or topology changes.
+
+For an upgrade, verify the new digest/attestation, make a backup, stop/drain the old
+runtime, run `migrate`, and start the selected mode. An image-only rollback is allowed
+only if the existing forward-only schema is known compatible. Otherwise restore the
+tested backup; the helper intentionally has no destructive automatic downgrade.
+
+### Attestation verification and disconnected delivery
+
+Before deployment, verify the release record's digest while authenticated to the chosen
+registry. This checks the GitHub workflow identity and source revision, not merely a
+mutable tag:
+
+```powershell
+gh attestation verify oci://registry.example/caseweaver-standalone@sha256:<digest> --repo <owner>/<repository> --source-digest <source-commit> --signer-workflow <owner>/<repository>/.github/workflows/containers.yml --bundle-from-oci
+gh attestation verify oci://registry.example/caseweaver-standalone@sha256:<digest> --repo <owner>/<repository> --source-digest <source-commit> --signer-workflow <owner>/<repository>/.github/workflows/containers.yml --predicate-type https://github.com/in-toto/attestation/blob/main/spec/predicates/spdx.md --bundle-from-oci
+```
+
+For a disconnected site, mirror every exact image digest **and its OCI attestations**
+to the internal registry, retain the release record/SBOM artifacts with the change
+record, authenticate Docker and `gh` to that mirror, then run the same verification
+against the mirrored digest before using the helper. Do not convert a digest to a local
+tag as the production identity.
+
+### Production troubleshooting
+
+| Symptom | First safe check |
+| --- | --- |
+| Helper refuses a configuration | Run `validate`; correct the public environment/secret file path it names. It never prints a secret value. |
+| Edge or Admin is not healthy | `docker compose --env-file <file> -f deploy/docker/compose.production.yml ps`; check only the named service's redacted logs. Confirm the TLS files and exact upstream mode settings. |
+| `/health/ready` fails | Check PostgreSQL health, runtime-role grants, migration completion, and the selected API/standalone service. Do not grant DDL to make it green. |
+| OIDC callback fails | Compare the public HTTPS origin, issuer configuration, registered callback, certificate hostname, and trusted-proxy subnet. Browser tokens are never a workaround. |
+| Backup/restore fails | Keep the runtime stopped, preserve dump and manifest, confirm backup/source bucket/prefix match, then investigate S3 access and PostgreSQL output. The helper never deletes target objects. |
+| A scan/attestation release job fails | Treat the tag as unaccepted. Use the retained security artifact and signed digest evidence; create a reviewed remediation/exception design rather than overriding the job. |
 
 ## OIDC in the local stack
 

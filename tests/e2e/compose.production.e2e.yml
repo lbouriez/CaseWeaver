@@ -1,0 +1,91 @@
+# Test-owned overlay for the production Compose fixture. It is never an operator
+# deployment and supplies a deterministic private OIDC issuer and S3-compatible
+# object store. Both are isolated fixtures; operators never apply this file.
+
+services:
+  oidc-provider:
+    image: caseweaver-e2e-fixtures:production
+    command: ["node", "/fixtures/oidc-provider.mjs"]
+    environment:
+      CASEWEAVER_E2E_OIDC_ISSUER: ${OIDC_ISSUER:?Set OIDC_ISSUER in the generated E2E environment.}
+      CASEWEAVER_E2E_OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:?Set OIDC_CLIENT_ID in the generated E2E environment.}
+      CASEWEAVER_E2E_OIDC_CLIENT_SECRET_FILE: /run/caseweaver-e2e/client-secret
+      CASEWEAVER_E2E_OIDC_CERTIFICATE_FILE: /run/caseweaver-e2e/certificate.pem
+      CASEWEAVER_E2E_OIDC_PRIVATE_KEY_FILE: /run/caseweaver-e2e/private-key.pem
+      CASEWEAVER_E2E_OIDC_PORT: ${CASEWEAVER_E2E_OIDC_PORT:?Set CASEWEAVER_E2E_OIDC_PORT in the generated E2E environment.}
+    volumes:
+      - ${CASEWEAVER_OIDC_CLIENT_SECRET_FILE:?Set CASEWEAVER_OIDC_CLIENT_SECRET_FILE.}:/run/caseweaver-e2e/client-secret:ro
+      - ${CASEWEAVER_TLS_CERTIFICATE_FILE:?Set CASEWEAVER_TLS_CERTIFICATE_FILE.}:/run/caseweaver-e2e/certificate.pem:ro
+      - ${CASEWEAVER_TLS_PRIVATE_KEY_FILE:?Set CASEWEAVER_TLS_PRIVATE_KEY_FILE.}:/run/caseweaver-e2e/private-key.pem:ro
+      - ${CASEWEAVER_E2E_OIDC_FIXTURE_PATH:?Set CASEWEAVER_E2E_OIDC_FIXTURE_PATH in the generated E2E environment.}:/fixtures/oidc-provider.mjs:ro
+    ports:
+      - "127.0.0.1:${CASEWEAVER_E2E_OIDC_PORT:?Set CASEWEAVER_E2E_OIDC_PORT in the generated E2E environment.}:${CASEWEAVER_E2E_OIDC_PORT:?Set CASEWEAVER_E2E_OIDC_PORT in the generated E2E environment.}"
+    networks:
+      egress:
+        ipv4_address: ${CASEWEAVER_E2E_OIDC_IP:?Set CASEWEAVER_E2E_OIDC_IP in the generated E2E environment.}
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('node:https').get({host:'127.0.0.1',port:Number(process.env.CASEWEAVER_E2E_OIDC_PORT),path:'/issuer/.well-known/openid-configuration',rejectUnauthorized:false},(response)=>process.exit(response.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 3s
+
+  standalone:
+    extra_hosts:
+      - "oidc.caseweaver.test:${CASEWEAVER_E2E_OIDC_IP:?Set CASEWEAVER_E2E_OIDC_IP in the generated E2E environment.}"
+    depends_on:
+      oidc-provider:
+        condition: service_healthy
+        required: true
+
+  object-store-operations:
+    volumes:
+      - ${CASEWEAVER_E2E_OBJECT_MARKER_FILE:?Set CASEWEAVER_E2E_OBJECT_MARKER_FILE in the generated E2E environment.}:/run/caseweaver-e2e/object-marker.txt:ro
+
+  object-store:
+    image: minio/minio@sha256:a1ea29fa28355559ef137d71fc570e508a214ec84ff8083e39bc5428980b015e
+    entrypoint:
+      - sh
+      - -ec
+      - >-
+        export MINIO_ROOT_USER="$(cat /run/caseweaver-e2e/access-key)";
+        export MINIO_ROOT_PASSWORD="$(cat /run/caseweaver-e2e/secret-key)";
+        export MINIO_REGION_NAME=ca-central-1;
+        exec minio server --certs-dir /run/caseweaver-e2e/tls /data --address :9000
+    volumes:
+      - ${CASEWEAVER_OBJECT_STORAGE_S3_ACCESS_KEY_ID_FILE:?Set CASEWEAVER_OBJECT_STORAGE_S3_ACCESS_KEY_ID_FILE.}:/run/caseweaver-e2e/access-key:ro
+      - ${CASEWEAVER_OBJECT_STORAGE_S3_SECRET_ACCESS_KEY_FILE:?Set CASEWEAVER_OBJECT_STORAGE_S3_SECRET_ACCESS_KEY_FILE.}:/run/caseweaver-e2e/secret-key:ro
+      - ${CASEWEAVER_TLS_CERTIFICATE_FILE:?Set CASEWEAVER_TLS_CERTIFICATE_FILE.}:/run/caseweaver-e2e/tls/public.crt:ro
+      - ${CASEWEAVER_TLS_PRIVATE_KEY_FILE:?Set CASEWEAVER_TLS_PRIVATE_KEY_FILE.}:/run/caseweaver-e2e/tls/private.key:ro
+      - caseweaver_e2e_object_storage:/data
+    networks:
+      egress:
+        ipv4_address: ${CASEWEAVER_E2E_OBJECT_STORAGE_IP:?Set CASEWEAVER_E2E_OBJECT_STORAGE_IP in the generated E2E environment.}
+    read_only: true
+    tmpfs:
+      - /tmp:uid=0,gid=0,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent --show-error --cacert /run/caseweaver-e2e/tls/public.crt https://127.0.0.1:9000/minio/health/live > /dev/null"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 3s
+
+volumes:
+  # The test runner creates and removes this external, run-specific volume. It
+  # survives the first isolated Compose project long enough to prove that the
+  # recovery project reads its object-store backup rather than local leftovers.
+  caseweaver_e2e_object_storage:
+    external: true
+    name: ${CASEWEAVER_E2E_OBJECT_STORAGE_VOLUME:?Set CASEWEAVER_E2E_OBJECT_STORAGE_VOLUME in the generated E2E environment.}

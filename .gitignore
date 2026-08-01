@@ -4,6 +4,7 @@ coverage/
 .env
 .env.*
 !.env.example
+!deploy/docker/.env.portainer.example
 *.log
 .DS_Store
 *.tsbuildinfo

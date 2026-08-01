@@ -101,7 +101,7 @@ export function loadObjectStorageRuntimeConfiguration(
   }
   if (kind !== "s3") throw new ObjectStorageConfigurationError();
   const endpoint = parseEndpoint(
-    environment.OBJECT_STORAGE_S3_ENDPOINT,
+    optionalDeploymentValue(environment.OBJECT_STORAGE_S3_ENDPOINT),
     environment.NODE_ENV,
   );
   const multipartPartSizeBytes = parseMultipartPartSize(
@@ -109,7 +109,7 @@ export function loadObjectStorageRuntimeConfiguration(
   );
   const encryption = parseEncryption(
     environment.OBJECT_STORAGE_S3_ENCRYPTION,
-    environment.OBJECT_STORAGE_S3_KMS_KEY_ID,
+    optionalDeploymentValue(environment.OBJECT_STORAGE_S3_KMS_KEY_ID),
   );
   return Object.freeze({
     kind,
@@ -125,6 +125,13 @@ export function loadObjectStorageRuntimeConfiguration(
     multipartPartSizeBytes,
     encryption,
   });
+}
+
+/** Docker Compose mapping-form optional values are rendered as empty strings. */
+function optionalDeploymentValue(
+  value: string | undefined,
+): string | undefined {
+  return value === undefined || value.trim().length === 0 ? undefined : value;
 }
 
 function requiredIdentifier(value: string | undefined): string {

@@ -15,8 +15,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   AuthSessionService,
-  AuthSessionServiceError,
   type AuthSessionServiceDependencies,
+  AuthSessionServiceError,
 } from "./session-service.js";
 
 class MemorySessionStore implements AuthSessionStore {
@@ -212,7 +212,7 @@ function createService() {
           : undefined,
     permissionsFor: async () => ["configuration.read" as Permission],
     now: () => new Date("2026-01-01T00:00:00.000Z"),
-    secureCookies: true,
+    sessionCookie: { secure: true, sameSite: "lax" },
     allowedOrigins: ["https://admin.example"],
   };
   return {
@@ -367,6 +367,39 @@ describe("server-managed OIDC session service", () => {
       authenticated: false,
       authentication: { password: false, oauth: true },
     });
+  });
+
+  it("keeps SameSite=None on session creation, rotation, and clearing", async () => {
+    const { dependencies } = createService();
+    const service = new AuthSessionService({
+      ...dependencies,
+      sessionCookie: { secure: true, sameSite: "none" },
+    });
+    const login = await service.login("/");
+    const state = new URL(login.redirectTo).searchParams.get("state");
+    const callback = await service.callback({
+      code: "authorization-code",
+      state,
+      audit,
+    });
+    expect(callback.setCookie).toContain("SameSite=None; Secure");
+
+    const switched = await service.switchWorkspace({
+      cookieHeader: callback.setCookie,
+      origin: "https://admin.example",
+      csrfToken: callback.session.csrfToken,
+      workspaceId: "workspace-b",
+      audit,
+    });
+    expect(switched.setCookie).toContain("SameSite=None; Secure");
+
+    const loggedOut = await service.logout({
+      cookieHeader: switched.setCookie,
+      origin: "https://admin.example",
+      csrfToken: switched.session.csrfToken,
+      audit,
+    });
+    expect(loggedOut.setCookie).toContain("SameSite=None; Secure");
   });
 
   it("does not create a browser session when atomic success audit persistence fails", async () => {

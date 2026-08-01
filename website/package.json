@@ -12,7 +12,8 @@
     "test": "node --test tests/*.test.mjs",
     "i18n:write": "docusaurus write-translations",
     "translations:status": "node scripts/translate-docs/status.mjs --check",
-    "translations:manifest": "node scripts/translate-docs/status.mjs --write-manifest"
+    "translations:manifest": "node scripts/translate-docs/status.mjs --write-manifest",
+    "translations:plan": "node scripts/translate-docs/plan.mjs"
   },
   "dependencies": {
     "@docusaurus/core": "3.10.2",

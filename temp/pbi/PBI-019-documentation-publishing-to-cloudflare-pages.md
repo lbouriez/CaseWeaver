@@ -12,11 +12,18 @@ receive application secrets.
 
 ## State and dependencies
 
-**In progress.** The isolated verification/publishing workflow is implemented. A
-repository owner must still create the Cloudflare Pages project, the GitHub deployment
-environments, and the required repository or environment variables before real
-deployments and cleanup can occur. Operational setup details live in the website's
-internal documentation, not in the public docs portal.
+**Pending — separate repository-governance follow-up.** All PBI-owned workflow,
+documentation, and automated-validation work is complete. The pre-provisioned Cloudflare
+Pages project, all four required repository secrets, and both Pages environments exist.
+GitHub Actions run `29528380369` published the portal successfully on 2026-07-16 and
+scheduled cleanup run `30603295655` succeeded on 2026-07-31.
+
+The workflow now fails closed through `github.ref_protected` and the production
+environment. Read-only GitHub API inspection confirmed that `main` currently has no
+branch-protection rule and `cloudflare-pages-production` has no protection rule or
+deployment-branch policy. No deployment, cleanup, secret, environment, or branch policy
+was changed by this delivery. Those are repository-governance choices that require the
+owner to select the required reviewers and branch policy.
 
 Depends on:
 
@@ -50,14 +57,28 @@ Depends on:
       trigger a production deployment.
 - [x] Pull requests from the same repository can deploy preview builds and comment the
       preview URL back on the PR.
-- [x] Only default-branch pushes and a deliberate manual dispatch from that branch can
-      reach the protected production deployment environment.
+- [ ] Only a protected default-branch push and a deliberate manual dispatch from that
+      protected branch can reach the protected production deployment environment. The
+      workflow enforces this fail-closed condition, but the live GitHub protection
+      settings are intentionally pending separate follow-up work.
 - [x] The workflow is concurrency-safe, has minimum required GitHub permissions, and
       uses immutable-SHA-pinned actions.
 - [x] A cleanup workflow removes closed-PR preview deployments, stale preview
       deployments, and older production deployments on a schedule or manual trigger.
 - [x] The workflow cannot deploy an application container, call a CaseWeaver API, read
       a database, or access a connector/provider credential.
+
+## Pending repository-governance follow-up
+
+This work is intentionally queued separately from the CaseWeaver implementation:
+
+1. Protect `main` with the branch policy selected by the repository owner. This makes
+   GitHub expose `github.ref_protected` for the production ref.
+2. Configure `cloudflare-pages-production` with the chosen required reviewers and a
+   deployment-branch policy that permits only protected `main`. The preview environment
+   remains unprotected for trusted same-repository pull-request previews.
+3. After those policies are in place, inspect one protected-`main` publish and run
+   cleanup once with `dry_run: true` before relying on nightly production pruning.
 
 ## Excluded
 

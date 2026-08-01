@@ -123,7 +123,7 @@
     "message": "Architecture"
   },
   "footer.operations": {
-    "message": "Statut des opérations"
+    "message": "Auto-hébergement"
   },
   "footer.status": {
     "message": "Feuille de route et statut"
@@ -522,5 +522,17 @@
   },
   "homepage.start.tagline": {
     "message": "Des opérations de dossier attentives aux preuves, documentées avec soin."
+  },
+  "languageSuggestion.message": {
+    "message": "Votre navigateur préfère {suggested}. Passer cette documentation depuis {current} ?"
+  },
+  "languageSuggestion.label": {
+    "message": "Suggestion de langue"
+  },
+  "languageSuggestion.switch": {
+    "message": "Passer à {suggested}"
+  },
+  "languageSuggestion.stay": {
+    "message": "Rester en {current}"
   }
 }

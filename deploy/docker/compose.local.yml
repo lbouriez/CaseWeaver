@@ -52,6 +52,11 @@ services:
       provenance: false
       sbom: false
     environment:
+      # The migration image defaults to production so its release entrypoint
+      # rejects direct database values. This disposable local stack deliberately
+      # uses its private trust-authenticated database URL instead of a secret
+      # file, so it must explicitly retain development semantics.
+      NODE_ENV: development
       DATABASE_URL: postgresql://caseweaver@postgres:5432/caseweaver
     depends_on:
       postgres:
@@ -75,6 +80,10 @@ services:
     pull_policy: never
     command: ["node", "dist/main.js", "migrate-queue"]
     environment:
+      # The backend image is production-hardened by default. This local-only
+      # job connects directly to the disposable trust-authenticated database,
+      # so it must not be treated as a production secret bootstrap.
+      NODE_ENV: development
       DATABASE_URL: postgresql://caseweaver@postgres:5432/caseweaver
     depends_on:
       migrate:

@@ -1,0 +1,154 @@
+name: Admin console Pages
+
+on:
+  pull_request:
+    paths:
+      - "apps/admin/**"
+      - "deploy/docker/compose.portainer.yml"
+      - "deploy/docker/compose-portainer-contract.test.mjs"
+      - ".github/workflows/admin-pages.yml"
+      - ".github/workflows/admin-pages-contract.test.mjs"
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/admin/**"
+      - "deploy/docker/compose.portainer.yml"
+      - "deploy/docker/compose-portainer-contract.test.mjs"
+      - ".github/workflows/admin-pages.yml"
+      - ".github/workflows/admin-pages-contract.test.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify Admin Pages artifact
+    runs-on: ubuntu-latest
+    outputs:
+      production_configured: ${{ steps.configuration.outputs.production_configured }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.13.1
+      # Node 22.13 ships an older Corepack keyring that cannot verify the
+      # repository-pinned pnpm release. No deployment credential is available
+      # in this verification job.
+      - name: Activate the pinned pnpm toolchain
+        run: |
+          npm install --global corepack@0.31.0
+          corepack enable
+          corepack prepare pnpm@11.12.0 --activate
+      - name: Validate Admin Pages workflow contract
+        run: node --test .github/workflows/admin-pages-contract.test.mjs
+      - name: Validate Portainer backend Compose contract
+        run: node --test deploy/docker/compose-portainer-contract.test.mjs
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Resolve public Pages configuration
+        id: configuration
+        shell: bash
+        env:
+          CASEWEAVER_ADMIN_PAGES_API_ORIGIN: ${{ vars.CASEWEAVER_ADMIN_PAGES_API_ORIGIN }}
+          CASEWEAVER_ADMIN_PAGES_ACCOUNT_ID: ${{ vars.CASEWEAVER_ADMIN_PAGES_ACCOUNT_ID }}
+          CASEWEAVER_ADMIN_PAGES_PROJECT: ${{ vars.CASEWEAVER_ADMIN_PAGES_PROJECT }}
+        run: |
+          set -euo pipefail
+
+          is_safe_account_id() {
+            [[ "$1" =~ ^[A-Fa-f0-9]{32}$ ]]
+          }
+
+          is_safe_project_slug() {
+            [[ "$1" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]
+          }
+
+          production_configured=true
+          if [ -z "$CASEWEAVER_ADMIN_PAGES_API_ORIGIN" ] || [ -z "$CASEWEAVER_ADMIN_PAGES_ACCOUNT_ID" ] || [ -z "$CASEWEAVER_ADMIN_PAGES_PROJECT" ]; then
+            production_configured=false
+            echo "Admin Pages production metadata is absent; building a verification-only artifact."
+          elif ! is_safe_account_id "$CASEWEAVER_ADMIN_PAGES_ACCOUNT_ID" || ! is_safe_project_slug "$CASEWEAVER_ADMIN_PAGES_PROJECT"; then
+            echo "Admin Pages Cloudflare metadata is invalid; refusing publication." >&2
+            exit 1
+          fi
+
+          printf 'production_configured=%s\n' "$production_configured" >> "$GITHUB_OUTPUT"
+      - name: Test public artifact generator
+        run: node --test apps/admin/scripts/write-pages-runtime-config.test.mjs
+      - name: Type check Admin console
+        run: pnpm --filter @caseweaver/admin typecheck
+      - name: Test Admin console
+        run: pnpm --filter @caseweaver/admin test
+      - name: Build Admin console
+        run: pnpm --filter @caseweaver/admin build
+      - name: Generate the public Pages configuration
+        env:
+          CASEWEAVER_ADMIN_API_BASE_URL: ${{ vars.CASEWEAVER_ADMIN_PAGES_API_ORIGIN || 'https://caseweaver.invalid' }}
+          CASEWEAVER_ADMIN_UI_TITLE: ${{ vars.CASEWEAVER_ADMIN_PAGES_UI_TITLE || 'CaseWeaver Control Room' }}
+        run: node apps/admin/scripts/write-pages-runtime-config.mjs apps/admin/dist
+      - name: Verify only public Pages files will be published
+        run: |
+          node --input-type=module -e "import { readFileSync } from 'node:fs'; const config = JSON.parse(readFileSync('apps/admin/dist/runtime-config.json', 'utf8')); if (Object.keys(config).sort().join(',') !== 'apiBaseUrl,uiTitle' || !config.apiBaseUrl.startsWith('https://')) throw new Error('The generated Pages configuration is not public-origin-only.'); const headers = readFileSync('apps/admin/dist/_headers', 'utf8'); if (!headers.includes('Cache-Control: no-store') || !headers.includes(\"connect-src 'self' \" + config.apiBaseUrl)) throw new Error('The generated Pages headers are incomplete.');"
+      - name: Upload verified Admin Pages artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          if-no-files-found: error
+          name: caseweaver-admin-pages-${{ github.sha }}
+          path: apps/admin/dist
+          retention-days: 7
+
+  publish-production:
+    name: Publish Admin console
+    if: |
+      github.ref == 'refs/heads/main' &&
+      github.ref_protected &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      needs.verify.outputs.production_configured == 'true'
+    needs: verify
+    runs-on: ubuntu-latest
+    environment:
+      name: caseweaver-admin-pages-production
+    concurrency:
+      group: caseweaver-admin-pages-production
+      cancel-in-progress: false
+    permissions: {}
+    steps:
+      - name: Download verified Admin Pages artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: caseweaver-admin-pages-${{ github.sha }}
+          path: apps/admin/dist
+      - name: Validate protected production publishing configuration
+        shell: bash
+        env:
+          CASEWEAVER_ADMIN_PAGES_ACCOUNT_ID: ${{ vars.CASEWEAVER_ADMIN_PAGES_ACCOUNT_ID }}
+          CASEWEAVER_ADMIN_PAGES_PROJECT: ${{ vars.CASEWEAVER_ADMIN_PAGES_PROJECT }}
+          CASEWEAVER_ADMIN_PAGES_API_TOKEN: ${{ secrets.CASEWEAVER_ADMIN_PAGES_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$CASEWEAVER_ADMIN_PAGES_ACCOUNT_ID" =~ ^[A-Fa-f0-9]{32}$ ]] || ! [[ "$CASEWEAVER_ADMIN_PAGES_PROJECT" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]; then
+            echo "Protected Admin Pages metadata is invalid." >&2
+            exit 1
+          fi
+          if [ -z "$CASEWEAVER_ADMIN_PAGES_API_TOKEN" ]; then
+            echo "The protected Admin Pages API token is unavailable." >&2
+            exit 1
+          fi
+      - name: Deploy verified artifact to Cloudflare Pages
+        id: publish
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0
+        with:
+          apiToken: ${{ secrets.CASEWEAVER_ADMIN_PAGES_API_TOKEN }}
+          accountId: ${{ vars.CASEWEAVER_ADMIN_PAGES_ACCOUNT_ID }}
+          command: pages deploy apps/admin/dist --project-name=${{ vars.CASEWEAVER_ADMIN_PAGES_PROJECT }} --branch=main
+          packageManager: npm
+          wranglerVersion: 4.111.0
+      - name: Record Admin Pages deployment URL
+        env:
+          DEPLOYMENT_URL: ${{ steps.publish.outputs.deployment-url }}
+        run: |
+          if [ -n "$DEPLOYMENT_URL" ]; then
+            printf '### Admin console deployment\n\n%s\n' "$DEPLOYMENT_URL" >> "$GITHUB_STEP_SUMMARY"
+          fi

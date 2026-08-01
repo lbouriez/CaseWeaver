@@ -32,6 +32,7 @@ describe("parseApiConfig", () => {
       principalId: "principal-test",
       workspaceId: "workspace-test",
       allowedAdminOrigins: ["https://admin.example"],
+      adminSessionCookieSameSite: "lax",
       trustedProxyCidrs: [],
       localAuthentication: {
         login: "admin",
@@ -270,6 +271,83 @@ describe("parseApiConfig", () => {
         TRUSTED_PROXY_CIDRS: "forwarded.example",
       }),
     ).toThrow(ApiConfigurationError);
+    expect(() =>
+      parseApiConfig({
+        ...validEnvironment,
+        TRUSTED_PROXY_CIDRS: "0.0.0.0/0",
+      }),
+    ).toThrow(ApiConfigurationError);
+    expect(() =>
+      parseApiConfig({
+        ...validEnvironment,
+        TRUSTED_PROXY_CIDRS: "::/0",
+      }),
+    ).toThrow(ApiConfigurationError);
+  });
+
+  it("requires canonical exact browser origins and permits only development loopback HTTP", () => {
+    for (const invalidOrigin of [
+      "https://admin.example/",
+      "https://operator:password@admin.example",
+      "https://admin.example/console",
+      "https://admin.example?preview=true",
+      "https://admin.example#fragment",
+    ]) {
+      expect(() =>
+        parseApiConfig({
+          ...validEnvironment,
+          ADMIN_ALLOWED_ORIGINS: invalidOrigin,
+        }),
+      ).toThrow(ApiConfigurationError);
+    }
+    expect(
+      parseApiConfig({
+        ...validEnvironment,
+        NODE_ENV: "development",
+        ADMIN_ALLOWED_ORIGINS: "http://127.0.0.1:8082",
+      }).allowedAdminOrigins,
+    ).toEqual(["http://127.0.0.1:8082"]);
+    expect(
+      parseApiConfig({
+        ...validEnvironment,
+        NODE_ENV: "development",
+        ADMIN_ALLOWED_ORIGINS: "http://[::1]:8082",
+      }).allowedAdminOrigins,
+    ).toEqual(["http://[::1]:8082"]);
+    expect(() =>
+      parseApiConfig({
+        ...validEnvironment,
+        NODE_ENV: "development",
+        ADMIN_ALLOWED_ORIGINS: "http://127.0.0.1:8082/",
+      }),
+    ).toThrow(ApiConfigurationError);
+  });
+
+  it("permits cross-site cookies only for a production HTTPS console", () => {
+    expect(() =>
+      parseApiConfig({
+        ...validEnvironment,
+        NODE_ENV: "test",
+        ADMIN_SESSION_COOKIE_SAME_SITE: "none",
+      }),
+    ).toThrow(ApiConfigurationError);
+
+    const oidc = {
+      OIDC_ISSUER: "https://issuer.example",
+      OIDC_CLIENT_ID: "admin-client",
+      OIDC_CALLBACK_URL: "https://api.example/v1/auth/callback",
+      OIDC_EPHEMERAL_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64url"),
+      OIDC_EPHEMERAL_KEY_ID: "key-1",
+    };
+    expect(
+      parseApiConfig({
+        ...validEnvironment,
+        ...oidc,
+        NODE_ENV: "production",
+        ADMIN_DISABLE_LOGIN_AUTHENTICATION: "true",
+        ADMIN_SESSION_COOKIE_SAME_SITE: "none",
+      }).adminSessionCookieSameSite,
+    ).toBe("none");
   });
 });
 

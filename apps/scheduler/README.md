@@ -22,3 +22,7 @@ make the scheduler emit v1 work or rebind to mutable configuration. It accepts
 `SCHEDULER_BATCH_LIMIT` (1–100), and `SCHEDULER_LEASE_MS` (1–3,600,000). Startup
 performs a first durable poll before readiness; shutdown drains that poll and closes the
 pool. It still never invokes connector, AI, or object-storage code.
+
+`caseweaver-scheduler health` performs only a bounded `SELECT 1` PostgreSQL connectivity
+check. It never evaluates a schedule, acquires a lease, enqueues work, or includes
+database details in its health output.

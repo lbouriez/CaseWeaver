@@ -1,0 +1,586 @@
+name: caseweaver-portainer
+
+# Backend-only Docker Standalone stack for Portainer. Every image value is a
+# deployment-owned immutable digest; this stack never builds from a checkout
+# and deliberately does not contain the static Admin console.
+#
+# Start the one-shot migration sequence first:
+#   docker compose --env-file /absolute/path/caseweaver-portainer.env \
+#     -f compose.portainer.yml --profile migrate up --abort-on-container-exit grant-runtime
+# Then start the long-running backend:
+#   docker compose --env-file /absolute/path/caseweaver-portainer.env \
+#     -f compose.portainer.yml --profile standalone up -d
+
+x-runtime-security: &runtime-security
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp:uid=1000,gid=1000,mode=0700
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+
+x-runtime-environment: &runtime-environment
+  NODE_ENV: production
+  DATABASE_URL_FILE: /run/secrets/runtime-database-url
+  CASEWEAVER_APPLICATION_SECRETS_DIRECTORY: /run/caseweaver/application-secrets
+  NODE_EXTRA_CA_CERTS: /run/secrets/trusted-ca-certificate
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+  OTEL_METRIC_EXPORT_INTERVAL_MS: ${OTEL_METRIC_EXPORT_INTERVAL_MS:-30000}
+  OTEL_SERVICE_VERSION: ${CASEWEAVER_RELEASE_VERSION:?Set CASEWEAVER_RELEASE_VERSION.}
+
+x-api-environment: &api-environment
+  HOST: "0.0.0.0"
+  PORT: "3000"
+  DATABASE_READINESS_TIMEOUT_MS: ${DATABASE_READINESS_TIMEOUT_MS:-5000}
+  API_WORKSPACE_ID: ${API_WORKSPACE_ID:?Set API_WORKSPACE_ID.}
+  API_PRINCIPAL_ID: ${API_PRINCIPAL_ID:?Set API_PRINCIPAL_ID.}
+  # This must be the exact Cloudflare Pages Admin HTTPS origin, never a wildcard.
+  ADMIN_ALLOWED_ORIGINS: ${ADMIN_ALLOWED_ORIGINS:?Set the exact Cloudflare Pages Admin origin.}
+  ADMIN_SESSION_COOKIE_SAME_SITE: ${ADMIN_SESSION_COOKIE_SAME_SITE:-none}
+  TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:?Set the fixed internal TLS-edge CIDR.}
+  ADMIN_DISABLE_LOGIN_AUTHENTICATION: ${ADMIN_DISABLE_LOGIN_AUTHENTICATION:-true}
+  ADMIN_ENABLE_PASSWORD_AUTHENTICATION: ${ADMIN_ENABLE_PASSWORD_AUTHENTICATION:-false}
+  OIDC_ISSUER: ${OIDC_ISSUER:-}
+  OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+  OIDC_CLIENT_SECRET_FILE: /run/secrets/oidc-client-secret
+  OIDC_CALLBACK_URL: ${OIDC_CALLBACK_URL:-}
+  OIDC_EPHEMERAL_ENCRYPTION_KEY_FILE: /run/secrets/oidc-ephemeral-encryption-key
+  OIDC_EPHEMERAL_KEY_ID: ${OIDC_EPHEMERAL_KEY_ID:-}
+  ADMIN_BOOTSTRAP_OIDC_SUBJECT: ${ADMIN_BOOTSTRAP_OIDC_SUBJECT:-}
+  ADMIN_BOOTSTRAP_DISPLAY_NAME: ${ADMIN_BOOTSTRAP_DISPLAY_NAME:-}
+  ADMIN_LOGIN_FILE: /run/secrets/admin-login
+  ADMIN_PASSWORD_FILE: /run/secrets/admin-password
+  AI_CATALOG_LITELLM_COMMIT_SHA: ${AI_CATALOG_LITELLM_COMMIT_SHA:-}
+
+x-worker-environment: &worker-environment
+  OBJECT_STORAGE_KIND: s3
+  OBJECT_STORAGE_BACKEND_ID: ${OBJECT_STORAGE_BACKEND_ID:?Set OBJECT_STORAGE_BACKEND_ID.}
+  OBJECT_STORAGE_KEY_DERIVATION_SECRET_FILE: /run/secrets/object-storage-key-derivation-secret
+  OBJECT_STORAGE_KEY_PREFIX: ${OBJECT_STORAGE_KEY_PREFIX:-caseweaver}
+  OBJECT_STORAGE_S3_ENDPOINT: ${OBJECT_STORAGE_S3_ENDPOINT:?Set OBJECT_STORAGE_S3_ENDPOINT.}
+  OBJECT_STORAGE_S3_REGION: ${OBJECT_STORAGE_S3_REGION:?Set OBJECT_STORAGE_S3_REGION.}
+  OBJECT_STORAGE_S3_BUCKET: ${OBJECT_STORAGE_S3_BUCKET:?Set OBJECT_STORAGE_S3_BUCKET.}
+  OBJECT_STORAGE_S3_FORCE_PATH_STYLE: ${OBJECT_STORAGE_S3_FORCE_PATH_STYLE:-false}
+  OBJECT_STORAGE_S3_ENCRYPTION: ${OBJECT_STORAGE_S3_ENCRYPTION:-AES256}
+  OBJECT_STORAGE_S3_KMS_KEY_ID: ${OBJECT_STORAGE_S3_KMS_KEY_ID:-}
+  OBJECT_STORAGE_S3_ACCESS_KEY_ID_FILE: /run/secrets/object-storage-s3-access-key-id
+  OBJECT_STORAGE_S3_SECRET_ACCESS_KEY_FILE: /run/secrets/object-storage-s3-secret-access-key
+  WORKER_GIT_TEMPORARY_DIRECTORY: ${WORKER_GIT_TEMPORARY_DIRECTORY:-/tmp/caseweaver-git}
+  WORKER_GIT_REMOTE_CACHE_DIRECTORY: ${WORKER_GIT_REMOTE_CACHE_DIRECTORY:-/tmp/caseweaver-git-cache}
+
+x-attachment-runtime-environment: &attachment-runtime-environment
+  WORKER_ATTACHMENT_RUNTIME_SOCKET_PATH: /var/run/caseweaver-attachments/processor.sock
+  WORKER_ATTACHMENT_RUNTIME_JOBS_DIRECTORY: /var/run/caseweaver-attachments/jobs
+  WORKER_ATTACHMENT_RUNTIME_TIMEOUT_MS: ${WORKER_ATTACHMENT_RUNTIME_TIMEOUT_MS:-60000}
+  WORKER_ATTACHMENT_RUNTIME_MAXIMUM_MEMORY_BYTES: ${WORKER_ATTACHMENT_RUNTIME_MAXIMUM_MEMORY_BYTES:-536870912}
+  WORKER_ATTACHMENT_RUNTIME_MAXIMUM_INPUT_BYTES: ${WORKER_ATTACHMENT_RUNTIME_MAXIMUM_INPUT_BYTES:-67108864}
+  WORKER_ATTACHMENT_RUNTIME_MAXIMUM_OUTPUT_BYTES: ${WORKER_ATTACHMENT_RUNTIME_MAXIMUM_OUTPUT_BYTES:-8388608}
+  WORKER_ATTACHMENT_RUNTIME_MAXIMUM_FILES: ${WORKER_ATTACHMENT_RUNTIME_MAXIMUM_FILES:-1000}
+  WORKER_ATTACHMENT_RUNTIME_MAXIMUM_EXPANDED_BYTES: ${WORKER_ATTACHMENT_RUNTIME_MAXIMUM_EXPANDED_BYTES:-268435456}
+  WORKER_ATTACHMENT_RUNTIME_MAXIMUM_EXTRACTED_FILE_BYTES: ${WORKER_ATTACHMENT_RUNTIME_MAXIMUM_EXTRACTED_FILE_BYTES:-33554432}
+  WORKER_ATTACHMENT_RUNTIME_MAXIMUM_ARCHIVE_DEPTH: ${WORKER_ATTACHMENT_RUNTIME_MAXIMUM_ARCHIVE_DEPTH:-16}
+  WORKER_ATTACHMENT_RUNTIME_MAXIMUM_COMPRESSION_RATIO: ${WORKER_ATTACHMENT_RUNTIME_MAXIMUM_COMPRESSION_RATIO:-100}
+
+services:
+  postgres:
+    image: ${CASEWEAVER_POSTGRES_IMAGE:?Set CASEWEAVER_POSTGRES_IMAGE to a pgvector digest.}
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-caseweaver}
+      POSTGRES_USER: ${POSTGRES_USER:-caseweaver_migrator}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres-password
+    secrets:
+      - source: postgres-password
+        target: postgres-password
+    volumes:
+      - caseweaver_portainer_postgres_data:/var/lib/postgresql/data
+    networks:
+      - data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    # The private PostgreSQL bootstrap is the one documented root exception. It
+    # owns a new named volume briefly, then drops to postgres. It never publishes
+    # a host port and receives no source/configuration bind mount.
+
+  runtime-role-bootstrap:
+    image: ${CASEWEAVER_MIGRATION_IMAGE:?Set CASEWEAVER_MIGRATION_IMAGE to a pinned migration image.}
+    profiles: ["migrate"]
+    restart: "no"
+    command:
+      - sh
+      - -ec
+      - |
+        set -eu
+        runtime_role="$${CASEWEAVER_RUNTIME_DATABASE_ROLE:-caseweaver_runtime}"
+        case "$$runtime_role" in
+          [a-z][a-z0-9_]* ) ;;
+          *) echo "CASEWEAVER_RUNTIME_DATABASE_ROLE is invalid." >&2; exit 1 ;;
+        esac
+        runtime_password="$$(cat /run/secrets/runtime-database-password)"
+        if [ -z "$$runtime_password" ]; then
+          echo "The runtime database password secret is empty." >&2
+          exit 1
+        fi
+        # Portainer stacks cannot rely on a checkout-relative init-script bind
+        # mount. Establish pgvector here, before migrations and the unprivileged
+        # runtime start, using this one-shot privileged database connection.
+        psql --set=ON_ERROR_STOP=1 --dbname="$$DATABASE_URL" \
+          -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+        psql --set=ON_ERROR_STOP=1 \
+          --set=runtime_role="$$runtime_role" \
+          --set=runtime_password="$$runtime_password" \
+          --dbname="$$DATABASE_URL" <<'SQL'
+        SELECT CASE
+          WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname = :'runtime_role')
+            THEN format('ALTER ROLE %I LOGIN PASSWORD %L', :'runtime_role', :'runtime_password')
+          ELSE format('CREATE ROLE %I LOGIN PASSWORD %L', :'runtime_role', :'runtime_password')
+        END
+        \gexec
+        SELECT format('GRANT CONNECT ON DATABASE %I TO %I', current_database(), :'runtime_role')
+        \gexec
+        GRANT USAGE ON SCHEMA public TO :"runtime_role";
+        SQL
+        unset runtime_password
+    environment:
+      NODE_ENV: production
+      DATABASE_URL_FILE: /run/secrets/migration-database-url
+      CASEWEAVER_RUNTIME_DATABASE_ROLE: ${CASEWEAVER_RUNTIME_DATABASE_ROLE:-caseweaver_runtime}
+      OTEL_SDK_DISABLED: "true"
+    secrets:
+      - source: migration-database-url
+        target: migration-database-url
+      - source: runtime-database-password
+        target: runtime-database-password
+    networks:
+      - data
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: true
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  migrate:
+    image: ${CASEWEAVER_MIGRATION_IMAGE:?Set CASEWEAVER_MIGRATION_IMAGE to a pinned migration image.}
+    profiles: ["migrate"]
+    restart: "no"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL_FILE: /run/secrets/migration-database-url
+      OTEL_SDK_DISABLED: "true"
+    secrets:
+      - source: migration-database-url
+        target: migration-database-url
+    networks:
+      - data
+    depends_on:
+      runtime-role-bootstrap:
+        condition: service_completed_successfully
+        required: true
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  queue-migrate:
+    image: ${CASEWEAVER_STANDALONE_IMAGE:?Set CASEWEAVER_STANDALONE_IMAGE to a pinned standalone image.}
+    profiles: ["migrate"]
+    restart: "no"
+    command: ["node", "dist/main.js", "migrate-queue"]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL_FILE: /run/secrets/migration-database-url
+    secrets:
+      - source: migration-database-url
+        target: migration-database-url
+    networks:
+      - data
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+        required: true
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  grant-runtime:
+    image: ${CASEWEAVER_MIGRATION_IMAGE:?Set CASEWEAVER_MIGRATION_IMAGE to a pinned migration image.}
+    profiles: ["migrate"]
+    restart: "no"
+    command: ["/usr/local/bin/caseweaver-grant-runtime-role"]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL_FILE: /run/secrets/migration-database-url
+      CASEWEAVER_RUNTIME_DATABASE_ROLE: ${CASEWEAVER_RUNTIME_DATABASE_ROLE:-caseweaver_runtime}
+    secrets:
+      - source: migration-database-url
+        target: migration-database-url
+    networks:
+      - data
+    depends_on:
+      queue-migrate:
+        condition: service_completed_successfully
+        required: true
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  edge-material:
+    image: ${CASEWEAVER_EDGE_IMAGE:?Set CASEWEAVER_EDGE_IMAGE to a pinned nginx-unprivileged image.}
+    profiles: ["standalone"]
+    restart: unless-stopped
+    # File-backed Docker secrets are root-owned on Docker Standalone. This isolated,
+    # no-network material service copies certificate files and writes the complete,
+    # fixed API-only Nginx configuration to a private tmpfs volume for the non-root edge.
+    user: "0:0"
+    command:
+      - sh
+      - -ec
+      - |
+        set -eu
+        case "${CASEWEAVER_EDGE_PUBLIC_HTTPS_PORT:?Set the public HTTPS port.}" in
+          *[!0-9]*|'') echo "CASEWEAVER_EDGE_PUBLIC_HTTPS_PORT is invalid." >&2; exit 1 ;;
+        esac
+        if [ "${CASEWEAVER_EDGE_PUBLIC_HTTPS_PORT}" -lt 1 ] || [ "${CASEWEAVER_EDGE_PUBLIC_HTTPS_PORT}" -gt 65535 ]; then
+          echo "CASEWEAVER_EDGE_PUBLIC_HTTPS_PORT is invalid." >&2
+          exit 1
+        fi
+        umask 077
+        cp /run/secrets/tls-certificate /run/caseweaver-edge/certificate.pem
+        cp /run/secrets/tls-private-key /run/caseweaver-edge/private-key.pem
+        cat > /run/caseweaver-edge/default.conf <<'NGINX'
+        server {
+            listen 8080;
+            server_name _;
+            server_tokens off;
+            return 308 https://__CASEWEAVER_NGINX_DOLLAR__host:${CASEWEAVER_EDGE_PUBLIC_HTTPS_PORT}__CASEWEAVER_NGINX_DOLLAR__request_uri;
+        }
+
+        server {
+            listen 8443 ssl;
+            server_name _;
+            server_tokens off;
+
+            ssl_certificate /run/caseweaver-edge/certificate.pem;
+            ssl_certificate_key /run/caseweaver-edge/private-key.pem;
+            ssl_protocols TLSv1.2 TLSv1.3;
+            ssl_session_timeout 1d;
+            ssl_session_cache shared:CaseWeaverTLS:10m;
+
+            client_max_body_size 10m;
+            client_body_timeout 15s;
+            keepalive_timeout 30s;
+            send_timeout 30s;
+
+            resolver 127.0.0.11 ipv6=off valid=10s;
+            set __CASEWEAVER_NGINX_DOLLAR__api_upstream standalone:3000;
+            set __CASEWEAVER_NGINX_DOLLAR__webhook_upstream standalone:8081;
+
+            add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+            add_header X-Content-Type-Options "nosniff" always;
+            add_header X-Frame-Options "DENY" always;
+            add_header Referrer-Policy "no-referrer" always;
+            add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+
+            location /v1/ {
+                proxy_pass http://__CASEWEAVER_NGINX_DOLLAR__api_upstream;
+                proxy_http_version 1.1;
+                proxy_connect_timeout 5s;
+                proxy_read_timeout 30s;
+                proxy_send_timeout 30s;
+                proxy_set_header Host __CASEWEAVER_NGINX_DOLLAR__host;
+                proxy_set_header X-Real-IP __CASEWEAVER_NGINX_DOLLAR__remote_addr;
+                proxy_set_header X-Forwarded-For __CASEWEAVER_NGINX_DOLLAR__remote_addr;
+                proxy_set_header X-Forwarded-Proto https;
+                proxy_set_header X-Forwarded-Host __CASEWEAVER_NGINX_DOLLAR__host;
+            }
+
+            location /health/ {
+                proxy_pass http://__CASEWEAVER_NGINX_DOLLAR__api_upstream;
+                proxy_http_version 1.1;
+                proxy_connect_timeout 5s;
+                proxy_read_timeout 10s;
+                proxy_set_header Host __CASEWEAVER_NGINX_DOLLAR__host;
+                proxy_set_header X-Real-IP __CASEWEAVER_NGINX_DOLLAR__remote_addr;
+                proxy_set_header X-Forwarded-For __CASEWEAVER_NGINX_DOLLAR__remote_addr;
+                proxy_set_header X-Forwarded-Proto https;
+                proxy_set_header X-Forwarded-Host __CASEWEAVER_NGINX_DOLLAR__host;
+            }
+
+            location /webhooks/ {
+                proxy_pass http://__CASEWEAVER_NGINX_DOLLAR__webhook_upstream;
+                proxy_http_version 1.1;
+                proxy_connect_timeout 5s;
+                proxy_read_timeout 30s;
+                proxy_send_timeout 30s;
+                proxy_set_header Host __CASEWEAVER_NGINX_DOLLAR__host;
+                proxy_set_header X-Real-IP __CASEWEAVER_NGINX_DOLLAR__remote_addr;
+                proxy_set_header X-Forwarded-For __CASEWEAVER_NGINX_DOLLAR__remote_addr;
+                proxy_set_header X-Forwarded-Proto https;
+                proxy_set_header X-Forwarded-Host __CASEWEAVER_NGINX_DOLLAR__host;
+            }
+
+            location / {
+                return 404;
+            }
+        }
+        NGINX
+        sed -i 's/__CASEWEAVER_NGINX_DOLLAR__/$/g' /run/caseweaver-edge/default.conf
+        chown 101:101 /run/caseweaver-edge/certificate.pem /run/caseweaver-edge/private-key.pem /run/caseweaver-edge/default.conf
+        chmod 0444 /run/caseweaver-edge/certificate.pem /run/caseweaver-edge/default.conf
+        chmod 0400 /run/caseweaver-edge/private-key.pem
+        exec tail -f /dev/null
+    secrets:
+      - source: tls-certificate
+        target: tls-certificate
+      - source: tls-private-key
+        target: tls-private-key
+    volumes:
+      - caseweaver_portainer_edge_runtime:/run/caseweaver-edge
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp:uid=0,gid=0,mode=0700
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "test -r /run/caseweaver-edge/certificate.pem && test -r /run/caseweaver-edge/private-key.pem && test -r /run/caseweaver-edge/default.conf"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+      start_period: 1s
+
+  edge:
+    image: ${CASEWEAVER_EDGE_IMAGE:?Set CASEWEAVER_EDGE_IMAGE to a pinned nginx-unprivileged image.}
+    profiles: ["standalone"]
+    restart: unless-stopped
+    ports:
+      - "${CASEWEAVER_EDGE_HTTP_BINDING:?Set CASEWEAVER_EDGE_HTTP_BINDING.}:8080"
+      - "${CASEWEAVER_EDGE_HTTPS_BINDING:?Set CASEWEAVER_EDGE_HTTPS_BINDING.}:8443"
+    volumes:
+      - caseweaver_portainer_edge_runtime:/etc/nginx/conf.d:ro
+      - caseweaver_portainer_edge_runtime:/run/caseweaver-edge:ro
+    networks:
+      - ingress
+      - application
+    depends_on:
+      edge-material:
+        condition: service_healthy
+        required: true
+      standalone:
+        condition: service_healthy
+        required: true
+    read_only: true
+    tmpfs:
+      - /tmp:uid=101,gid=101,mode=0700
+      - /var/cache/nginx:uid=101,gid=101,mode=0700
+      - /var/run:uid=101,gid=101,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "nginx -t && wget -q --no-check-certificate -O /dev/null https://127.0.0.1:8443/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  attachment-processor:
+    image: ${CASEWEAVER_ATTACHMENT_PROCESSOR_IMAGE:?Set CASEWEAVER_ATTACHMENT_PROCESSOR_IMAGE to a pinned attachment processor image.}
+    profiles: ["standalone"]
+    restart: unless-stopped
+    environment: *attachment-runtime-environment
+    volumes:
+      - caseweaver_portainer_attachment_runtime:/var/run/caseweaver-attachments
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=0700
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    network_mode: none
+    pids_limit: 64
+    mem_limit: 512m
+    cpus: 1.0
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /var/run/caseweaver-attachments/processor.sock"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  standalone:
+    <<: *runtime-security
+    image: ${CASEWEAVER_STANDALONE_IMAGE:?Set CASEWEAVER_STANDALONE_IMAGE to a pinned standalone image.}
+    profiles: ["standalone"]
+    environment:
+      <<: [*runtime-environment, *api-environment, *worker-environment, *attachment-runtime-environment]
+      OTEL_SERVICE_NAME: caseweaver-standalone
+    secrets:
+      - source: runtime-database-url
+        target: runtime-database-url
+      - source: oidc-client-secret
+        target: oidc-client-secret
+      - source: oidc-ephemeral-encryption-key
+        target: oidc-ephemeral-encryption-key
+      - source: admin-login
+        target: admin-login
+      - source: admin-password
+        target: admin-password
+      - source: trusted-ca-certificate
+        target: trusted-ca-certificate
+      - source: object-storage-key-derivation-secret
+        target: object-storage-key-derivation-secret
+      - source: object-storage-s3-access-key-id
+        target: object-storage-s3-access-key-id
+      - source: object-storage-s3-secret-access-key
+        target: object-storage-s3-secret-access-key
+    volumes:
+      - type: bind
+        source: ${CASEWEAVER_APPLICATION_SECRETS_DIRECTORY:?Set CASEWEAVER_APPLICATION_SECRETS_DIRECTORY to an absolute, operator-owned secret directory.}
+        target: /run/caseweaver/application-secrets
+        read_only: true
+        bind:
+          create_host_path: false
+      - caseweaver_portainer_attachment_runtime:/var/run/caseweaver-attachments
+    networks:
+      - application
+      - data
+      - egress
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: true
+      attachment-processor:
+        condition: service_healthy
+        required: true
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health/ready').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  object-store-operations:
+    image: ${CASEWEAVER_S3_OPERATIONS_IMAGE:?Set CASEWEAVER_S3_OPERATIONS_IMAGE to a pinned S3-compatible operations image.}
+    profiles: ["operations"]
+    restart: "no"
+    entrypoint:
+      - sh
+      - -ec
+      - >-
+        export AWS_ACCESS_KEY_ID="$$(cat /run/secrets/object-storage-s3-access-key-id)";
+        export AWS_SECRET_ACCESS_KEY="$$(cat /run/secrets/object-storage-s3-secret-access-key)";
+        export AWS_DEFAULT_REGION="$$OBJECT_STORAGE_S3_REGION";
+        export AWS_EC2_METADATA_DISABLED=true;
+        if [ -s /run/secrets/trusted-ca-certificate ]; then export AWS_CA_BUNDLE=/run/secrets/trusted-ca-certificate; fi;
+        exec aws "$$@"
+      - --
+    environment:
+      HOME: /tmp
+      OBJECT_STORAGE_S3_REGION: ${OBJECT_STORAGE_S3_REGION:?Set OBJECT_STORAGE_S3_REGION.}
+    secrets:
+      - source: object-storage-s3-access-key-id
+        target: object-storage-s3-access-key-id
+      - source: object-storage-s3-secret-access-key
+        target: object-storage-s3-secret-access-key
+      - source: trusted-ca-certificate
+        target: trusted-ca-certificate
+    networks:
+      - egress
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1000,gid=1000,mode=0700
+    user: "1000:1000"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+secrets:
+  postgres-password:
+    file: ${CASEWEAVER_POSTGRES_PASSWORD_FILE:?Set CASEWEAVER_POSTGRES_PASSWORD_FILE.}
+  runtime-database-password:
+    file: ${CASEWEAVER_RUNTIME_DATABASE_PASSWORD_FILE:?Set CASEWEAVER_RUNTIME_DATABASE_PASSWORD_FILE.}
+  migration-database-url:
+    file: ${CASEWEAVER_MIGRATION_DATABASE_URL_FILE:?Set CASEWEAVER_MIGRATION_DATABASE_URL_FILE.}
+  runtime-database-url:
+    file: ${CASEWEAVER_RUNTIME_DATABASE_URL_FILE:?Set CASEWEAVER_RUNTIME_DATABASE_URL_FILE.}
+  oidc-client-secret:
+    file: ${CASEWEAVER_OIDC_CLIENT_SECRET_FILE:?Set CASEWEAVER_OIDC_CLIENT_SECRET_FILE (an empty file when OIDC is disabled).}
+  oidc-ephemeral-encryption-key:
+    file: ${CASEWEAVER_OIDC_EPHEMERAL_ENCRYPTION_KEY_FILE:?Set CASEWEAVER_OIDC_EPHEMERAL_ENCRYPTION_KEY_FILE (an empty file when OIDC is disabled).}
+  admin-login:
+    file: ${CASEWEAVER_ADMIN_LOGIN_FILE:?Set CASEWEAVER_ADMIN_LOGIN_FILE (an empty file when password login is disabled).}
+  admin-password:
+    file: ${CASEWEAVER_ADMIN_PASSWORD_FILE:?Set CASEWEAVER_ADMIN_PASSWORD_FILE (an empty file when password login is disabled).}
+  object-storage-key-derivation-secret:
+    file: ${CASEWEAVER_OBJECT_STORAGE_KEY_DERIVATION_SECRET_FILE:?Set CASEWEAVER_OBJECT_STORAGE_KEY_DERIVATION_SECRET_FILE.}
+  object-storage-s3-access-key-id:
+    file: ${CASEWEAVER_OBJECT_STORAGE_S3_ACCESS_KEY_ID_FILE:?Set CASEWEAVER_OBJECT_STORAGE_S3_ACCESS_KEY_ID_FILE.}
+  object-storage-s3-secret-access-key:
+    file: ${CASEWEAVER_OBJECT_STORAGE_S3_SECRET_ACCESS_KEY_FILE:?Set CASEWEAVER_OBJECT_STORAGE_S3_SECRET_ACCESS_KEY_FILE.}
+  trusted-ca-certificate:
+    file: ${CASEWEAVER_TRUSTED_CA_FILE:?Set CASEWEAVER_TRUSTED_CA_FILE (an empty file when only public trust roots are needed).}
+  tls-certificate:
+    file: ${CASEWEAVER_TLS_CERTIFICATE_FILE:?Set CASEWEAVER_TLS_CERTIFICATE_FILE.}
+  tls-private-key:
+    file: ${CASEWEAVER_TLS_PRIVATE_KEY_FILE:?Set CASEWEAVER_TLS_PRIVATE_KEY_FILE.}
+
+volumes:
+  # This is the only durable local volume. Back it up through the documented
+  # PostgreSQL/S3 recovery procedure; never publish PostgreSQL directly.
+  caseweaver_portainer_postgres_data:
+  caseweaver_portainer_edge_runtime:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: uid=101,gid=101,mode=0700,size=1048576
+  caseweaver_portainer_attachment_runtime:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: uid=1000,gid=1000,mode=0700,size=536870912
+
+networks:
+  ingress:
+  application:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${CASEWEAVER_APPLICATION_SUBNET:-172.31.0.0/24}
+  data:
+    internal: true
+  egress:
+    ipam:
+      config:
+        - subnet: ${CASEWEAVER_EGRESS_SUBNET:-172.32.0.0/24}

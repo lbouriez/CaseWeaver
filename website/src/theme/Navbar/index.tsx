@@ -18,6 +18,7 @@ import {
   languageNames,
   supportedLocales,
 } from "../../localization/languages";
+import { storeLocalePreference } from "../../localization/language-preference";
 import styles from "./styles.module.css";
 
 function LocaleChooser(): React.ReactElement {
@@ -40,6 +41,7 @@ function LocaleChooser(): React.ReactElement {
         onChange={(event) => {
           const locale = event.currentTarget.value;
           if (!isSupportedLocale(locale)) return;
+          storeLocalePreference(locale);
           window.location.assign(
             alternatePageUtils.createUrl({
               locale,

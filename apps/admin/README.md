@@ -30,6 +30,28 @@ compiled into the bundle.
 For local development, copy the example to `public/runtime-config.json`, substitute a
 local API URL, and do not commit that file.
 
+### Cloudflare Pages artifact
+
+For a separately hosted Console, the Pages artifact is generated only after the normal
+Vite build. It accepts a public API **origin** (not a URL path) and writes exactly two
+deployment-owned files: `runtime-config.json` and Cloudflare's `_headers`. The latter
+keeps the runtime configuration out of caches and limits browser `connect-src` to that
+API origin. It cannot accept HTTP, credentials, paths, query strings, or fragments.
+
+```powershell
+$env:CASEWEAVER_ADMIN_API_BASE_URL = 'https://api.caseweaver.example'
+$env:CASEWEAVER_ADMIN_UI_TITLE = 'CaseWeaver Control Room'
+pnpm --filter @caseweaver/admin build
+node apps/admin/scripts/write-pages-runtime-config.mjs apps/admin/dist
+```
+
+The generated API origin is public configuration, not a credential. The API must still
+list the exact Pages origin in `ADMIN_ALLOWED_ORIGINS`; an externally hosted Console
+also requires the API's explicit `ADMIN_SESSION_COOKIE_SAME_SITE=none` production
+configuration. The Console continues to use the API-managed `HttpOnly` session cookie,
+CSRF token, and `/v1/auth/*` endpoints. It does not receive an OIDC token, provider
+credential, database configuration, or connector/runtime value.
+
 ## Live API contract
 
 PBI-016 supplies the following typed API boundary. The console always renders server

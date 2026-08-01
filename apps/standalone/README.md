@@ -25,3 +25,8 @@ pg-boss migrations before the standalone service starts.
 for a standalone image. It performs no long-running work and exits before the
 standalone host is started. This permits a three-service local topology (database,
 standalone backend, and frontend) without using a second durable-worker image.
+
+On startup failure the command emits either a generic failure or one of a small,
+allow-listed configuration outcome codes. It never writes a caught exception message
+to standard error: connection URLs, provider responses, and secret material are not a
+safe production diagnostic channel.

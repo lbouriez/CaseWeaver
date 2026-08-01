@@ -47,6 +47,12 @@ content does not, CaseWeaver records the observation without generating embeddin
 
 ## Documentation
 
+For the task-oriented operator and contributor guide, use the standalone
+[CaseWeaver documentation portal](website/README.md). It covers the supported local
+evaluation stack, connector/AI setup boundaries, production self-hosting, recovery,
+testing, and the current capability status. The portal builds without an application
+runtime or secret.
+
 The `.features` directory is the authoritative implementation specification:
 
 - [Product and scope](.features/01-product-and-scope.md)
@@ -88,14 +94,16 @@ orchestrator prompt for beginning implementation with independent subagents.
 
 ## Status
 
-PBI-013 production operations, PBI-016’s operator console, and PBI-020’s repository-
-assisted analysis and attachment-intelligence workflow are accepted. The supported local
-Docker topology has three persistent services: PostgreSQL, the standalone backend, and
-the Admin frontend. API, webhook ingress, scheduler, durable worker, and outbox relay
-remain reusable modules, but run inside that one backend process. PBI-017 release hardening is still in
-progress: production TLS, release-profile runtime exercise, backup/restore,
-image-vulnerability policy, and provenance/attestation verification are not yet claimed
-complete. Detailed contracts in `.features` remain authoritative.
+PBI-013 production operations, PBI-016’s operator console, PBI-017 Docker-first
+self-hosting/delivery, and PBI-020’s repository-assisted analysis and attachment-
+intelligence workflow are accepted. The supported local Docker topology has three
+persistent services: PostgreSQL, the standalone backend, and the Admin frontend. API,
+webhook ingress, scheduler, durable worker, and outbox relay remain reusable modules,
+but run inside that one backend process. Production uses digest-pinned linux/amd64
+images, a single public TLS edge, explicit forward-only migrations, separate migration/
+runtime database roles, S3-compatible backup/restore, and release-digest scanning plus
+provenance/SBOM attestation verification. Detailed contracts in `.features` remain
+authoritative.
 
 ## Quick Docker evaluation
 
@@ -120,6 +128,46 @@ It exercises real image builds, PostgreSQL/queue migrations, API readiness, same
 cookie sessions, the browser artifact, and all durable backend modules. See [the Docker
 guide](deploy/docker/README.md) for the difference between the local, test, Admin bridge,
 and production Compose files, plus OIDC and digest-pinned image setup.
+
+### Five-minute manual smoke test
+
+After the stack reports healthy, validate the normal operator path without an external
+provider or a credential:
+
+1. Open `http://localhost:8080`, sign in with `admin` / `admin`, and confirm the
+   **Overview** screen appears.
+2. Visit **Knowledge & Analysis**, create a retrieval profile named `manual-smoke` with
+   `{"policy":"hybrid","maximumResults":8}`, and confirm the success notice. Refresh
+   the page: the server-owned draft remains listed.
+3. Visit **Access & security**, register the harmless opaque reference
+   `env:CASEWEAVER_MANUAL_SMOKE`. Confirm it receives an ID but the locator is not shown
+   again after refresh.
+4. Click **Sign out**, then reload. The sign-in page must return; browser storage must
+   not contain an OAuth token, API key, or secret reference value.
+5. In another PowerShell window, verify the backend through the same public edge:
+
+   ```powershell
+   curl.exe --fail http://localhost:8080/health/live
+   curl.exe --fail http://localhost:8080/health/ready
+   ```
+
+Finish the disposable evaluation with `docker compose -f deploy\docker\compose.local.yml down -v`.
+Do not use the local `admin` / `admin` credentials outside this loopback-only stack.
+
+## Portainer backend with Cloudflare Pages Admin
+
+For a persistent self-hosted deployment, CaseWeaver can keep the backend in a
+source-free Portainer Docker Standalone stack and publish the unchanged static Admin
+artifact independently to Cloudflare Pages. The backend stack has a durable PostgreSQL
+named volume, uses immutable release-image digests and host-owned secret files, and
+exposes only API, health, and webhook routes—never the Admin files. The API remains the
+OIDC callback/session owner; the Pages browser holds only its secure HttpOnly session
+cookie.
+
+Follow the [Portainer and Cloudflare Pages runbook](deploy/docker/README.md#portainer-backend-with-cloudflare-pages-admin).
+It documents the required exact Pages origin, `SameSite=None` session mode, migration
+sequence, TLS/secrets, and the dedicated artifact-only GitHub workflow. The local,
+same-origin Compose command above remains the quickest evaluation path.
 
 ## Automated provider and knowledge E2E test
 
@@ -218,10 +266,11 @@ For a development password session, set `ADMIN_ALLOWED_ORIGINS` and use the expl
 development-only `ADMIN_LOGIN` / `ADMIN_PASSWORD` values below. For OIDC, configure a
 standards-compliant client and its registered HTTPS callback URL
 `https://.../v1/auth/callback`; place a TLS terminator in front of the API for that
-flow. The API itself does not terminate TLS and production TLS remains PBI-017 work.
-For a fresh OIDC database, set the initial administrator's stable `sub` claim once; the
-API creates the workspace, principal, administrator role, and OIDC mapping atomically.
-Remove bootstrap variables after the mapping exists.
+flow. The API itself does not terminate TLS; use the PBI-017 production TLS edge rather
+than exposing this source-run development process. For a fresh OIDC database, set the
+initial administrator's stable `sub` claim once; the API creates the workspace,
+principal, administrator role, and OIDC mapping atomically. Remove bootstrap variables
+after the mapping exists.
 
 ```powershell
 $env:NODE_ENV = "development"
@@ -267,10 +316,11 @@ Stop and remove the disposable test database when finished:
 pnpm db:test:down
 ```
 
-Do not use the test database credentials or the bootstrap environment variables in a
-production deployment. Production Compose and release packaging are owned by PBI-017;
-see [deploy/docker/README.md](deploy/docker/README.md) for its current operator
-contract.
+Do not use the test database credentials or bootstrap environment variables in a
+production deployment. For the supported digest-pinned TLS installation, migration,
+backup/restore, OIDC, and release-attestation procedure, see the
+[production Docker guide](deploy/docker/README.md) and its
+[threat model](deploy/docker/THREAT_MODEL.md).
 
 ## License
 

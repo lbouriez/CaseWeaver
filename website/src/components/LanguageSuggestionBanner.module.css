@@ -1,0 +1,22 @@
+.banner {
+  background: var(--ifm-background-surface-color);
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 0.75rem;
+  bottom: 1rem;
+  box-shadow: 0 0.75rem 2rem rgb(0 0 0 / 18%);
+  max-width: min(32rem, calc(100vw - 2rem));
+  padding: 1rem;
+  position: fixed;
+  right: 1rem;
+  z-index: 1000;
+}
+
+.banner p {
+  margin: 0 0 0.75rem;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}

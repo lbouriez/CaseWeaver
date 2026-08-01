@@ -829,7 +829,9 @@ export function registerAdministrationRoutes(
     // A session response is principal-specific and includes CSRF material. In
     // particular, an earlier anonymous response must not win after login.
     reply.header("cache-control", "no-store, private");
-    reply.header("vary", "Cookie");
+    // Preserve the CORS hook's origin variance as this principal-specific
+    // response also varies by its HttpOnly server-session cookie.
+    reply.header("vary", "Origin, Cookie");
     return operations.session(request);
   });
 

@@ -1,30 +1,30 @@
 ---
-sidebar_position: 3
+sidebar_position: 15
 title: Statut des capacités
 ---
 
-# Statut des capacités
+# Ce qui est pris en charge aujourd'hui
 
-## Fondation du portail — disponible
+Cette page distingue les instructions livrées du travail prévu. Le control plane en
+exécution reste l'autorité : il annonce si une surface est gérée, en lecture seule ou
+indisponible pour l'espace de travail et le rôle connectés.
 
-Ce site de documentation est un artefact statique autonome avec une recherche locale,
-une structure de langues et un flux de rédaction révisable.
+| Capacité | Statut | Parcours opérateur |
+| --- | --- | --- |
+| Portail documentaire statique | Disponible | Ce site ; aucune dépendance API ou secret. |
+| Stack d'évaluation locale | Disponible | `compose.local.yml`, loopback et jetable. |
+| Auto-hébergement production | Disponible | Images à digest et helper d'opérations. |
+| Sessions mot de passe/OIDC | Disponible | Configuration de déploiement ; cookies API. |
+| Source Git/Markdown | Disponible | Brouillon, test borné, source, planification, synchronisation. |
+| Jitbit connaissance/cas/destination | Disponible là où le serveur annonce la surface | [Guide Jitbit](./jitbit.md). |
+| Inventaire IA, bindings, prix, budgets | Disponible | Rafraîchissement serveur et test protégé. |
+| Analyse avec dépôt | Disponible là où les flux gérés sont annoncés | Zones Console dédiées. |
+| MCP et chat avec preuves | Reporté | Aucun parcours de configuration publié. |
 
-## Guide opérateur — vérification en attente
+## Limites importantes
 
-Les instructions orientées tâche pour l'auto-hébergement, l'authentification, la
-configuration, les opérations, la sauvegarde, la récupération et les parcours
-navigateur seront publiées uniquement après acceptation et nouveau test de leurs contrats
-de runtime, d'administration et de livraison.
-
-## Capacités reportées
-
-MCP et le chat attentif aux preuves ne sont pas des cibles de configuration disponibles.
-Ce sont des capacités planifiées qui recevront une documentation seulement lorsque leurs
-contrats de livraison seront acceptés.
-
-## Comment utiliser ce statut
-
-Ne déduisez pas une disponibilité à partir d'une étiquette de backlog, d'une capture
-d'écran ou d'un module source inachevé. Un guide opérateur doit s'appuyer sur le
-comportement de runtime actuel, des validateurs et des tests au moment de sa publication.
+La console ne fabrique pas de CRUD si le contrat API manque. Source, collection,
+planification, profil d'analyse, profil de publication et destination sont des
+enregistrements différents. Certaines données opérationnelles restent volontairement en
+lecture seule. Une surface indisponible exige une release compatible et un rôle autorisé,
+pas une requête navigateur modifiée.

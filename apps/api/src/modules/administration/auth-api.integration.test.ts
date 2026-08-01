@@ -174,6 +174,126 @@ describe("OIDC administration API integration", () => {
     await built.app.close();
   });
 
+  it("uses an exact trusted external console origin with secure SameSite=None cookies", async () => {
+    const externalConsoleOrigin = "https://console.pages.example";
+    const built = createOidcAdministrationApiFixture({
+      allowedAdminOrigins: [externalConsoleOrigin],
+      sessionCookie: { secure: true, sameSite: "none" },
+    });
+    const login = await built.app.inject({
+      method: "GET",
+      url: "/v1/auth/login?returnTo=https%3A%2F%2Fconsole.pages.example%2Fknowledge",
+    });
+    const state = new URL(login.headers.location ?? "").searchParams.get(
+      "state",
+    );
+    const callback = await built.app.inject({
+      method: "GET",
+      url: `/v1/auth/callback?code=authorization-code-for-test&state=${encodeURIComponent(state ?? "")}`,
+    });
+    const initialCookie = sessionCookie(String(callback.headers["set-cookie"]));
+    expect(callback.headers.location).toBe(
+      `${externalConsoleOrigin}/knowledge`,
+    );
+    expect(String(callback.headers["set-cookie"])).toContain(
+      "__Host-caseweaver-session=",
+    );
+    expect(String(callback.headers["set-cookie"])).toContain(
+      "SameSite=None; Secure",
+    );
+    const authenticated = await built.app.inject({
+      method: "GET",
+      url: "/v1/auth/session",
+      headers: { cookie: initialCookie, origin: externalConsoleOrigin },
+    });
+    expect(authenticated.headers["access-control-allow-origin"]).toBe(
+      externalConsoleOrigin,
+    );
+    expect(authenticated.headers["access-control-allow-credentials"]).toBe(
+      "true",
+    );
+    expect(authenticated.headers.vary).toBe("Origin, Cookie");
+    const session = authenticated.json();
+
+    const trustedPreflight = await built.app.inject({
+      method: "OPTIONS",
+      url: "/v1/auth/session/workspace",
+      headers: {
+        origin: externalConsoleOrigin,
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "x-csrf-token,idempotency-key",
+      },
+    });
+    expect(trustedPreflight.statusCode).toBe(204);
+    expect(trustedPreflight.headers["access-control-allow-origin"]).toBe(
+      externalConsoleOrigin,
+    );
+    expect(trustedPreflight.headers["access-control-allow-credentials"]).toBe(
+      "true",
+    );
+
+    const untrusted = await built.app.inject({
+      method: "POST",
+      url: "/v1/auth/session/workspace",
+      headers: {
+        cookie: initialCookie,
+        origin: "https://attacker.example",
+        "x-csrf-token": session.csrfToken,
+        "idempotency-key": "external-console-untrusted-origin-0001",
+      },
+      payload: { workspaceId: "workspace-b" },
+    });
+    expect(untrusted.statusCode).toBe(403);
+    expect(untrusted.headers["access-control-allow-origin"]).toBeUndefined();
+    expect(untrusted.headers["access-control-allow-credentials"]).toBeUndefined();
+
+    const rejectedPreflight = await built.app.inject({
+      method: "OPTIONS",
+      url: "/v1/auth/session/workspace",
+      headers: {
+        origin: "https://attacker.example",
+        "access-control-request-method": "POST",
+      },
+    });
+    expect(rejectedPreflight.statusCode).toBe(404);
+    expect(rejectedPreflight.headers["access-control-allow-origin"]).toBeUndefined();
+    expect(
+      rejectedPreflight.headers["access-control-allow-credentials"],
+    ).toBeUndefined();
+
+    const switched = await built.app.inject({
+      method: "POST",
+      url: "/v1/auth/session/workspace",
+      headers: {
+        cookie: initialCookie,
+        origin: externalConsoleOrigin,
+        "x-csrf-token": session.csrfToken,
+        "idempotency-key": "external-console-switch-workspace-0001",
+      },
+      payload: { workspaceId: "workspace-b" },
+    });
+    expect(switched.statusCode).toBe(200);
+    expect(String(switched.headers["set-cookie"])).toContain(
+      "SameSite=None; Secure",
+    );
+    const rotatedCookie = sessionCookie(String(switched.headers["set-cookie"]));
+    const loggedOut = await built.app.inject({
+      method: "POST",
+      url: "/v1/auth/logout",
+      headers: {
+        cookie: rotatedCookie,
+        origin: externalConsoleOrigin,
+        "x-csrf-token": switched.json().csrfToken,
+        "idempotency-key": "external-console-logout-0001",
+      },
+    });
+    expect(loggedOut.statusCode).toBe(204);
+    expect(String(loggedOut.headers["set-cookie"])).toContain(
+      "SameSite=None; Secure",
+    );
+    await built.app.close();
+  });
+
   it("fails a browser mutation with an invalid CSRF token and audits the denied workspace switch", async () => {
     const built = createOidcAdministrationApiFixture({
       allowedAdminOrigins: [adminOrigin],

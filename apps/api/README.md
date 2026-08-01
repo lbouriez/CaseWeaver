@@ -1,6 +1,6 @@
 # API application
 
-**PBIs:** 001, 002, 012, 013, 016, 021
+**PBIs:** 001, 002, 012, 013, 016, 021, 022
 
 Authenticated control-plane HTTP API for configuration, synchronization requests,
 analysis jobs, approvals, publications, evidence, budgets, and cost queries.
@@ -28,8 +28,8 @@ surface consumed by `apps/admin`; it validates descriptors server-side, scopes a
 records to the session workspace, uses persistent one-use action previews, and composes
 existing publication/operations use cases rather than duplicating their policy.
 Authentication redirects and session responses are `Cache-Control: no-store, private`;
-the session response also varies by cookie. This prevents an anonymous response from
-being replayed after the API has established an HttpOnly session.
+the session response varies by `Origin` and cookie. This prevents an anonymous response
+from being replayed after the API has established an HttpOnly session.
 
 Descriptor revisions are immutable. The descriptor discovery routes expose only the
 newest registered revision of each type for new authoring, while historical revisions
@@ -42,6 +42,13 @@ The API returns credentialed CORS headers only for explicit
 that server-side metadata and a generated ID, and never returns the locator or a secret
 value. Descriptor drafts accept those registration IDs for secret slots; composition
 resolves active metadata inside the transaction before adapter-owned validation.
+
+For an Admin artifact hosted separately from the API, deployment may set
+`ADMIN_SESSION_COOKIE_SAME_SITE=none` with one exact HTTPS `ADMIN_ALLOWED_ORIGINS`
+entry. This production-only setting issues the same host-only `__Host-`, `HttpOnly`,
+`Secure` API session cookie with `SameSite=None`; it does not loosen the origin or CSRF
+boundaries. Embedded/same-site deployments retain `lax`. See the Portainer and Pages
+runbook in [`deploy/docker/README.md`](../../deploy/docker/README.md#portainer-backend-with-cloudflare-pages-admin).
 
 `POST /v1/admin/diagnostics/exports` accepts a bounded export request and returns a
 safe status DTO only after it has atomically persisted the request, worker outbox

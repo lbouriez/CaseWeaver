@@ -463,7 +463,17 @@ function createOperatorLayout(title: string, onSignOut: () => Promise<void>) {
   }
 
   function OperatorLayout(props: LayoutProps) {
-    return <Layout {...props} appBar={AppBarWithTitle} menu={OperatorMenu} />;
+    // The operator controls remain reachable while a long authoring form is
+    // scrolled. Hiding the only sign-out and workspace controls on scroll is
+    // particularly unsafe for a server-session console.
+    return (
+      <Layout
+        {...props}
+        appBar={AppBarWithTitle}
+        appBarAlwaysOn
+        menu={OperatorMenu}
+      />
+    );
   }
   return OperatorLayout;
 }

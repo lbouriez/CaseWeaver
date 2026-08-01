@@ -30,8 +30,8 @@ export default function Footer(): React.ReactElement {
           <Link to="/docs/architecture">
             <Translate id="footer.architecture">Architecture</Translate>
           </Link>
-          <Link to="/docs/operations">
-            <Translate id="footer.operations">Operations status</Translate>
+          <Link to="/docs/self-hosting">
+            <Translate id="footer.operations">Self-hosting</Translate>
           </Link>
           <Link to="/docs/capability-status">
             <Translate id="footer.status">Roadmap and status</Translate>

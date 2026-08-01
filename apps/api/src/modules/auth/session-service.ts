@@ -1,29 +1,30 @@
 import {
-  createOidcLoginMaterial,
-  matchesDigest,
-  normalizeTrustedReturnTarget,
-  randomUrlSafeValue,
-  sha256Base64Url,
   type AuthAuditRequestMetadata,
   type AuthSessionAuditMutationStore,
   type AuthSessionStore,
+  createOidcLoginMaterial,
   type EphemeralSecretProtector,
+  matchesDigest,
+  normalizeTrustedReturnTarget,
   type OidcAuthorizationCodeClient,
   type OidcIdentityMapping,
   type OidcIdentityMappingStore,
   type OidcValidatedIdentity,
+  randomUrlSafeValue,
   type ServerSession,
+  sha256Base64Url,
 } from "@caseweaver/administration";
 import type { Permission } from "@caseweaver/security";
-
+import { createAuthAuditPlan } from "./audit-compliance.js";
 import {
+  assertValidSessionCookieConfiguration,
   clearedSessionCookie,
   csrfMatches,
   parseSessionCookie,
   requiresTrustedOrigin,
+  type SessionCookieConfiguration,
   sessionCookie,
 } from "./session-security.js";
-import { createAuthAuditPlan } from "./audit-compliance.js";
 
 export interface AuthenticatedSessionDto {
   readonly authenticated: true;
@@ -78,7 +79,8 @@ export interface AuthSessionServiceDependencies {
   readonly now?: () => Date;
   readonly loginLifetimeMs?: number;
   readonly sessionLifetimeMs?: number;
-  readonly secureCookies: boolean;
+  /** Internal transport policy; browser DTOs never receive cookie attributes. */
+  readonly sessionCookie: SessionCookieConfiguration;
   readonly allowedOrigins: readonly string[];
   /** Deployment-scoped local operator credential. It is never persisted or returned. */
   readonly passwordAuthentication?: Readonly<{
@@ -141,6 +143,7 @@ export class AuthSessionService {
     this.sessionLifetimeMs = validLifetime(
       dependencies.sessionLifetimeMs ?? defaultSessionLifetimeMs,
     );
+    assertValidSessionCookieConfiguration(dependencies.sessionCookie);
   }
 
   public async login(returnTo: string | undefined): Promise<{
@@ -357,7 +360,7 @@ export class AuthSessionService {
       });
     if (!revoked) throw new AuthSessionServiceError("auth.session.required");
     return Object.freeze({
-      setCookie: clearedSessionCookie(this.dependencies.secureCookies),
+      setCookie: clearedSessionCookie(this.dependencies.sessionCookie),
     });
   }
 
@@ -439,7 +442,7 @@ export class AuthSessionService {
   ): Promise<ActiveSession | undefined> {
     const sessionValue = parseSessionCookie(
       cookieHeader,
-      this.dependencies.secureCookies,
+      this.dependencies.sessionCookie,
     );
     if (sessionValue === undefined) return undefined;
     const session = await this.dependencies.sessions.findActiveSession(
@@ -537,7 +540,7 @@ export class AuthSessionService {
       setCookie: sessionCookie(
         rawSession,
         new Date(expiresAt),
-        this.dependencies.secureCookies,
+        this.dependencies.sessionCookie,
       ),
       session: await this.toSessionDto(serverSession, csrfToken),
     });

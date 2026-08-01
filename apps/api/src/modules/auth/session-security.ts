@@ -3,19 +3,46 @@ import { timingSafeEqual } from "node:crypto";
 const secureSessionCookieName = "__Host-caseweaver-session";
 const developmentSessionCookieName = "caseweaver-session";
 
-function sessionCookieName(secure: boolean): string {
-  return secure ? secureSessionCookieName : developmentSessionCookieName;
+export type SessionCookieSameSite = "lax" | "none";
+
+/** Deployment-owned HTTP cookie attributes. They are never sent to the browser as data. */
+export interface SessionCookieConfiguration {
+  readonly secure: boolean;
+  readonly sameSite: SessionCookieSameSite;
+}
+
+export function assertValidSessionCookieConfiguration(
+  configuration: SessionCookieConfiguration,
+): void {
+  if (configuration.sameSite === "none" && !configuration.secure) {
+    throw new Error("Cross-site session cookies must be secure.");
+  }
+}
+
+function sessionCookieName(configuration: SessionCookieConfiguration): string {
+  return configuration.secure
+    ? secureSessionCookieName
+    : developmentSessionCookieName;
+}
+
+function sessionCookieAttributes(
+  configuration: SessionCookieConfiguration,
+): string {
+  assertValidSessionCookieConfiguration(configuration);
+  const sameSite = configuration.sameSite === "none" ? "None" : "Lax";
+  return `Path=/; HttpOnly; SameSite=${sameSite}; ${configuration.secure ? "Secure; " : ""}`;
 }
 
 export function parseSessionCookie(
   cookieHeader: string | undefined,
-  secure: boolean,
+  configuration: SessionCookieConfiguration,
 ): string | undefined {
+  assertValidSessionCookieConfiguration(configuration);
   if (cookieHeader === undefined || cookieHeader.length > 8_192)
     return undefined;
   for (const part of cookieHeader.split(";")) {
     const [name, ...values] = part.trim().split("=");
-    if (name === sessionCookieName(secure)) {
+    if (name === sessionCookieName(configuration)) {
       const value = values.join("=");
       return /^[A-Za-z0-9_-]{22,512}$/u.test(value) ? value : undefined;
     }
@@ -26,15 +53,17 @@ export function parseSessionCookie(
 export function sessionCookie(
   value: string,
   expiresAt: Date,
-  secure: boolean,
+  configuration: SessionCookieConfiguration,
 ): string {
   if (!/^[A-Za-z0-9_-]{22,512}$/u.test(value))
     throw new Error("Session value is invalid.");
-  return `${sessionCookieName(secure)}=${value}; Path=/; HttpOnly; SameSite=Lax; ${secure ? "Secure; " : ""}Expires=${expiresAt.toUTCString()}`;
+  return `${sessionCookieName(configuration)}=${value}; ${sessionCookieAttributes(configuration)}Expires=${expiresAt.toUTCString()}`;
 }
 
-export function clearedSessionCookie(secure: boolean): string {
-  return `${sessionCookieName(secure)}=; Path=/; HttpOnly; SameSite=Lax; ${secure ? "Secure; " : ""}Max-Age=0`;
+export function clearedSessionCookie(
+  configuration: SessionCookieConfiguration,
+): string {
+  return `${sessionCookieName(configuration)}=; ${sessionCookieAttributes(configuration)}Max-Age=0`;
 }
 
 export function requiresTrustedOrigin(

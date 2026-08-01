@@ -1,3 +1,5 @@
+import { isIP } from "node:net";
+
 import { z } from "zod";
 
 const nodeEnvironments = ["development", "test", "production"] as const;
@@ -8,17 +10,6 @@ const httpsUrl = z
   .refine((value) => new URL(value).protocol === "https:", {
     message: "Expected an HTTPS URL.",
   });
-const proxyAddress = z
-  .string()
-  .trim()
-  .min(1)
-  .max(200)
-  .refine(
-    (value) =>
-      /^(?:\d{1,3}\.){3}\d{1,3}(?:\/\d{1,2})?$/u.test(value) ||
-      /^[0-9a-fA-F:]+(?:\/\d{1,3})?$/u.test(value),
-    { message: "Expected an IP address or CIDR." },
-  );
 const booleanEnvironmentValue = z
   .enum(["true", "false"])
   .transform((value) => value === "true");
@@ -94,6 +85,13 @@ const apiConfigSchema = z
       .optional()
       .default(false),
     ADMIN_ALLOWED_ORIGINS: z.string().max(8_000).optional(),
+    ADMIN_SESSION_COOKIE_SAME_SITE: z.preprocess(
+      (value) =>
+        typeof value === "string" && value.trim().length === 0
+          ? undefined
+          : value,
+      z.enum(["lax", "none"]).default("lax"),
+    ),
     TRUSTED_PROXY_CIDRS: z.string().max(8_000).optional(),
     /** Optional deployment pin for the trusted LiteLLM catalog source. */
     AI_CATALOG_LITELLM_COMMIT_SHA: optionalEnvironmentValue(gitCommitSha),
@@ -130,6 +128,8 @@ export interface ApiConfig {
     readonly displayName: string;
   }>;
   readonly allowedAdminOrigins: readonly string[];
+  /** Deployment-only cookie policy; it never enters an API DTO. */
+  readonly adminSessionCookieSameSite: "lax" | "none";
   /** Explicit proxy sources only; forwarding headers are otherwise ignored. */
   readonly trustedProxyCidrs: readonly string[];
   /** Optional deployment pin; absent means resolve the trusted source's main revision. */
@@ -195,6 +195,15 @@ export function parseApiConfig(env: NodeJS.ProcessEnv): ApiConfig {
   if (origins.length === 0) {
     throw new ApiConfigurationError();
   }
+  if (new Set(origins).size !== origins.length) {
+    throw new ApiConfigurationError();
+  }
+  if (
+    result.data.ADMIN_SESSION_COOKIE_SAME_SITE === "none" &&
+    result.data.NODE_ENV !== "production"
+  ) {
+    throw new ApiConfigurationError();
+  }
   if (
     result.data.ADMIN_DISABLE_LOGIN_AUTHENTICATION &&
     result.data.ADMIN_ENABLE_PASSWORD_AUTHENTICATION === true
@@ -224,9 +233,7 @@ export function parseApiConfig(env: NodeJS.ProcessEnv): ApiConfig {
     .split(",")
     .map((value) => value.trim())
     .filter((value) => value.length > 0);
-  if (
-    trustedProxyCidrs.some((value) => !proxyAddress.safeParse(value).success)
-  ) {
+  if (trustedProxyCidrs.some((value) => !validTrustedProxyCidr(value))) {
     throw new ApiConfigurationError();
   }
   return {
@@ -238,6 +245,7 @@ export function parseApiConfig(env: NodeJS.ProcessEnv): ApiConfig {
     principalId: result.data.API_PRINCIPAL_ID,
     databaseReadinessTimeoutMs: result.data.DATABASE_READINESS_TIMEOUT_MS,
     allowedAdminOrigins: Object.freeze(origins),
+    adminSessionCookieSameSite: result.data.ADMIN_SESSION_COOKIE_SAME_SITE,
     trustedProxyCidrs: Object.freeze(trustedProxyCidrs),
     ...(result.data.AI_CATALOG_LITELLM_COMMIT_SHA === undefined
       ? {}
@@ -287,20 +295,42 @@ function validAdminOrigin(
   value: string,
   nodeEnv: (typeof nodeEnvironments)[number],
 ): boolean {
-  if (httpsUrl.safeParse(value).success) return true;
-  if (nodeEnv !== "development") return false;
   try {
     const url = new URL(value);
+    if (
+      url.origin !== value ||
+      url.username.length > 0 ||
+      url.password.length > 0 ||
+      url.pathname !== "/" ||
+      url.search.length > 0 ||
+      url.hash.length > 0
+    ) {
+      return false;
+    }
+    if (url.protocol === "https:") return true;
+    if (nodeEnv !== "development") return false;
     return (
       url.protocol === "http:" &&
-      (url.hostname === "localhost" || url.hostname === "127.0.0.1") &&
-      url.username.length === 0 &&
-      url.password.length === 0 &&
-      url.pathname === "/" &&
-      url.search.length === 0 &&
-      url.hash.length === 0
+      (url.hostname === "localhost" ||
+        url.hostname === "127.0.0.1" ||
+        url.hostname === "[::1]")
     );
   } catch {
     return false;
   }
+}
+
+function validTrustedProxyCidr(value: string): boolean {
+  const [address, prefix, ...extra] = value.split("/");
+  if (address === undefined || address.length === 0 || extra.length > 0)
+    return false;
+  const family = isIP(address);
+  if (family === 0) return false;
+  if (prefix === undefined) return true;
+  if (!/^(?:0|[1-9]\d{0,2})$/u.test(prefix)) return false;
+  const numericPrefix = Number(prefix);
+  if (numericPrefix > (family === 4 ? 32 : 128)) return false;
+  // A /0 entry trusts every source in an address family. Forwarded headers
+  // would then be attacker-controlled whenever the API is directly reachable.
+  return numericPrefix !== 0;
 }

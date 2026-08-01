@@ -11,6 +11,12 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: container-images-${{ github.workflow }}-${{ github.ref }}
+  # A newer pull-request/main revision supersedes its predecessor. A release
+  # tag is immutable deployment evidence and must never be cancelled mid-publish.
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+
 env:
   NODE_VERSION: 22.13.1
 
@@ -34,6 +40,7 @@ jobs:
           context: .
           file: deploy/docker/Dockerfile
           target: ${{ matrix.target }}
+          platforms: linux/amd64
           load: true
           push: false
           tags: caseweaver-${{ matrix.target }}:ci
@@ -86,14 +93,35 @@ jobs:
         if: always()
         run: docker compose -f deploy/docker/compose.local.yml down -v
 
+  production-compose:
+    name: Production TLS Compose acceptance
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Install the pinned production acceptance toolchain
+        run: |
+          npm install --global corepack@0.31.0
+          corepack enable
+          corepack prepare pnpm@11.12.0 --activate
+          pnpm install --frozen-lockfile
+          pnpm exec playwright install --with-deps chromium
+      - name: Exercise standalone and distributed TLS release profiles
+        run: pnpm test:e2e:production
+
   publish:
     name: Publish ${{ matrix.target }} release image
-    needs: [build, local-smoke]
+    needs: [build, local-smoke, production-compose]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+      attestations: write
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -103,6 +131,10 @@ jobs:
       IMAGE: ${{ vars.CASEWEAVER_CONTAINER_REGISTRY || 'ghcr.io' }}/${{ github.repository_owner }}/caseweaver-${{ matrix.target }}
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+      - name: Require a version tag to point at main history
+        run: git merge-base --is-ancestor "$GITHUB_SHA" origin/main
       - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435
       - name: Validate registry-scoped destination
         run: |
@@ -122,11 +154,13 @@ jobs:
             type=ref,event=tag
             type=sha,format=long,prefix=sha-
       - name: Publish final image
+        id: build
         uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83
         with:
           context: .
           file: deploy/docker/Dockerfile
           target: ${{ matrix.target }}
+          platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -140,8 +174,77 @@ jobs:
           sbom: true
           provenance: mode=max
 
+      # Every HIGH or CRITICAL finding blocks a release. This initial policy has
+      # no ignore file: an exception must be explicitly designed and reviewed
+      # rather than silently weakening a release after publication.
+      - name: Generate SPDX SBOM for the immutable digest
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8
+        with:
+          image-ref: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          format: spdx-json
+          output: release-reports/${{ matrix.target }}.spdx.json
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: "0"
+      - name: Scan immutable image vulnerabilities
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8
+        with:
+          image-ref: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          format: table
+          output: release-reports/${{ matrix.target }}.image-vulnerabilities.txt
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: "1"
+      - name: Scan generated SPDX SBOM vulnerabilities
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8
+        with:
+          scan-type: sbom
+          scan-ref: release-reports/${{ matrix.target }}.spdx.json
+          format: table
+          output: release-reports/${{ matrix.target }}.sbom-vulnerabilities.txt
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: "1"
+      - name: Retain vulnerability and SBOM reports
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        with:
+          name: release-security-${{ matrix.target }}
+          path: release-reports/
+          if-no-files-found: warn
+          retention-days: 90
+      - name: Attest immutable build provenance
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+      - name: Attest SPDX SBOM
+        uses: actions/attest-sbom@4651f806c01d8637787e274ac3bdf724ef169f34
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          sbom-path: release-reports/${{ matrix.target }}.spdx.json
+          push-to-registry: true
+      - name: Emit immutable release image record
+        env:
+          RELEASE_IMAGE: ${{ env.IMAGE }}
+          RELEASE_DIGEST: ${{ steps.build.outputs.digest }}
+          RELEASE_TARGET: ${{ matrix.target }}
+          RELEASE_REVISION: ${{ github.sha }}
+          RELEASE_SIGNER_WORKFLOW: ${{ github.repository }}/.github/workflows/containers.yml
+        run: |
+          node --input-type=module -e "import { mkdirSync, writeFileSync } from 'node:fs'; const required = ['RELEASE_IMAGE', 'RELEASE_DIGEST', 'RELEASE_TARGET', 'RELEASE_REVISION', 'RELEASE_SIGNER_WORKFLOW']; for (const key of required) if (!process.env[key]) throw new Error('Missing release identity.'); mkdirSync('release-records', { recursive: true }); writeFileSync('release-records/' + process.env.RELEASE_TARGET + '.json', JSON.stringify({ target: process.env.RELEASE_TARGET, image: process.env.RELEASE_IMAGE, digest: process.env.RELEASE_DIGEST, reference: process.env.RELEASE_IMAGE + '@' + process.env.RELEASE_DIGEST, sourceRevision: process.env.RELEASE_REVISION, platform: 'linux/amd64', signerWorkflow: process.env.RELEASE_SIGNER_WORKFLOW, sbom: 'SPDX JSON is attached to this exact digest through a GitHub OCI attestation.', provenance: 'SLSA provenance is attached to this exact digest through a GitHub OCI attestation.' }, null, 2) + '\n');"
+      - name: Retain immutable release image record
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        with:
+          name: release-image-${{ matrix.target }}
+          path: release-records/${{ matrix.target }}.json
+          if-no-files-found: error
+          retention-days: 365
+
   release-pull-smoke:
-    name: Pull ${{ matrix.target }} release image
+    name: Verify ${{ matrix.target }} release image
     needs: publish
     if: needs.publish.result == 'success'
     runs-on: ubuntu-latest
@@ -154,14 +257,92 @@ jobs:
         target: [migration, api, admin, worker, scheduler, webhook, standalone, attachment-processor]
     env:
       REGISTRY: ${{ vars.CASEWEAVER_CONTAINER_REGISTRY || 'ghcr.io' }}
-      IMAGE: ${{ vars.CASEWEAVER_CONTAINER_REGISTRY || 'ghcr.io' }}/${{ github.repository_owner }}/caseweaver-${{ matrix.target }}:${{ github.ref_name }}
     steps:
+      - name: Download the immutable image identity
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3
+        with:
+          name: release-image-${{ matrix.target }}
+          path: release-records
+      - name: Load immutable image identity
+        run: |
+          node --input-type=module -e "import { readFileSync } from 'node:fs'; const record = JSON.parse(readFileSync('release-records/${{ matrix.target }}.json', 'utf8')); if (record.target !== '${{ matrix.target }}' || !/^[a-z0-9./_-]+$/i.test(record.image) || !/^sha256:[a-f0-9]{64}$/i.test(record.digest)) throw new Error('Release image record is invalid.'); process.stdout.write('CASEWEAVER_RELEASE_IMAGE=' + record.image + '\nCASEWEAVER_RELEASE_DIGEST=' + record.digest + '\n');" >> "$GITHUB_ENV"
       - uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
         with:
           registry: ${{ vars.CASEWEAVER_CONTAINER_REGISTRY || 'ghcr.io' }}
           username: ${{ vars.CASEWEAVER_CONTAINER_USERNAME || github.actor }}
           password: ${{ secrets.CASEWEAVER_CONTAINER_PASSWORD || secrets.GITHUB_TOKEN }}
-      - name: Pull the freshly published release tag
+      - name: Pull the freshly published immutable digest
         run: |
-          docker pull "$IMAGE"
-          docker image inspect "$IMAGE" --format '{{.Id}} {{.Config.User}}'
+          docker pull "$CASEWEAVER_RELEASE_IMAGE@$CASEWEAVER_RELEASE_DIGEST"
+          docker image inspect "$CASEWEAVER_RELEASE_IMAGE@$CASEWEAVER_RELEASE_DIGEST" --format '{{.Id}} {{.Config.User}}'
+      - name: Verify GitHub provenance from the OCI registry
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh attestation verify "oci://$CASEWEAVER_RELEASE_IMAGE@$CASEWEAVER_RELEASE_DIGEST" --repo "$GITHUB_REPOSITORY" --source-digest "$GITHUB_SHA" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/containers.yml" --deny-self-hosted-runners --bundle-from-oci
+      - name: Verify SPDX SBOM attestation from the OCI registry
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh attestation verify "oci://$CASEWEAVER_RELEASE_IMAGE@$CASEWEAVER_RELEASE_DIGEST" --repo "$GITHUB_REPOSITORY" --source-digest "$GITHUB_SHA" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/containers.yml" --predicate-type "https://github.com/in-toto/attestation/blob/main/spec/predicates/spdx.md" --deny-self-hosted-runners --bundle-from-oci
+
+  release-record:
+    name: Create verified release record
+    needs: release-pull-smoke
+    if: needs.release-pull-smoke.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Download verified immutable image records
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3
+        with:
+          pattern: release-image-*
+          path: release-images
+          merge-multiple: true
+      - name: Build machine-readable release record
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_REVISION: ${{ github.sha }}
+          RELEASE_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          node --input-type=module -e "import { readdirSync, readFileSync, writeFileSync } from 'node:fs'; const images = readdirSync('release-images', { withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith('.json')).map((entry) => JSON.parse(readFileSync('release-images/' + entry.name, 'utf8'))).sort((left, right) => left.target.localeCompare(right.target)); if (images.length !== 8 || new Set(images.map((image) => image.target)).size !== 8) throw new Error('Expected eight verified release image records.'); const migrations = readdirSync('infrastructure/postgres/prisma/migrations', { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort(); const record = { release: process.env.RELEASE_TAG, sourceRevision: process.env.RELEASE_REVISION, platform: 'linux/amd64', verifiedBy: process.env.RELEASE_RUN_URL, images, schema: { migrationPolicy: 'forward-only explicit migration runner', targetMigration: migrations.at(-1), supportedRange: 'A runtime starts only after this release\'s explicit migration sequence; image-only rollback is supported only while the retained schema is compatible. Otherwise restore the tested backup.' } }; writeFileSync('caseweaver-release-record.json', JSON.stringify(record, null, 2) + '\n');"
+      - name: Retain machine-readable release record
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        with:
+          name: caseweaver-release-record-${{ github.ref_name }}
+          path: caseweaver-release-record.json
+          retention-days: 365
+      - name: Publish human-readable verified release record
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
+        env:
+          RELEASE_RECORD_PATH: caseweaver-release-record.json
+        with:
+          script: |
+            const fs = require('node:fs');
+            const record = JSON.parse(fs.readFileSync(process.env.RELEASE_RECORD_PATH, 'utf8'));
+            const rows = record.images.map((image) => `| ${image.target} | \`${image.reference}\` |`).join('\n');
+            const body = [
+              '## Verified CaseWeaver OCI release',
+              '',
+              `Source revision: \`${record.sourceRevision}\``,
+              `Platform: \`${record.platform}\``,
+              '',
+              'All images were scanned at their immutable digest, then their GitHub provenance and SPDX SBOM attestations were verified from the OCI registry before this record was created.',
+              '',
+              '| Image | Immutable reference |',
+              '| --- | --- |',
+              rows,
+              '',
+              `Schema target: \`${record.schema.targetMigration}\`. ${record.schema.supportedRange}`,
+              '',
+              `Machine-readable record: [workflow artifact](${record.verifiedBy}).`,
+            ].join('\n');
+            try {
+              const existing = await github.rest.repos.getReleaseByTag({ owner: context.repo.owner, repo: context.repo.repo, tag: record.release });
+              await github.rest.repos.updateRelease({ owner: context.repo.owner, repo: context.repo.repo, release_id: existing.data.id, name: `CaseWeaver ${record.release}`, body, draft: false, prerelease: false });
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              await github.rest.repos.createRelease({ owner: context.repo.owner, repo: context.repo.repo, tag_name: record.release, target_commitish: record.sourceRevision, name: `CaseWeaver ${record.release}`, body, draft: false, prerelease: false });
+            }

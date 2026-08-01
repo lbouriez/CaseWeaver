@@ -192,6 +192,7 @@ export const oidcFixtureConfig: Omit<ApiConfig, "allowedAdminOrigins"> = {
   workspaceId: "workspace-a",
   principalId: "principal-a",
   databaseReadinessTimeoutMs: 500,
+  adminSessionCookieSameSite: "lax",
   trustedProxyCidrs: [],
 };
 
@@ -221,6 +222,10 @@ export function createOidcAdministrationApiFixture(
     readonly passwordAuthentication?: Readonly<{
       readonly login: string;
       readonly password: string;
+    }>;
+    readonly sessionCookie?: Readonly<{
+      readonly secure: boolean;
+      readonly sameSite: "lax" | "none";
     }>;
   }>,
 ): OidcAdministrationApiFixture {
@@ -290,7 +295,7 @@ export function createOidcAdministrationApiFixture(
       "credential.readMetadata" as Permission,
     ],
     now: () => new Date("2030-01-01T00:00:00.000Z"),
-    secureCookies: false,
+    sessionCookie: input.sessionCookie ?? { secure: false, sameSite: "lax" },
     allowedOrigins: input.allowedAdminOrigins,
     ...(input.passwordAuthentication === undefined
       ? {}

@@ -56,7 +56,7 @@ test("reviewed translation manifest records the exact English source revision", 
   );
 });
 
-test("source changes require a fresh human translation review", async () => {
+test("source changes require a fresh documented translation review", async () => {
   const fixture = await makeFixture();
   await writeReviewedManifest({ ...fixture, locale: "fr" });
   await writeFile(
@@ -84,5 +84,20 @@ test("a missing locale document cannot be registered as reviewed", async () => {
   await assert.rejects(
     writeReviewedManifest({ ...fixture, locale: "fr" }),
     /missing: architecture\.md/u,
+  );
+});
+
+test("only the published CaseWeaver locale can use the status manifest", async () => {
+  const fixture = await makeFixture();
+  const { runTranslationStatus } = await import(
+    "../scripts/translate-docs/status.mjs"
+  );
+  await assert.rejects(
+    runTranslationStatus({
+      locale: "es",
+      siteRoot: fixture.documentationRoot,
+      writeManifest: false,
+    }),
+    /Unsupported translation locale/u,
   );
 });
