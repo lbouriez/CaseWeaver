@@ -232,9 +232,13 @@ function randomSecret() {
 
 async function secretFile(name, contents = randomSecret()) {
   const destination = path.join(secretDirectory, name);
+  // Docker Compose keeps the host mode for file-backed secrets. Runtime images
+  // deliberately run as UID/GID 1000, so individual files must be readable
+  // there. The enclosing temporary directory is 0700, which keeps these test
+  // values private on the host while permitting the isolated container mount.
   await writeFile(destination, `${contents}\n`, {
     encoding: "utf8",
-    mode: 0o600,
+    mode: 0o444,
   });
   if (contents.length > 0) secretValues.push(contents);
   return destination;
@@ -410,7 +414,9 @@ function assertTlsReadiness(project) {
 
 async function writeConfiguration() {
   await mkdir(secretDirectory, { recursive: true, mode: 0o700 });
-  await mkdir(applicationSecretsDirectory, { recursive: true, mode: 0o700 });
+  // This directory is bind-mounted as a directory into non-root runtimes. Its
+  // parent remains private, while the mounted path must be searchable there.
+  await mkdir(applicationSecretsDirectory, { recursive: true, mode: 0o755 });
 
   const postgresPassword = await secretFile("postgres-password");
   const runtimePassword = await secretFile("runtime-database-password");

@@ -63,11 +63,34 @@ const requiredObjectStorageSecretFiles = [
   "CASEWEAVER_OBJECT_STORAGE_S3_ACCESS_KEY_ID_FILE",
   "CASEWEAVER_OBJECT_STORAGE_S3_SECRET_ACCESS_KEY_FILE",
 ];
+const rootBootstrapSecretFiles = new Set([
+  "CASEWEAVER_POSTGRES_PASSWORD_FILE",
+  "CASEWEAVER_RUNTIME_DATABASE_PASSWORD_FILE",
+  "CASEWEAVER_TLS_CERTIFICATE_FILE",
+  "CASEWEAVER_TLS_PRIVATE_KEY_FILE",
+]);
+const runtimeUser = Object.freeze({ uid: 1000, gid: 1000 });
 
 function usage() {
   console.error(
     "Usage: node deploy/docker/production-operations.mjs <validate|migrate|start|backup|restore> --env-file <path> [--mode standalone|distributed] [--output <file>|--input <file>]",
   );
+}
+
+function isReadableByRuntimeUser(stat, requireDirectorySearch = false) {
+  const mode = stat.mode & 0o777;
+  const permissions =
+    stat.uid === runtimeUser.uid
+      ? (mode >> 6) & 0o7
+      : stat.gid === runtimeUser.gid
+        ? (mode >> 3) & 0o7
+        : mode & 0o7;
+  const requiredPermissions = requireDirectorySearch ? 0o5 : 0o4;
+  return (permissions & requiredPermissions) === requiredPermissions;
+}
+
+function runtimeSecretPermissionGuidance(name) {
+  return `${name} must be readable by the non-root CaseWeaver runtime (UID/GID 1000). Protect the host parent directory with mode 0700, then grant the mounted file read access (for example mode 0444).`;
 }
 
 function parseArguments(argumentsList) {
@@ -206,6 +229,13 @@ async function validateEnvironment(environment, mode) {
     if (!stat.isFile())
       throw new Error(`Set ${key} to a regular operator-owned secret file.`);
     if (
+      process.platform !== "win32" &&
+      !rootBootstrapSecretFiles.has(key) &&
+      !isReadableByRuntimeUser(stat)
+    ) {
+      throw new Error(runtimeSecretPermissionGuidance(key));
+    }
+    if (
       [...requiredSecretFiles, ...requiredObjectStorageSecretFiles].includes(
         key,
       ) &&
@@ -220,14 +250,41 @@ async function validateEnvironment(environment, mode) {
     environment,
     "CASEWEAVER_APPLICATION_SECRETS_DIRECTORY",
   );
+  let applicationSecretDirectoryStat;
   try {
-    if (!(await fs.stat(applicationSecrets)).isDirectory()) {
+    applicationSecretDirectoryStat = await fs.stat(applicationSecrets);
+    if (!applicationSecretDirectoryStat.isDirectory()) {
       throw new Error("not a directory");
     }
   } catch {
     throw new Error(
       "Set CASEWEAVER_APPLICATION_SECRETS_DIRECTORY to a readable secret directory.",
     );
+  }
+  if (
+    process.platform !== "win32" &&
+    !isReadableByRuntimeUser(applicationSecretDirectoryStat, true)
+  ) {
+    throw new Error(
+      "CASEWEAVER_APPLICATION_SECRETS_DIRECTORY must be readable and searchable by the non-root CaseWeaver runtime (UID/GID 1000). Protect its parent directory with mode 0700, then use mode 0755 for the mounted directory and mode 0444 for its entries.",
+    );
+  }
+  if (process.platform !== "win32") {
+    for (const entry of await fs.readdir(applicationSecrets, {
+      withFileTypes: true,
+    })) {
+      if (!entry.isFile()) continue;
+      const entryStat = await fs.stat(
+        path.join(applicationSecrets, entry.name),
+      );
+      if (!isReadableByRuntimeUser(entryStat)) {
+        throw new Error(
+          runtimeSecretPermissionGuidance(
+            "CASEWEAVER_APPLICATION_SECRETS_DIRECTORY entry",
+          ),
+        );
+      }
+    }
   }
 }
 

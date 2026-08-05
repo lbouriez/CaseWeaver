@@ -246,11 +246,18 @@ notepad "$operator\production.env"
 The environment file is public configuration: public HTTPS origin, selected image
 digests, non-secret database role/name, selected mode's upstreams, S3 endpoint/bucket
 names, and paths to secret files. Never put a password, token, private key, or
-credential-bearing database URL in it. Create restrictive files named by the variables
-in the example (`CASEWEAVER_*_FILE`), including empty files for disabled optional
-features because Docker mounts a fixed secret contract. The helper requires non-empty
-files for PostgreSQL, the migration/runtime URLs, TLS certificate/key, and all required
-S3 encryption/credential material.
+credential-bearing database URL in it. On a Linux/Portainer Docker host, secure the
+operator directory itself with mode `0700`. Docker Compose preserves host modes for
+file-backed secrets, while CaseWeaver runtime images deliberately run as UID/GID `1000`:
+make each mounted `CASEWEAVER_*_FILE` readable by that UID/GID (for example mode
+`0444`). This does not make a file host-public when its parent directory is `0700`.
+`CASEWEAVER_APPLICATION_SECRETS_DIRECTORY` is mounted as a directory, so it must be
+searchable by that UID/GID (for example mode `0755`) and each entry readable (for example
+mode `0444`); its parent remains private. Include empty files for disabled optional
+features because Docker mounts a fixed secret contract. The helper fails before a
+deployment starts when these Linux permissions would make a runtime secret unreadable.
+It requires non-empty files for PostgreSQL, the migration/runtime URLs, TLS
+certificate/key, and all required S3 encryption/credential material.
 
 `CASEWEAVER_APPLICATION_SECRETS_DIRECTORY` is a read-only directory of additional
 server-private connector/provider/repository values. Each filename must be a safe
