@@ -37,9 +37,7 @@ export interface FakeGitFile {
 }
 
 export interface FakeGitSnapshot {
-  readonly ref:
-    | `${"branch" | "tag"}:${string}`
-    | `commit:${string}`;
+  readonly ref: `${"branch" | "tag"}:${string}` | `commit:${string}`;
   readonly commitSha: string;
   readonly files: readonly FakeGitFile[];
 }

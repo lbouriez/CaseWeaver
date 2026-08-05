@@ -56,6 +56,7 @@
 
 .menuButton,
 .repositoryLink,
+.docsLink,
 .localeSelect {
   border: 1px solid var(--ifm-color-emphasis-300);
   border-radius: 999px;
@@ -66,7 +67,8 @@
 }
 
 .menuButton,
-.repositoryLink {
+.repositoryLink,
+.docsLink {
   background: var(--ifm-background-surface-color);
   cursor: pointer;
   font-size: 0.875rem;
@@ -74,6 +76,7 @@
 }
 
 .repositoryLink:hover,
+.docsLink:hover,
 .menuButton:hover,
 .localeSelect:hover {
   border-color: var(--ifm-color-primary);
@@ -85,6 +88,16 @@
   background: var(--ifm-background-surface-color);
   cursor: pointer;
   font-size: 0.875rem;
+}
+
+.repositoryLink {
+  align-items: center;
+  gap: 0.45rem;
+  justify-content: center;
+}
+
+.docsLink {
+  font-weight: 650;
 }
 
 .search {
@@ -104,14 +117,27 @@
     height: 4.5rem;
     padding: 0 2rem;
   }
+}
 
+@media (min-width: 1024px) {
   .search {
     display: block;
   }
 }
 
+@media (max-width: 640px) {
+  .docsLink {
+    display: none;
+  }
+}
+
 @media (max-width: 460px) {
   .repositoryLink {
+    min-width: 2.5rem;
+    padding: 0;
+  }
+
+  .repositoryLabel {
     display: none;
   }
 

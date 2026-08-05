@@ -49,8 +49,6 @@ services:
       dockerfile: deploy/docker/Dockerfile
       target: migration
       args: *build-args
-      provenance: false
-      sbom: false
     environment:
       # The migration image defaults to production so its release entrypoint
       # rejects direct database values. This disposable local stack deliberately
@@ -107,8 +105,6 @@ services:
       dockerfile: deploy/docker/Dockerfile
       target: standalone
       args: *build-args
-      provenance: false
-      sbom: false
     environment:
       NODE_ENV: development
       HOST: 0.0.0.0
@@ -189,8 +185,6 @@ services:
       dockerfile: deploy/docker/Dockerfile
       target: admin
       args: *build-args
-      provenance: false
-      sbom: false
     environment:
       # The UI proxy keeps cookie-session API traffic same-origin; it is neither
       # a security decision point nor an independent backend role.

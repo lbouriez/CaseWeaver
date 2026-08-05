@@ -9,6 +9,8 @@ test("the portal foundation has its required standalone files", () => {
   for (const file of [
     "docusaurus.config.ts",
     "sidebars.ts",
+    "src/components/GitHubMark.tsx",
+    "src/pages/index.tsx",
     "src/theme/Navbar/index.tsx",
     "src/theme/Footer/index.tsx",
     "docs/overview.md",
@@ -23,6 +25,25 @@ test("the portal foundation has its required standalone files", () => {
       `${file} is missing`,
     );
   }
+});
+
+test("the landing page directs operators to concrete tasks and the repository link is recognizable", () => {
+  const home = readFileSync(resolve(siteRoot, "src/pages/index.tsx"), "utf8");
+  const navbar = readFileSync(
+    resolve(siteRoot, "src/theme/Navbar/index.tsx"),
+    "utf8",
+  );
+
+  for (const guide of [
+    "/docs/quick-start",
+    "/docs/operator-knowledge-map",
+    "/docs/operator-console-reference",
+    "/docs/self-hosting",
+  ]) {
+    assert.match(home, new RegExp(guide, "u"));
+  }
+  assert.match(navbar, /<GitHubMark/u);
+  assert.match(navbar, /aria-label=\{translate/u);
 });
 
 test("the portal uses CaseWeaver-owned presentation rather than Rekindle imports", () => {

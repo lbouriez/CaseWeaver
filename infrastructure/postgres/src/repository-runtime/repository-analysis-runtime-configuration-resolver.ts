@@ -13,11 +13,7 @@ const publicCheckoutReference = "caseweaver-public-checkout";
  * unbounded values are never accepted into the worker configuration.
  */
 function opaqueSecretLocator(value: string): boolean {
-  return (
-    value.length > 0 &&
-    value.length <= 4_096 &&
-    !/[\r\n\0]/u.test(value)
-  );
+  return value.length > 0 && value.length <= 4_096 && !/[\r\n\0]/u.test(value);
 }
 
 export type RepositoryAnalysisCheckoutReference =
@@ -30,7 +26,10 @@ export type RepositoryAnalysisRuntimeLocation =
       readonly remoteUrl: string;
       readonly checkoutSecretReference?: string;
     }>
-  | Readonly<{ readonly mode: "deploymentMounted"; readonly mountAlias: string }>;
+  | Readonly<{
+      readonly mode: "deploymentMounted";
+      readonly mountAlias: string;
+    }>;
 
 /**
  * The private resolver output is intentionally usable only by worker runtime
@@ -49,7 +48,11 @@ export interface ResolvedRepositoryAnalysisRuntimeConfiguration {
     readonly executionPolicyId: string;
     readonly executionPolicyVersionId: string;
     readonly repositoryAgentBindingVersionId: string;
-    readonly allowedTools: readonly ("listFiles" | "readFile" | "searchFiles")[];
+    readonly allowedTools: readonly (
+      | "listFiles"
+      | "readFile"
+      | "searchFiles"
+    )[];
     readonly sandbox: Readonly<{
       readonly timeoutMs: number;
       readonly maximumCpuMilliseconds: number;
@@ -62,7 +65,10 @@ export interface ResolvedRepositoryAnalysisRuntimeConfiguration {
       readonly maximumInputTokensPerTurn: number;
       readonly maximumOutputTokensPerTurn: number;
       readonly maximumInstructionCharacters: number;
-      readonly budget: Readonly<{ readonly currency: string; readonly hard: true }>;
+      readonly budget: Readonly<{
+        readonly currency: string;
+        readonly hard: true;
+      }>;
     }>;
   }>;
   readonly location: RepositoryAnalysisRuntimeLocation;
@@ -210,9 +216,7 @@ function remoteUrl(value: Prisma.JsonValue | undefined): string {
   }
 }
 
-function profileBudget(
-  definition: Prisma.JsonValue,
-): Readonly<{
+function profileBudget(definition: Prisma.JsonValue): Readonly<{
   readonly maximumInputTokens: number;
   readonly maximumOutputTokens: number;
   readonly currency: string;
@@ -277,7 +281,8 @@ export class PostgresRepositoryAnalysisRuntimeConfigurationResolver {
           repositoryStageMode: true,
         },
       });
-      if (recipe === null) throw new RepositoryAnalysisRuntimeNotApplicableError();
+      if (recipe === null)
+        throw new RepositoryAnalysisRuntimeNotApplicableError();
       if (
         recipe.repositoryStageMode === "disabled" ||
         recipe.codeRepositoryVersionId === null ||
@@ -405,7 +410,10 @@ export class PostgresRepositoryAnalysisRuntimeConfigurationResolver {
               boundedInteger(policyVersion.maximumOutputTokens, 1, 128_000),
             ),
             maximumInstructionCharacters: 64_000,
-            budget: Object.freeze({ currency: profileLimits.currency, hard: true }),
+            budget: Object.freeze({
+              currency: profileLimits.currency,
+              hard: true,
+            }),
           }),
         }),
         location: checkout,
@@ -448,7 +456,10 @@ export class PostgresRepositoryAnalysisRuntimeConfigurationResolver {
     readonly secretReferenceIds: Prisma.JsonValue;
   }): Promise<RepositoryAnalysisRuntimeLocation> {
     if (input.repository.mode === "deploymentMounted") {
-      if (!Array.isArray(input.secretReferenceIds) || input.secretReferenceIds.length !== 0) {
+      if (
+        !Array.isArray(input.secretReferenceIds) ||
+        input.secretReferenceIds.length !== 0
+      ) {
         unavailable();
       }
       return Object.freeze({
@@ -457,7 +468,10 @@ export class PostgresRepositoryAnalysisRuntimeConfigurationResolver {
       });
     }
     if (input.repository.mode !== "remoteHttps") unavailable();
-    if (!Array.isArray(input.secretReferenceIds) || input.secretReferenceIds.length > 1) {
+    if (
+      !Array.isArray(input.secretReferenceIds) ||
+      input.secretReferenceIds.length > 1
+    ) {
       unavailable();
     }
     const id = input.secretReferenceIds[0];
@@ -494,13 +508,17 @@ export class PostgresRepositoryAnalysisRuntimeConfigurationResolver {
     versionId: string,
     resourceType: string,
   ): Promise<string> {
-    const version = await this.client.administrationConfigurationVersion.findUnique({
-      where: { workspaceId_id: { workspaceId, id: versionId } },
-      select: {
-        configuration: { select: { id: true, resourceType: true } },
-      },
-    });
-    if (version === null || version.configuration.resourceType !== resourceType) {
+    const version =
+      await this.client.administrationConfigurationVersion.findUnique({
+        where: { workspaceId_id: { workspaceId, id: versionId } },
+        select: {
+          configuration: { select: { id: true, resourceType: true } },
+        },
+      });
+    if (
+      version === null ||
+      version.configuration.resourceType !== resourceType
+    ) {
       unavailable();
     }
     return version.configuration.id;

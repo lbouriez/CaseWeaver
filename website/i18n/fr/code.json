@@ -15,10 +15,58 @@
     "message": "CaseWeaver réunit les bonnes connaissances de l’entreprise, les politiques opérationnelles et l’historique des dossiers afin que les équipes enquêtent avec le contexte nécessaire plutôt que de repartir de zéro."
   },
   "homepage.primaryAction": {
-    "message": "Explorer la documentation"
+    "message": "Démarrer en local"
   },
   "homepage.secondaryAction": {
-    "message": "Voir comment cela fonctionne"
+    "message": "Configurer la Console"
+  },
+  "homepage.allGuides": {
+    "message": "Parcourir tous les guides opérateur et de déploiement"
+  },
+  "homepage.paths.eyebrow": {
+    "message": "Choisissez votre prochaine étape"
+  },
+  "homepage.paths.title": {
+    "message": "Commencez par le travail à accomplir."
+  },
+  "homepage.paths.copy": {
+    "message": "CaseWeaver se configure par petites étapes gouvernées. Ces guides indiquent le bon point de départ sans exposer d’identifiants ni supposer votre environnement."
+  },
+  "homepage.paths.local.title": {
+    "message": "Essayer CaseWeaver en local"
+  },
+  "homepage.paths.local.copy": {
+    "message": "Démarrez la pile d’évaluation à trois services et connectez-vous à une Console éphémère."
+  },
+  "homepage.paths.local.link": {
+    "message": "Ouvrir le démarrage rapide"
+  },
+  "homepage.paths.knowledge.title": {
+    "message": "Connecter les connaissances en sécurité"
+  },
+  "homepage.paths.knowledge.copy": {
+    "message": "Choisissez un connecteur, une collection, une planification et un parcours de recherche pour vos connaissances de support."
+  },
+  "homepage.paths.knowledge.link": {
+    "message": "Planifier une source de connaissances"
+  },
+  "homepage.paths.console.title": {
+    "message": "Configurer l’IA et les opérations"
+  },
+  "homepage.paths.console.copy": {
+    "message": "Utilisez la Console pour gérer les références de secrets opaques, les fournisseurs, les budgets, les analyses et l’historique d’audit."
+  },
+  "homepage.paths.console.link": {
+    "message": "Lire le guide de la Console"
+  },
+  "homepage.paths.deploy.title": {
+    "message": "Préparer un vrai déploiement"
+  },
+  "homepage.paths.deploy.copy": {
+    "message": "Séparez les paramètres publics des fichiers de secrets, puis appliquez les procédures d’auto-hébergement et de reprise prises en charge."
+  },
+  "homepage.paths.deploy.link": {
+    "message": "Ouvrir le guide de déploiement"
   },
   "homepage.proof.evidence.title": {
     "message": "Des preuves, pas des suppositions"
@@ -111,7 +159,10 @@
     "message": "Menu"
   },
   "navbar.repository": {
-    "message": "Dépôt"
+    "message": "Ouvrir CaseWeaver sur GitHub"
+  },
+  "navbar.documentation": {
+    "message": "Documentation"
   },
   "footer.navigation": {
     "message": "Navigation de pied de page"

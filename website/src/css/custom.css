@@ -113,6 +113,32 @@
   gap: 0.8rem;
 }
 
+.homeHero__allGuides {
+  align-items: center;
+  color: var(--ifm-font-color-base);
+  display: inline-flex;
+  font-size: 0.9rem;
+  font-weight: 700;
+  gap: 0.45rem;
+  margin-top: 1.15rem;
+  text-decoration: none;
+}
+
+.homeHero__allGuides:hover {
+  color: var(--ifm-color-primary);
+  text-decoration: none;
+}
+
+.homeHero__allGuides span {
+  color: var(--ifm-color-primary);
+  font-size: 1.1rem;
+  transition: transform 160ms ease;
+}
+
+.homeHero__allGuides:hover span {
+  transform: translateX(0.2rem);
+}
+
 .homeHero__proofs {
   display: grid;
   gap: 1rem;
@@ -353,6 +379,118 @@
   padding-top: clamp(4rem, 7vw, 7rem);
 }
 
+.homePaths {
+  padding-bottom: clamp(4rem, 6vw, 6rem);
+  padding-top: clamp(4rem, 6vw, 6rem);
+}
+
+.homePaths__heading {
+  max-width: 43rem;
+}
+
+.homePaths h2 {
+  font-size: clamp(2rem, 3.8vw, 3.25rem);
+  letter-spacing: -0.052em;
+  line-height: 1.04;
+  margin: 0;
+}
+
+.homePaths__heading > p:last-child {
+  color: var(--ifm-color-emphasis-700);
+  line-height: 1.65;
+  margin: 1.15rem 0 0;
+  max-width: 40rem;
+}
+
+.homePaths__grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 2.6rem;
+}
+
+.homePathCard {
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--ifm-color-primary) 5%, transparent),
+      transparent 45%
+    ),
+    var(--ifm-background-surface-color);
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 1rem;
+  color: var(--ifm-font-color-base);
+  display: flex;
+  flex-direction: column;
+  min-height: 18rem;
+  padding: 1.4rem;
+  text-decoration: none;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.homePathCard:hover,
+.homePathCard:focus-visible {
+  border-color: var(--ifm-color-primary);
+  box-shadow: 0 1rem 2rem rgba(13, 52, 65, 0.12);
+  color: var(--ifm-font-color-base);
+  text-decoration: none;
+  transform: translateY(-0.25rem);
+}
+
+[data-theme="dark"] .homePathCard:hover,
+[data-theme="dark"] .homePathCard:focus-visible {
+  box-shadow: 0 1rem 2rem rgba(0, 0, 0, 0.25);
+}
+
+.homePathCard__number {
+  color: var(--ifm-color-primary);
+  font-size: 0.78rem;
+  font-weight: 850;
+  letter-spacing: 0.1em;
+}
+
+.homePathCard h3 {
+  font-size: 1.08rem;
+  line-height: 1.25;
+  margin: 1.8rem 0 0.7rem;
+}
+
+.homePathCard p {
+  color: var(--ifm-color-emphasis-700);
+  font-size: 0.9rem;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.homePathCard__link {
+  align-items: center;
+  color: var(--ifm-color-primary-dark);
+  display: flex;
+  font-size: 0.86rem;
+  font-weight: 750;
+  gap: 0.4rem;
+  justify-content: space-between;
+  margin-top: auto;
+  padding-top: 1.45rem;
+}
+
+[data-theme="dark"] .homePathCard__link {
+  color: var(--ifm-color-primary-light);
+}
+
+.homePathCard__link > span {
+  font-size: 1.15rem;
+  transition: transform 160ms ease;
+}
+
+.homePathCard:hover .homePathCard__link > span,
+.homePathCard:focus-visible .homePathCard__link > span {
+  transform: translateX(0.2rem);
+}
+
 .homeSection__heading {
   max-width: 42rem;
 }
@@ -481,6 +619,9 @@
   .homeStart {
     grid-template-columns: 1fr;
   }
+  .homePaths__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .homeHero h1 {
     max-width: 18ch;
   }
@@ -497,7 +638,8 @@
     padding-top: 3.5rem;
   }
   .homeHero__proofs,
-  .homeSteps {
+  .homeSteps,
+  .homePaths__grid {
     grid-template-columns: 1fr;
   }
   .homeFlowVisual {

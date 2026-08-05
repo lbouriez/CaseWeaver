@@ -438,7 +438,10 @@ export interface CaseDiscoveryStateStore {
       readonly leaseMs: number;
     }>,
   ): Promise<
-    | Readonly<{ readonly kind: "claimed"; readonly claim: ClaimedCaseDiscovery }>
+    | Readonly<{
+        readonly kind: "claimed";
+        readonly claim: ClaimedCaseDiscovery;
+      }>
     | Readonly<{ readonly kind: "alreadyRunning" | "unavailable" }>
   >;
   advance(

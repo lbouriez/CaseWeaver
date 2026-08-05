@@ -1,6 +1,9 @@
 import type { GitRepository } from "@caseweaver/connector-git-markdown";
 import { EnvironmentConnectorSecretResolver } from "@caseweaver/connector-runtime";
-import { type AnalysisProfile, type RepositoryRunPin } from "@caseweaver/analysis";
+import {
+  type AnalysisProfile,
+  type RepositoryRunPin,
+} from "@caseweaver/analysis";
 import { secretReference, utcInstant } from "@caseweaver/domain";
 import type { PostgresRepositoryAnalysisRuntimeConfigurationResolver } from "@caseweaver/postgres";
 
@@ -54,7 +57,10 @@ export class RepositoryAnalysisRunPinResolver {
     readonly runtimeVersionId: string;
     readonly signal: AbortSignal;
   }): Promise<RepositoryRunPin> {
-    if (input.signal.aborted || input.profile.repository.policy === "disabled") {
+    if (
+      input.signal.aborted ||
+      input.profile.repository.policy === "disabled"
+    ) {
       unavailable();
     }
     const repository = input.profile.repository;
@@ -82,7 +88,8 @@ export class RepositoryAnalysisRunPinResolver {
     if (
       configuration.runtimeVersionId !== input.runtimeVersionId ||
       configuration.repository.repositoryId !== repository.repositoryId ||
-      configuration.repository.repositoryVersionId !== repository.repositoryVersionId ||
+      configuration.repository.repositoryVersionId !==
+        repository.repositoryVersionId ||
       configuration.executionPolicy.executionPolicyId !==
         repository.executionPolicyId ||
       configuration.executionPolicy.executionPolicyVersionId !==
@@ -100,7 +107,9 @@ export class RepositoryAnalysisRunPinResolver {
               kind: "token" as const,
               token: (
                 await this.secrets.resolve(
-                  secretReference(configuration.location.checkoutSecretReference),
+                  secretReference(
+                    configuration.location.checkoutSecretReference,
+                  ),
                   input.signal,
                 )
               ).value,
@@ -119,7 +128,9 @@ export class RepositoryAnalysisRunPinResolver {
               signal: input.signal,
             }
           : (() => {
-              const directory = this.mounts.get(configuration.location.mountAlias);
+              const directory = this.mounts.get(
+                configuration.location.mountAlias,
+              );
               if (directory === undefined) unavailable();
               return {
                 repository: { kind: "local" as const, path: directory },
@@ -147,7 +158,8 @@ export class RepositoryAnalysisRunPinResolver {
       });
     } catch (error) {
       if (input.signal.aborted) throw error;
-      if (error instanceof RepositoryAnalysisRunPinUnavailableError) throw error;
+      if (error instanceof RepositoryAnalysisRunPinUnavailableError)
+        throw error;
       unavailable();
     }
   }

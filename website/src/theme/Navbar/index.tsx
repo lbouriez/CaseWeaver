@@ -13,6 +13,7 @@ import clsx from "clsx";
 import type React from "react";
 
 import { CaseWeaverMark } from "../../components/CaseWeaverMark";
+import { GitHubMark } from "../../components/GitHubMark";
 import {
   isSupportedLocale,
   languageNames,
@@ -119,17 +120,25 @@ export default function Navbar(): React.ReactElement {
             </Link>
           </div>
           <div className={styles.rightSection}>
+            <Link className={styles.docsLink} to="/docs/overview">
+              <Translate id="navbar.documentation">Documentation</Translate>
+            </Link>
             <div className={styles.search}>
               <SearchBar />
             </div>
             <LocaleChooser />
             <a
+              aria-label={translate({
+                id: "navbar.repository",
+                message: "Open CaseWeaver on GitHub",
+              })}
               className={styles.repositoryLink}
               href={repositoryUrl}
               rel="noreferrer"
               target="_blank"
             >
-              <Translate id="navbar.repository">Repository</Translate>
+              <GitHubMark />
+              <span className={styles.repositoryLabel}>GitHub</span>
             </a>
           </div>
         </div>

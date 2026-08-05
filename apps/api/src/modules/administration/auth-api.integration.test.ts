@@ -245,7 +245,9 @@ describe("OIDC administration API integration", () => {
     });
     expect(untrusted.statusCode).toBe(403);
     expect(untrusted.headers["access-control-allow-origin"]).toBeUndefined();
-    expect(untrusted.headers["access-control-allow-credentials"]).toBeUndefined();
+    expect(
+      untrusted.headers["access-control-allow-credentials"],
+    ).toBeUndefined();
 
     const rejectedPreflight = await built.app.inject({
       method: "OPTIONS",
@@ -256,7 +258,9 @@ describe("OIDC administration API integration", () => {
       },
     });
     expect(rejectedPreflight.statusCode).toBe(404);
-    expect(rejectedPreflight.headers["access-control-allow-origin"]).toBeUndefined();
+    expect(
+      rejectedPreflight.headers["access-control-allow-origin"],
+    ).toBeUndefined();
     expect(
       rejectedPreflight.headers["access-control-allow-credentials"],
     ).toBeUndefined();

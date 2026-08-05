@@ -177,7 +177,9 @@ export class RepositoryAnalysisDraftTestRunner
   }
 }
 
-function parseMountedRepositories(value: string | undefined): readonly MountedRepository[] {
+function parseMountedRepositories(
+  value: string | undefined,
+): readonly MountedRepository[] {
   const entries = parseArray(value);
   const seen = new Set<string>();
   return Object.freeze(
@@ -209,7 +211,8 @@ function parseOptions(value: string | undefined): readonly DeploymentOption[] {
 }
 
 function parseArray(value: string | undefined): readonly unknown[] {
-  if (value === undefined || value.trim().length === 0) return Object.freeze([]);
+  if (value === undefined || value.trim().length === 0)
+    return Object.freeze([]);
   try {
     const parsed: unknown = JSON.parse(value);
     if (!Array.isArray(parsed) || parsed.length > 100) invalid();
@@ -243,12 +246,19 @@ function safeOptions(values: readonly DeploymentOption[]) {
 }
 
 function plainRecord(value: unknown): Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) invalid();
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    invalid();
   return value as Record<string, unknown>;
 }
 
-function exactKeys(value: Record<string, unknown>, expected: readonly string[]): void {
-  if (Object.keys(value).length !== expected.length || expected.some((key) => !(key in value))) {
+function exactKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+): void {
+  if (
+    Object.keys(value).length !== expected.length ||
+    expected.some((key) => !(key in value))
+  ) {
     invalid();
   }
 }

@@ -156,10 +156,16 @@ describe("NormalizedCaseSnapshotProjector", () => {
     });
 
     expect(snapshot.attachmentReferences).toHaveLength(2);
-    expect(snapshot.attachmentReferences?.map((value) => value.occurrenceIdentity)).toEqual(
+    expect(
+      snapshot.attachmentReferences?.map((value) => value.occurrenceIdentity),
+    ).toEqual(
       expect.arrayContaining([expect.stringMatching(/^[a-f0-9]{64}$/u)]),
     );
-    expect(new Set(snapshot.attachmentReferences?.map((value) => value.occurrenceIdentity))).toHaveLength(2);
+    expect(
+      new Set(
+        snapshot.attachmentReferences?.map((value) => value.occurrenceIdentity),
+      ),
+    ).toHaveLength(2);
     expect(JSON.stringify(snapshot)).not.toContain("private-one");
     expect(JSON.stringify(snapshot)).not.toContain("private-two");
   });

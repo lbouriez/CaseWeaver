@@ -100,21 +100,27 @@ export default function HomePage(): React.ReactElement {
               <div className="homeHero__actions">
                 <Link
                   className="button button--primary button--lg"
-                  to="/docs/overview"
+                  to="/docs/quick-start"
                 >
                   <Translate id="homepage.primaryAction">
-                    Explore the documentation
+                    Start locally
                   </Translate>
                 </Link>
                 <Link
                   className="button button--outline button--lg"
-                  to="/docs/architecture"
+                  to="/docs/operator-console-reference"
                 >
                   <Translate id="homepage.secondaryAction">
-                    See how it works
+                    Configure the Console
                   </Translate>
                 </Link>
               </div>
+              <Link className="homeHero__allGuides" to="/docs/overview">
+                <Translate id="homepage.allGuides">
+                  Browse all operator and deployment guides
+                </Translate>
+                <span aria-hidden="true">→</span>
+              </Link>
               <ul className="homeHero__proofs">
                 <li>
                   <strong>
@@ -145,6 +151,113 @@ export default function HomePage(): React.ReactElement {
             <SupportFlowVisual />
           </div>
         </header>
+
+        <section className="homePaths container">
+          <div className="homePaths__heading">
+            <p className="homeEyebrow">
+              <Translate id="homepage.paths.eyebrow">
+                Choose your next step
+              </Translate>
+            </p>
+            <h2>
+              <Translate id="homepage.paths.title">
+                Start from the job you need to do.
+              </Translate>
+            </h2>
+            <p>
+              <Translate id="homepage.paths.copy">
+                CaseWeaver is configured in small, governed steps. These guides
+                point to the right starting place without exposing credentials
+                or guessing at your environment.
+              </Translate>
+            </p>
+          </div>
+          <div className="homePaths__grid">
+            <Link className="homePathCard" to="/docs/quick-start">
+              <span className="homePathCard__number">01</span>
+              <h3>
+                <Translate id="homepage.paths.local.title">
+                  Try CaseWeaver locally
+                </Translate>
+              </h3>
+              <p>
+                <Translate id="homepage.paths.local.copy">
+                  Start the three-service evaluation stack and sign in to a
+                  disposable Console.
+                </Translate>
+              </p>
+              <span className="homePathCard__link">
+                <Translate id="homepage.paths.local.link">
+                  Open the quick start
+                </Translate>
+                <span aria-hidden="true">→</span>
+              </span>
+            </Link>
+            <Link className="homePathCard" to="/docs/operator-knowledge-map">
+              <span className="homePathCard__number">02</span>
+              <h3>
+                <Translate id="homepage.paths.knowledge.title">
+                  Connect knowledge safely
+                </Translate>
+              </h3>
+              <p>
+                <Translate id="homepage.paths.knowledge.copy">
+                  Choose a connector, collection, schedule, and retrieval path
+                  for your support knowledge.
+                </Translate>
+              </p>
+              <span className="homePathCard__link">
+                <Translate id="homepage.paths.knowledge.link">
+                  Plan a knowledge source
+                </Translate>
+                <span aria-hidden="true">→</span>
+              </span>
+            </Link>
+            <Link
+              className="homePathCard"
+              to="/docs/operator-console-reference"
+            >
+              <span className="homePathCard__number">03</span>
+              <h3>
+                <Translate id="homepage.paths.console.title">
+                  Configure AI and operations
+                </Translate>
+              </h3>
+              <p>
+                <Translate id="homepage.paths.console.copy">
+                  Use the Console to manage opaque secret references, providers,
+                  budgets, analysis, and audit history.
+                </Translate>
+              </p>
+              <span className="homePathCard__link">
+                <Translate id="homepage.paths.console.link">
+                  Read the Console guide
+                </Translate>
+                <span aria-hidden="true">→</span>
+              </span>
+            </Link>
+            <Link className="homePathCard" to="/docs/self-hosting">
+              <span className="homePathCard__number">04</span>
+              <h3>
+                <Translate id="homepage.paths.deploy.title">
+                  Prepare a real deployment
+                </Translate>
+              </h3>
+              <p>
+                <Translate id="homepage.paths.deploy.copy">
+                  Separate public settings from secret files, then use the
+                  supported self-hosting and recovery procedures.
+                </Translate>
+              </p>
+              <span className="homePathCard__link">
+                <Translate id="homepage.paths.deploy.link">
+                  Open the deployment guide
+                </Translate>
+                <span aria-hidden="true">→</span>
+              </span>
+            </Link>
+          </div>
+        </section>
 
         <section className="homeSection container">
           <div className="homeSection__heading">

@@ -403,17 +403,17 @@ describe("PostgreSQL attachment persistence", () => {
       ),
     ).resolves.toMatchObject({
       rows: [
-          {
-            occurrence_identity: "stable-occurrence-a",
-            owner_identity: "stable-owner-case",
-            source_ordinal: 0,
-            derivative_id: derivativeValue.id,
-          },
-          {
-            occurrence_identity: "stable-occurrence-b",
-            owner_identity: "stable-owner-comment",
-            source_ordinal: 0,
-            derivative_id: derivativeValue.id,
+        {
+          occurrence_identity: "stable-occurrence-a",
+          owner_identity: "stable-owner-case",
+          source_ordinal: 0,
+          derivative_id: derivativeValue.id,
+        },
+        {
+          occurrence_identity: "stable-occurrence-b",
+          owner_identity: "stable-owner-comment",
+          source_ordinal: 0,
+          derivative_id: derivativeValue.id,
         },
       ],
     });

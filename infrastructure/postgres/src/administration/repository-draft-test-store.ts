@@ -150,7 +150,10 @@ export class PostgresRepositoryDraftTestStore
     >[0],
   ): Promise<ServerPrivateRepositoryDraftTestCandidate | undefined> {
     const candidate = await this.resolveCandidate(input);
-    if (candidate === undefined || candidate.candidateDigest !== input.candidateDigest) {
+    if (
+      candidate === undefined ||
+      candidate.candidateDigest !== input.candidateDigest
+    ) {
       return undefined;
     }
     const rows = await this.client.$queryRaw<readonly CandidateRow[]>`
@@ -218,7 +221,10 @@ export class PostgresRepositoryDraftTestStore
         checkoutRef,
       });
     }
-    if (secretReferenceIds.length !== 0 || typeof repository.mountAlias !== "string") {
+    if (
+      secretReferenceIds.length !== 0 ||
+      typeof repository.mountAlias !== "string"
+    ) {
       return undefined;
     }
     return Object.freeze({

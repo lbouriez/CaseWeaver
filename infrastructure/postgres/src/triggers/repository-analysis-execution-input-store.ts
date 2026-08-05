@@ -91,7 +91,10 @@ export interface ClaimedRepositoryAnalysisExecutionInput {
 export type RepositoryAnalysisExecutionInputClaim =
   | Readonly<{ readonly kind: "notApplicable" | "notCaptured" | "notFound" }>
   | Readonly<{ readonly kind: "completed" }>
-  | Readonly<{ readonly kind: "claimed"; readonly claim: ClaimedRepositoryAnalysisExecutionInput }>;
+  | Readonly<{
+      readonly kind: "claimed";
+      readonly claim: ClaimedRepositoryAnalysisExecutionInput;
+    }>;
 
 /** Redacted retryable contention result; it contains no connector/repository data. */
 export class RepositoryAnalysisExecutionInputInProgressError extends Error {
@@ -124,7 +127,11 @@ function hash(value: string): string {
 }
 
 function canonical(value: unknown): string {
-  if (value === null || typeof value === "boolean" || typeof value === "number") {
+  if (
+    value === null ||
+    typeof value === "boolean" ||
+    typeof value === "number"
+  ) {
     return JSON.stringify(value);
   }
   if (typeof value === "string") return JSON.stringify(value);
@@ -140,7 +147,8 @@ function canonical(value: unknown): string {
 }
 
 function object(value: Prisma.JsonValue): JsonObject {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) unavailable();
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    unavailable();
   return value as JsonObject;
 }
 
@@ -165,8 +173,12 @@ function stage(value: string): "disabled" | "optional" | "required" {
 export function effectiveProfileForRepositoryAnalysisRecipe(
   row: RepositoryAnalysisRecipeExecutionRow,
 ): AnalysisProfile {
-  const base = object(row.profile_definition) as unknown as Record<string, unknown>;
-  if (row.recipe_profile_version_id !== row.analysis_profile_version_id) unavailable();
+  const base = object(row.profile_definition) as unknown as Record<
+    string,
+    unknown
+  >;
+  if (row.recipe_profile_version_id !== row.analysis_profile_version_id)
+    unavailable();
   const repositoryMode = stage(row.repository_stage_mode);
   const attachmentMode = stage(row.attachment_stage_mode);
   const existingRepository = object(base.repository as Prisma.JsonValue);
@@ -176,7 +188,8 @@ export function effectiveProfileForRepositoryAnalysisRecipe(
       ? Object.freeze({
           policy: "disabled",
           maximumContextCharacters: existingRepository.maximumContextCharacters,
-          maximumEvidenceCharacters: existingRepository.maximumEvidenceCharacters,
+          maximumEvidenceCharacters:
+            existingRepository.maximumEvidenceCharacters,
         })
       : Object.freeze({
           policy: repositoryMode,
@@ -190,7 +203,8 @@ export function effectiveProfileForRepositoryAnalysisRecipe(
             row.repository_agent_binding_version_id,
           ),
           maximumContextCharacters: existingRepository.maximumContextCharacters,
-          maximumEvidenceCharacters: existingRepository.maximumEvidenceCharacters,
+          maximumEvidenceCharacters:
+            existingRepository.maximumEvidenceCharacters,
         });
   if (
     (repositoryMode === "disabled" &&
@@ -205,7 +219,8 @@ export function effectiveProfileForRepositoryAnalysisRecipe(
         row.repository_id === null ||
         row.execution_policy_id === null ||
         row.repository_agent_binding_version_id === null)) ||
-    (attachmentMode === "disabled" && row.attachment_policy_version_id !== null) ||
+    (attachmentMode === "disabled" &&
+      row.attachment_policy_version_id !== null) ||
     (attachmentMode !== "disabled" && row.attachment_policy_version_id === null)
   ) {
     unavailable();
@@ -331,9 +346,14 @@ export function preparedAttachmentsFromStableAttemptEvidence(
  */
 export async function preparedAttachmentsForCaseSnapshot(
   database: Prisma.TransactionClient,
-  input: Readonly<{ readonly workspaceId: string; readonly caseSnapshotId: string }>,
+  input: Readonly<{
+    readonly workspaceId: string;
+    readonly caseSnapshotId: string;
+  }>,
 ): Promise<PreparedAttachmentEvidenceSet> {
-  const rows = await database.$queryRaw<readonly SnapshotAttachmentEvidenceRow[]>`
+  const rows = await database.$queryRaw<
+    readonly SnapshotAttachmentEvidenceRow[]
+  >`
     SELECT occurrence_identity, attachment_id, attachment_derivative_id,
            output_content_hash
     FROM case_snapshot_attachment_references
@@ -351,9 +371,14 @@ export async function preparedAttachmentsForCaseSnapshot(
  */
 export async function preparedAttachmentsForPinnedCaseSnapshot(
   database: Prisma.TransactionClient,
-  input: Readonly<{ readonly workspaceId: string; readonly caseSnapshotId: string }>,
+  input: Readonly<{
+    readonly workspaceId: string;
+    readonly caseSnapshotId: string;
+  }>,
 ): Promise<PreparedAttachmentEvidenceSet> {
-  const rows = await database.$queryRaw<readonly StableAttemptAttachmentEvidenceRow[]>`
+  const rows = await database.$queryRaw<
+    readonly StableAttemptAttachmentEvidenceRow[]
+  >`
     SELECT occurrence.occurrence_identity,
            occurrence.attachment_id,
            evidence.outcome,
@@ -395,7 +420,10 @@ export async function preparedAttachmentsForPinnedCaseSnapshot(
 
 async function pinnedAttemptIdForCaseSnapshot(
   database: Prisma.TransactionClient,
-  input: Readonly<{ readonly workspaceId: string; readonly caseSnapshotId: string }>,
+  input: Readonly<{
+    readonly workspaceId: string;
+    readonly caseSnapshotId: string;
+  }>,
 ): Promise<string> {
   const rows = await database.$queryRaw<readonly { readonly id: string }[]>`
     SELECT attempt.id
@@ -494,7 +522,8 @@ export class PostgresRepositoryAnalysisExecutionInputStore {
       if (
         row.analysis_trigger_version_id !== command.payload.triggerVersionId ||
         row.trigger_id !== command.payload.triggerId ||
-        row.connector_registration_id !== command.payload.connectorRegistrationId ||
+        row.connector_registration_id !==
+          command.payload.connectorRegistrationId ||
         row.connector_configuration_version_id !==
           command.payload.connectorConfigurationVersionId
       ) {
@@ -527,10 +556,7 @@ export class PostgresRepositoryAnalysisExecutionInputStore {
       `;
       const current = existing[0];
       if (current?.state === "finalized") return { kind: "completed" };
-      if (
-        current?.state === "claimed" &&
-        current.lease_live
-      ) {
+      if (current?.state === "claimed" && current.lease_live) {
         throw new RepositoryAnalysisExecutionInputInProgressError();
       }
       if (current?.state === "failed" && current.error_retryable !== true) {
@@ -540,7 +566,10 @@ export class PostgresRepositoryAnalysisExecutionInputStore {
       const fence = (current?.fencing_token ?? 0n) + 1n;
       const token = randomUUID();
       const placeholder = hash(
-        canonical({ requestId: row.request_id, recipeVersionId: row.recipe_version_id }),
+        canonical({
+          requestId: row.request_id,
+          recipeVersionId: row.recipe_version_id,
+        }),
       );
       if (current === undefined) {
         await database.$executeRaw`
@@ -617,7 +646,11 @@ export class PostgresRepositoryAnalysisExecutionInputStore {
       unavailable();
     }
     const repository = input.repositoryRun;
-    if (input.claim.repository === undefined ? repository !== undefined : repository === undefined) {
+    if (
+      input.claim.repository === undefined
+        ? repository !== undefined
+        : repository === undefined
+    ) {
       unavailable();
     }
     if (
@@ -625,8 +658,10 @@ export class PostgresRepositoryAnalysisExecutionInputStore {
       (!sha.test(repository.pinnedCommit) ||
         repository.runtimePinId !== input.claim.repository?.runtimeVersionId ||
         repository.repositoryId !== input.claim.repository.repositoryId ||
-        repository.repositoryVersionId !== input.claim.repository.repositoryVersionId ||
-        repository.executionPolicyId !== input.claim.repository.executionPolicyId ||
+        repository.repositoryVersionId !==
+          input.claim.repository.repositoryVersionId ||
+        repository.executionPolicyId !==
+          input.claim.repository.executionPolicyId ||
         repository.executionPolicyVersionId !==
           input.claim.repository.executionPolicyVersionId ||
         repository.repositoryAgentBindingVersionId !==

@@ -202,7 +202,8 @@ function assertOccurrence(
     command.type !== "analysis.discover.v1" ||
     command.workspaceId !== schedule.workspaceId ||
     command.scheduleId !== schedule.id ||
-    command.scheduleConfigurationVersionId !== schedule.configurationVersionId ||
+    command.scheduleConfigurationVersionId !==
+      schedule.configurationVersionId ||
     command.triggerId !== schedule.triggerId ||
     command.triggerVersionId !== schedule.triggerVersionId ||
     command.connectorRegistrationId !== schedule.connectorRegistrationId ||
@@ -210,7 +211,9 @@ function assertOccurrence(
       schedule.connectorConfigurationVersionId ||
     command.occurrenceKey !== input.occurrenceKey
   ) {
-    throw new Error("Case-discovery schedule occurrence runtime pins are invalid.");
+    throw new Error(
+      "Case-discovery schedule occurrence runtime pins are invalid.",
+    );
   }
 }
 
@@ -238,7 +241,9 @@ export class PostgresCaseDiscoveryScheduleStore
     readonly leaseMs: number;
   }): Promise<ScheduleLease | undefined> {
     if (!Number.isInteger(input.leaseMs) || input.leaseMs < 1) {
-      throw new RangeError("Schedule lease duration must be a positive integer.");
+      throw new RangeError(
+        "Schedule lease duration must be a positive integer.",
+      );
     }
     const result = await this.pool.query<LeaseRow>(
       `INSERT INTO case_analysis_intake_schedule_leases (
@@ -276,8 +281,13 @@ export class PostgresCaseDiscoveryScheduleStore
         [input.schedule.workspaceId, input.schedule.id],
       );
       const current = locked.rows[0];
-      if (current === undefined || !samePinnedSchedule(input.schedule, current)) {
-        throw new Error("Case-discovery schedule runtime pins are unavailable.");
+      if (
+        current === undefined ||
+        !samePinnedSchedule(input.schedule, current)
+      ) {
+        throw new Error(
+          "Case-discovery schedule runtime pins are unavailable.",
+        );
       }
       const occurrence = await client.query<{ readonly id: string }>(
         `INSERT INTO case_analysis_intake_schedule_occurrences (

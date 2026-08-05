@@ -28,9 +28,9 @@ function readGuide(path) {
 }
 
 function composeInterpolationKeys(source) {
-  return [
-    ...source.matchAll(/\$\{([A-Z][A-Z0-9_]+)/gu),
-  ].map((match) => match[1]);
+  return [...source.matchAll(/\$\{([A-Z][A-Z0-9_]+)/gu)].map(
+    (match) => match[1],
+  );
 }
 
 function deploymentExampleKeys(source) {

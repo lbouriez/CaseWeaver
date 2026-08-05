@@ -479,7 +479,9 @@ export class PostgresAttachmentRepository
         [input.id, input.workspaceId, reference.id, input.observedAt],
       );
       if (attachments.rows.length !== 1) {
-        throw new Error("Attachment reservation conflicts with immutable data.");
+        throw new Error(
+          "Attachment reservation conflicts with immutable data.",
+        );
       }
       await client.query("COMMIT");
     } catch (error) {
