@@ -13,7 +13,7 @@
     "lint": "biome lint .",
     "typecheck": "pnpm -r --if-present run typecheck",
     "build": "pnpm -r --if-present run build",
-    "test": "pnpm -r --if-present run test && pnpm test:contract",
+    "test": "pnpm -r --if-present run test && pnpm test:contract && node --test deploy/docker/postgres-init-contract.test.mjs",
     "test:contract": "pnpm --filter @caseweaver/attachments run build && pnpm --filter @caseweaver/object-storage run build && pnpm --filter @caseweaver/attachment-runtime run build && vitest run tests/contract/ai tests/contract/attachments tests/contract/connectors",
     "test:e2e": "pnpm --filter @caseweaver/admin build && playwright test",
     "test:e2e:compose": "node tests/e2e/run-compose-e2e.mjs",
