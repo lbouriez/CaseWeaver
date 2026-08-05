@@ -25,6 +25,10 @@ history, conversation resolution, and no force-push or deletion; and restricted
 `cloudflare-pages-production` to protected branches. The existing Cloudflare token
 remains a GitHub secret and is neither read nor re-created by this delivery. The next
 deployment will therefore reach the protected production environment only from `main`.
+Pull-request run `31037118902` verified the portal and published its artifact to the
+same-repository preview branch; the resulting HTTPS preview responded successfully.
+Manual cleanup dry run `31037250898` completed successfully without deleting a
+deployment.
 
 Depends on:
 
@@ -75,8 +79,8 @@ Depends on:
    through its dashboard before the managed DNS record can serve Pages.
 2. Merge the verified documentation change through the protected `main` branch and
    inspect its artifact-only production publish at the configured HTTPS origin.
-3. Run the cleanup workflow once with `dry_run: true` and inspect its retained-preview
-   and retained-production result before relying on the nightly schedule.
+3. After the first protected publish, inspect its URL, and keep the successful cleanup
+   dry-run evidence with the release record before relying on the nightly schedule.
 
 ## Excluded
 
