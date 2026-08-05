@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
@@ -14,6 +14,7 @@ import {
   type PinnedRepositoryFile,
   type PreparedRepositoryTreeRegistrar,
   publishPreparedRepositoryTree,
+  removePrivatePreparedRepositoryTree,
   type RepositoryCheckoutBroker,
   RepositoryRuntimeError,
   type SanitizedPinnedTree,
@@ -325,11 +326,7 @@ export class GitCliPinnedRepositoryCheckoutBroker
       });
       return tree;
     } catch (error) {
-      await rm(preparedTree.parentDirectory, {
-        recursive: true,
-        force: true,
-        maxRetries: 2,
-      });
+      await removePrivatePreparedRepositoryTree(preparedTree.parentDirectory);
       if (signal.aborted) throw signal.reason;
       if (error instanceof RepositoryRuntimeError) throw error;
       throw unavailable(

@@ -59,6 +59,7 @@ export {
   createPrivatePreparedRepositoryTree,
   type PrivatePreparedRepositoryTree,
   publishPreparedRepositoryTree,
+  removePrivatePreparedRepositoryTree,
 } from "./prepared-tree.js";
 export { isSafeRepositoryTextFile } from "./tree-sanitizer.js";
 export { verifyRepositoryAgentOutput } from "./tree-verifier.js";

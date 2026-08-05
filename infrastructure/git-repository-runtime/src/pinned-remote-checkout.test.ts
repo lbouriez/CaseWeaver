@@ -1,7 +1,10 @@
-import { rm } from "node:fs/promises";
+import { dirname } from "node:path";
 
 import type { GitRepository } from "@caseweaver/connector-git-markdown";
-import type { PreparedRepositoryTreeRegistrar } from "@caseweaver/repository-runtime";
+import {
+  removePrivatePreparedRepositoryTree,
+  type PreparedRepositoryTreeRegistrar,
+} from "@caseweaver/repository-runtime";
 import { describe, expect, it, vi } from "vitest";
 
 import { GitCliPinnedRepositoryCheckoutBroker } from "./pinned-remote-checkout.js";
@@ -76,10 +79,9 @@ describe("GitCliPinnedRepositoryCheckoutBroker", () => {
     expect(JSON.stringify(tree)).not.toContain("checkout-token");
     expect(JSON.stringify(tree)).not.toContain("vault:git");
     expect(registered).toBeDefined();
-    await rm((registered as { readonly directory: string }).directory, {
-      recursive: true,
-      force: true,
-    });
+    await removePrivatePreparedRepositoryTree(
+      dirname((registered as { readonly directory: string }).directory),
+    );
   });
 
   it("fails closed when Git resolves a moving ref to a different commit", async () => {
