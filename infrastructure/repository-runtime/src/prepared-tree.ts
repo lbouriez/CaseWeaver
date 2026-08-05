@@ -1,4 +1,12 @@
-import { chmod, lstat, mkdir, mkdtemp, rename } from "node:fs/promises";
+import {
+  chmod,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  rename,
+  rm,
+} from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 
 import { RepositoryRuntimeError } from "./contracts.js";
@@ -101,4 +109,51 @@ export async function publishPreparedRepositoryTree(
     throw preparationFailure();
   }
   return tree.publicDirectory;
+}
+
+async function makePrivateTreeWritable(candidate: string): Promise<boolean> {
+  let metadata: Awaited<ReturnType<typeof lstat>>;
+  try {
+    metadata = await lstat(candidate);
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ENOENT"
+    ) {
+      return false;
+    }
+    throw error;
+  }
+  if (metadata.isSymbolicLink()) throw preparationFailure();
+
+  if (metadata.isDirectory()) {
+    await chmod(candidate, 0o700);
+    for (const name of await readdir(candidate)) {
+      await makePrivateTreeWritable(join(candidate, name));
+    }
+    return true;
+  }
+
+  if (!metadata.isFile()) throw preparationFailure();
+  await chmod(candidate, 0o600);
+  return true;
+}
+
+/**
+ * Removes a private prepared-tree parent after first restoring write access.
+ * Publication intentionally makes its child tree read-only for the OCI mount;
+ * recursive removal on a normal Linux worker otherwise fails before it can
+ * unlink those read-only child entries.
+ */
+export async function removePrivatePreparedRepositoryTree(
+  parentDirectory: string,
+): Promise<void> {
+  if (!(await makePrivateTreeWritable(parentDirectory))) return;
+  await rm(parentDirectory, {
+    recursive: true,
+    force: true,
+    maxRetries: 2,
+  });
 }
