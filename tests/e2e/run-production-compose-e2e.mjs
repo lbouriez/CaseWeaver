@@ -241,9 +241,18 @@ async function secretFile(name, contents = randomSecret()) {
 }
 
 async function createCertificate(certificate, privateKey) {
+  // The fixture writes into a host-owned temporary directory. On Linux, the
+  // Docker daemon otherwise creates the private key as root, which prevents
+  // this runner from reading it back to prove the generated material exists.
+  // Windows has no process UID/GID contract, so retain Docker's default there.
+  const hostUser =
+    typeof process.getuid === "function" && typeof process.getgid === "function"
+      ? `${process.getuid()}:${process.getgid()}`
+      : undefined;
   run(docker, [
     "run",
     "--rm",
+    ...(hostUser === undefined ? [] : ["--user", hostUser]),
     "--mount",
     `type=bind,source=${temporaryDirectory},target=/out`,
     "caseweaver-e2e-fixtures:production",

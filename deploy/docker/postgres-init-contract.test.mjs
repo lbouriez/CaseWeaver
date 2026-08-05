@@ -13,7 +13,7 @@ test("optional runtime-role initialization is safe when PostgreSQL sources the s
   assert.match(script, /configure_runtime_role\(\) \{/);
   assert.match(
     script,
-    /if \[ ! -r "\$runtime_password_file" \]; then[\s\S]*?return 0\n  fi/,
+    /if \[ ! -r "\$runtime_password_file" \]; then[\s\S]*?return 0\n {2}fi/,
   );
   assert.doesNotMatch(script, /^\s*exit\s+\d+/m);
   assert.match(script, /\nconfigure_runtime_role\n$/);
