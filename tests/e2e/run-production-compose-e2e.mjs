@@ -562,9 +562,12 @@ async function writeConfiguration() {
   values.set("CASEWEAVER_TLS_CERTIFICATE_FILE", tlsCertificate);
   values.set("CASEWEAVER_TLS_PRIVATE_KEY_FILE", tlsPrivateKey);
   values.set("CASEWEAVER_E2E_OBJECT_MARKER_FILE", objectMarkerFile);
+  // This non-secret recovery marker is bind-mounted into the isolated S3
+  // operations container, which intentionally runs as UID/GID 1000 without
+  // elevated read capabilities. Its parent test directory remains private.
   await writeFile(objectMarkerFile, `CaseWeaver object recovery ${runId}\n`, {
     encoding: "utf8",
-    mode: 0o600,
+    mode: 0o444,
   });
   await writeEnvironment(environmentFile);
   return {
