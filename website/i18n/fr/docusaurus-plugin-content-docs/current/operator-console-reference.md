@@ -115,7 +115,7 @@ sa surface n'est pas gérée par serveur.
 
 ## Overview
 
-**Route :** #/  
+**Route :** #/
 **Accès :** toujours affiché ; les signaux restent limités par permission/espace.
 
 **System pulse** résume santé de file, signaux opérateur et budget sans démarrer
@@ -126,7 +126,7 @@ le [dépannage](./troubleshooting.md).
 
 ## Integrations
 
-**Route :** #/integrations  
+**Route :** #/integrations
 **Permission navigation :** configuration.read ; chaque commande reçoit aussi
 son autorisation propre.
 
@@ -193,7 +193,7 @@ Créer le brouillon ne traite pas les tickets existants. Activez puis examinez
 
 ## AI configuration
 
-**Route :** #/ai  
+**Route :** #/ai
 **Permission navigation :** configuration.read ; création, activation, prix,
 budget et test restent autorisés séparément.
 
@@ -249,7 +249,7 @@ Voir [IA et coût](./ai-and-cost.md).
 
 ## Knowledge & Analysis
 
-**Route :** #/knowledge-analysis  
+**Route :** #/knowledge-analysis
 **Permission navigation :** analysis.read ; édition seulement pour surfaces
 serveur gérées.
 
@@ -290,7 +290,7 @@ configuration plus récente.
 
 ## Repository analysis
 
-**Route :** #/repository-analysis  
+**Route :** #/repository-analysis
 **Permission navigation :** configuration.read.
 
 Cet écran possède l'évidence code, non le contenu Git/Markdown de source. Il
@@ -324,7 +324,7 @@ Voir [Connaissance et analyse](./knowledge-analysis.md#analyse-de-cas-assistée-
 
 ## Publication
 
-**Route :** #/publication  
+**Route :** #/publication
 **Permission navigation :** analysis.read.
 
 **Create a publication profile draft** définit politique destination versionnée
@@ -339,7 +339,7 @@ job/dead letter et audit, pas de doublon manuel.
 
 ## Operations
 
-**Route :** #/operations  
+**Route :** #/operations
 **Visible avec :** operations.inspect, cost.read, audit.read ou retention.run ;
 chaque ressource/action garde sa permission.
 
@@ -362,7 +362,7 @@ et [dépannage](./troubleshooting.md).
 
 ## Access & security
 
-**Route :** #/access  
+**Route :** #/access
 **Visible avec :** workspace.manage, identity.manage ou credential.manage.
 
 C'est le registre canonique de références secrètes. Formulaires Intégration/IA
@@ -398,7 +398,7 @@ proxy sont réglages de déploiement.
 
 ## Platform
 
-**Route :** #/platform  
+**Route :** #/platform
 **Permission navigation :** configuration.read.
 
 Platform affiche capacité runtime, readiness, posture authentification et état

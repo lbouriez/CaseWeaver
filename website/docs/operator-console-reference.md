@@ -116,7 +116,7 @@ read-only when its server configuration surface is not managed.
 
 ## Overview
 
-**Route:** `#/`  
+**Route:** `#/`
 **Access:** always shown; individual server signals remain permission- and
 workspace-scoped.
 
@@ -129,7 +129,7 @@ healthy signal; follow its explicit unavailable state and
 
 ## Integrations
 
-**Route:** `#/integrations`  
+**Route:** `#/integrations`
 **Navigation permission:** `configuration.read`; every command receives its own
 server authorization.
 
@@ -201,7 +201,7 @@ Creating a draft does not process existing tickets. Activate it and inspect
 
 ## AI configuration
 
-**Route:** `#/ai`  
+**Route:** `#/ai`
 **Navigation permission:** `configuration.read`; creation, activation, pricing,
 budget, and testing remain separately authorized.
 
@@ -262,7 +262,7 @@ See [AI configuration and cost](./ai-and-cost.md) for the full flow.
 
 ## Knowledge & Analysis
 
-**Route:** `#/knowledge-analysis`  
+**Route:** `#/knowledge-analysis`
 **Navigation permission:** `analysis.read`; authoring appears only for managed
 server surfaces.
 
@@ -308,7 +308,7 @@ not silently use newer configuration.
 
 ## Repository analysis
 
-**Route:** `#/repository-analysis`  
+**Route:** `#/repository-analysis`
 **Navigation permission:** `configuration.read`.
 
 This screen owns code evidence, not Git/Markdown knowledge-source content. It
@@ -346,7 +346,7 @@ See [Knowledge and analysis](./knowledge-analysis.md#repository-assisted-case-an
 
 ## Publication
 
-**Route:** `#/publication`  
+**Route:** `#/publication`
 **Navigation permission:** `analysis.read`.
 
 **Create a publication profile draft** defines a versioned destination policy
@@ -362,7 +362,7 @@ instead of manually posting a duplicate.
 
 ## Operations
 
-**Route:** `#/operations`  
+**Route:** `#/operations`
 **Visible with any of:** `operations.inspect`, `cost.read`, `audit.read`, or
 `retention.run`; individual records/actions still require their own permission.
 
@@ -386,7 +386,7 @@ and [troubleshooting](./troubleshooting.md) for recovery procedures.
 
 ## Access & security
 
-**Route:** `#/access`  
+**Route:** `#/access`
 **Visible with any of:** `workspace.manage`, `identity.manage`, or
 `credential.manage`.
 
@@ -426,7 +426,7 @@ identity bootstrap/origin/proxy policy are deployment configuration.
 
 ## Platform
 
-**Route:** `#/platform`  
+**Route:** `#/platform`
 **Navigation permission:** `configuration.read`.
 
 Platform reports safe runtime capability, readiness, authentication posture, and
