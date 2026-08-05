@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
   access,
+  chmod,
   mkdir,
   mkdtemp,
   readFile,
@@ -277,6 +278,11 @@ async function createCertificate(certificate, privateKey) {
     "-addext",
     "subjectAltName=DNS:caseweaver.test,DNS:oidc.caseweaver.test,DNS:object-store,IP:127.0.0.1",
   ]);
+  // The test-only OIDC and S3 fixtures deliberately drop root's DAC override,
+  // yet both consume this ephemeral TLS material. The enclosing test directory
+  // remains 0700, so make the mounted copies readable without exposing them to
+  // other host users. Production TLS is instead read only by tls-material.
+  await Promise.all([chmod(certificate, 0o444), chmod(privateKey, 0o444)]);
   await Promise.all([
     readFile(certificate, "utf8"),
     readFile(privateKey, "utf8"),

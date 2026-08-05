@@ -249,8 +249,12 @@ names, and paths to secret files. Never put a password, token, private key, or
 credential-bearing database URL in it. On a Linux/Portainer Docker host, secure the
 operator directory itself with mode `0700`. Docker Compose preserves host modes for
 file-backed secrets, while CaseWeaver runtime images deliberately run as UID/GID `1000`:
-make each mounted `CASEWEAVER_*_FILE` readable by that UID/GID (for example mode
-`0444`). This does not make a file host-public when its parent directory is `0700`.
+make each secret consumed by those runtime containers readable by that UID/GID (for
+example mode `0444` for migration/runtime URLs, OIDC, password-login, CA, and object
+storage secrets). The PostgreSQL bootstrap password files and TLS certificate/key are
+instead consumed by their root-owned, isolated bootstrap services and may remain mode
+`0600`. This does not make a mode-`0444` runtime secret host-public when its parent
+directory is `0700`.
 `CASEWEAVER_APPLICATION_SECRETS_DIRECTORY` is mounted as a directory, so it must be
 searchable by that UID/GID (for example mode `0755`) and each entry readable (for example
 mode `0444`); its parent remains private. Include empty files for disabled optional
