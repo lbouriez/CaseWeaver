@@ -88,6 +88,11 @@ The `docs-pages.yml` GitHub workflow verifies pull requests but deploys only def
 branch pushes or a deliberate manual dispatch. Before enabling a real deployment, a
 repository owner must:
 
+For this repository, the Pages project is `caseweaver-website` and the intended public
+documentation origin is `https://caseweaver.weeboo.fr`. Associate that hostname through
+the project's **Custom domains** flow before the first protected production publish; a
+fork must use its own Pages project and HTTPS origin instead.
+
 1. Create the Cloudflare Pages project and the GitHub environments
    `cloudflare-pages-preview` and `cloudflare-pages-production`. Keep preview
    intentionally unprotected so trusted same-repository pull requests can publish their
