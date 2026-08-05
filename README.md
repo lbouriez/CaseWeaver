@@ -53,6 +53,11 @@ evaluation stack, connector/AI setup boundaries, production self-hosting, recove
 testing, and the current capability status. The portal builds without an application
 runtime or secret.
 
+For a technical integration or retrieval knowledge base, begin with the portal's
+[operator knowledge map](website/docs/operator-knowledge-map.md). It directs users and
+AI assistants to the source-verified Console workflow reference and Compose/environment
+reference, and keeps deployment-owned settings separate from workspace Console changes.
+
 The `.features` directory is the authoritative implementation specification:
 
 - [Product and scope](.features/01-product-and-scope.md)

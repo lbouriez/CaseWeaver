@@ -3,6 +3,7 @@ import type { SidebarsConfig } from "@docusaurus/plugin-content-docs";
 const sidebars: SidebarsConfig = {
   documentation: [
     "overview",
+    "operator-knowledge-map",
     {
       type: "category",
       label: "Get started",
@@ -16,12 +17,17 @@ const sidebars: SidebarsConfig = {
     {
       type: "category",
       label: "AI and governance",
-      items: ["ai-and-cost", "configuration-reference"],
+      items: [
+        "ai-and-cost",
+        "operator-console-reference",
+        "configuration-reference",
+      ],
     },
     {
       type: "category",
       label: "Operate CaseWeaver",
       items: [
+        "deployment-reference",
         "self-hosting",
         "persistence-recovery",
         "testing",

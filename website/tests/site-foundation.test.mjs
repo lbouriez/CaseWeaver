@@ -12,6 +12,9 @@ test("the portal foundation has its required standalone files", () => {
     "src/theme/Navbar/index.tsx",
     "src/theme/Footer/index.tsx",
     "docs/overview.md",
+    "docs/operator-knowledge-map.md",
+    "docs/operator-console-reference.md",
+    "docs/deployment-reference.md",
     "docs/capability-status.md",
   ]) {
     assert.equal(
@@ -46,6 +49,7 @@ test("all required launch locales are configured", () => {
 test("every documented operator page has a French counterpart and sidebar entry", () => {
   const documents = [
     "overview",
+    "operator-knowledge-map",
     "quick-start",
     "access-and-secrets",
     "connectors",
@@ -53,7 +57,9 @@ test("every documented operator page has a French counterpart and sidebar entry"
     "jitbit",
     "knowledge-analysis",
     "ai-and-cost",
+    "operator-console-reference",
     "configuration-reference",
+    "deployment-reference",
     "self-hosting",
     "persistence-recovery",
     "testing",

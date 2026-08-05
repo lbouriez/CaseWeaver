@@ -12,18 +12,19 @@ receive application secrets.
 
 ## State and dependencies
 
-**Pending — separate repository-governance follow-up.** All PBI-owned workflow,
-documentation, and automated-validation work is complete. The pre-provisioned Cloudflare
-Pages project, all four required repository secrets, and both Pages environments exist.
-GitHub Actions run `29528380369` published the portal successfully on 2026-07-16 and
-scheduled cleanup run `30603295655` succeeded on 2026-07-31.
+**In progress — repository governance is configured; live release evidence remains.**
+All PBI-owned workflow, documentation, and automated-validation work is complete. The
+pre-provisioned `caseweaver-website` Cloudflare Pages project, all four required
+repository secrets, and both Pages environments exist. GitHub Actions run `29528380369`
+published the portal successfully on 2026-07-16 and scheduled cleanup run `30603295655`
+succeeded on 2026-07-31.
 
-The workflow now fails closed through `github.ref_protected` and the production
-environment. Read-only GitHub API inspection confirmed that `main` currently has no
-branch-protection rule and `cloudflare-pages-production` has no protection rule or
-deployment-branch policy. No deployment, cleanup, secret, environment, or branch policy
-was changed by this delivery. Those are repository-governance choices that require the
-owner to select the required reviewers and branch policy.
+On 2026-08-05, repository configuration added public Pages variables for the production
+origin, account, and project; protected `main` with pull-request-only updates, linear
+history, conversation resolution, and no force-push or deletion; and restricted
+`cloudflare-pages-production` to protected branches. The existing Cloudflare token
+remains a GitHub secret and is neither read nor re-created by this delivery. The next
+deployment will therefore reach the protected production environment only from `main`.
 
 Depends on:
 
@@ -57,10 +58,9 @@ Depends on:
       trigger a production deployment.
 - [x] Pull requests from the same repository can deploy preview builds and comment the
       preview URL back on the PR.
-- [ ] Only a protected default-branch push and a deliberate manual dispatch from that
-      protected branch can reach the protected production deployment environment. The
-      workflow enforces this fail-closed condition, but the live GitHub protection
-      settings are intentionally pending separate follow-up work.
+- [x] Only a protected default-branch push and a deliberate manual dispatch from that
+      protected branch can reach the production deployment environment. `main` is
+      protected and the production environment accepts protected branches only.
 - [x] The workflow is concurrency-safe, has minimum required GitHub permissions, and
       uses immutable-SHA-pinned actions.
 - [x] A cleanup workflow removes closed-PR preview deployments, stale preview
@@ -68,17 +68,15 @@ Depends on:
 - [x] The workflow cannot deploy an application container, call a CaseWeaver API, read
       a database, or access a connector/provider credential.
 
-## Pending repository-governance follow-up
+## Remaining release verification
 
-This work is intentionally queued separately from the CaseWeaver implementation:
-
-1. Protect `main` with the branch policy selected by the repository owner. This makes
-   GitHub expose `github.ref_protected` for the production ref.
-2. Configure `cloudflare-pages-production` with the chosen required reviewers and a
-   deployment-branch policy that permits only protected `main`. The preview environment
-   remains unprotected for trusted same-repository pull-request previews.
-3. After those policies are in place, inspect one protected-`main` publish and run
-   cleanup once with `dry_run: true` before relying on nightly production pruning.
+1. Associate `caseweaver.weeboo.fr` with `caseweaver-website` through the Cloudflare
+   Pages **Custom domains** flow. Cloudflare requires this initial domain association
+   through its dashboard before the managed DNS record can serve Pages.
+2. Merge the verified documentation change through the protected `main` branch and
+   inspect its artifact-only production publish at the configured HTTPS origin.
+3. Run the cleanup workflow once with `dry_run: true` and inspect its retained-preview
+   and retained-production result before relying on the nightly schedule.
 
 ## Excluded
 

@@ -65,13 +65,16 @@ can dismiss it or continue using the canonical locale.
 
 ## Guide map
 
-The site documents the accepted local three-service evaluation stack, password/OIDC and
-external-secret boundaries, connector capability matrix and Git/Jitbit procedures, AI
-inventory/cost policy, collections/sources/schedules/analysis, self-hosting, recovery,
-testing, troubleshooting, architecture, and current capability status. The English pages
-are canonical. French counterparts are maintained alongside them and are recorded in the
-manifest only after documented review; the manifest records the exact English revision,
-not the identity of the reviewer or a translation provider.
+Start with the **Operator knowledge map** when preparing an integration or a retrieval
+knowledge base. It separates deployment-owned settings from Console configuration and
+links to the source-verified **Operator-console reference** and **Deployment reference**.
+Together with the task guides, they document the accepted local three-service evaluation
+stack, password/OIDC and external-secret boundaries, connector capability matrix and
+Git/Jitbit procedures, AI inventory/cost policy, collections/sources/schedules/analysis,
+self-hosting, recovery, testing, troubleshooting, architecture, and current capability
+status. The English pages are canonical. French counterparts are maintained alongside
+them and are recorded in the manifest only after documented review; the manifest records
+the exact English revision, not the identity of the reviewer or a translation provider.
 
 The production artifact is `website/build/`. `CASEWEAVER_DOCS_SITE_URL` is optional for
 local builds and must be an HTTPS origin when supplied. Cloudflare production builds set

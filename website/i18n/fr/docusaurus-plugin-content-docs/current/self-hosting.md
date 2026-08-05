@@ -10,6 +10,12 @@ N'exposez jamais une image Compose locale ou le mot de passe de développement.
 
 ## Préparer et valider
 
+La procédure canonique vérifiée contre les sources est dans
+[Référence de déploiement](./deployment-reference.md).
+Elle définit profils Compose, edge public, données durables, fichier environnement
+opérateur, commandes helper et récupération. Le catalogue complet est dans
+[Référence de configuration](./configuration-reference.md).
+
 Créez un dossier opérateur hors checkout. Copiez `deploy/docker/.env.production.example`,
 remplissez la configuration publique et stockez chaque secret dans son fichier restreint.
 Le fichier environnement ne contient ni mot de passe, jeton, clé privée ni URL base avec
@@ -46,3 +52,7 @@ Vérifiez les deux endpoints HTTPS health et utilisez logs expurgés ou export d
 
 La configuration OIDC est décrite dans [Accès et secrets](./access-and-secrets.md).
 Le contrôle se fait via `https://<public-origin>/health/live` et `/health/ready`.
+
+Pour un backend Docker Standalone avec Console externe, utilisez la section
+[Portainer](./deployment-reference.md).
+Ce n'est pas une autre façon d'exécuter la stack production avec Admin intégré.

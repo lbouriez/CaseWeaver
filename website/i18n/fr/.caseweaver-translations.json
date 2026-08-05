@@ -19,7 +19,7 @@
       "translationPath": "capability-status.md"
     },
     "configuration-reference.md": {
-      "sourceHash": "364f9e17b280829f6db88ae465fb578bcee1144899e1ee54ff7e90c9945ffe69",
+      "sourceHash": "d71a760f7c1a5668cb241c9bd24c334cd84847bc38680cb5bf822136606383fc",
       "translationPath": "configuration-reference.md"
     },
     "connectors.md": {
@@ -29,6 +29,10 @@
     "contributing.md": {
       "sourceHash": "205f33571ade369a574f7ea53a0b6aa61455a2925785a31af947f38bec7bffc4",
       "translationPath": "contributing.md"
+    },
+    "deployment-reference.md": {
+      "sourceHash": "e5964e2b341d72bbdfdc77b72b25df7207187a0dbe843567f6173ee0ffd73693",
+      "translationPath": "deployment-reference.md"
     },
     "git-markdown.md": {
       "sourceHash": "e46fec295e89f178860d4538efc24ffe7baefd50d852be35df8390e0a86daae5",
@@ -46,6 +50,14 @@
       "sourceHash": "bbb10a277965e4c779a6e34809e9cc382458760f5c64805c750ac082d0ea8b81",
       "translationPath": "operations.md"
     },
+    "operator-console-reference.md": {
+      "sourceHash": "1fd7333387687806412c92f7d906682a3154f21c4f8ec85a328ba6cfc192b637",
+      "translationPath": "operator-console-reference.md"
+    },
+    "operator-knowledge-map.md": {
+      "sourceHash": "1389340df0c293fba6fb1f164131cb1f24ec1bab130d3bc5ba5791a7a2e4d12f",
+      "translationPath": "operator-knowledge-map.md"
+    },
     "overview.md": {
       "sourceHash": "0cc8b97a733ff8e8bf32642bdce949ed8a9383e0087a10ae07e87fcb53b37980",
       "translationPath": "overview.md"
@@ -59,7 +71,7 @@
       "translationPath": "quick-start.md"
     },
     "self-hosting.md": {
-      "sourceHash": "30082b633c060b03caa484dadec80ec429a62f873a1510cd950f5960bdf9714d",
+      "sourceHash": "69d7aa74ed33a79cb743bb298fe186f2703f6fe8abbf6267ab4eeacdbf995825",
       "translationPath": "self-hosting.md"
     },
     "testing.md": {

@@ -11,6 +11,11 @@ password into a public deployment.
 
 ## Prepare and validate
 
+The canonical, source-verified procedure is now [Deployment reference](./deployment-reference.md#self-hosted-production-composeproductionyml).
+It defines the Compose profile boundary, public edge, durable data, operator-owned
+environment file, exact helper commands, and backup/restore behavior. The full input
+catalog is [Configuration reference](./configuration-reference.md).
+
 Create an operator-owned directory outside the checkout. Copy
 `deploy/docker/.env.production.example` to it, fill public configuration, and put every
 secret in its own restrictive file. The environment file contains no password, token,
@@ -52,3 +57,7 @@ zero-downtime transition.
 
 Check `https://<public-origin>/health/live` and `/health/ready` through the edge. Use
 redacted service logs and the safe diagnostic export for investigation.
+
+For a backend-only Docker Standalone deployment with an externally hosted Console, use
+the separate [Portainer section](./deployment-reference.md#portainer-backend-with-an-externally-hosted-admin-composeportaineryml). It is not an alternative way to run the
+embedded production Admin stack.
