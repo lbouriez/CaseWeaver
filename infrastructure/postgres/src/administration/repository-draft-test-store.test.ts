@@ -26,7 +26,9 @@ class ScriptedDatabase {
         id: "secret-registration-a",
       },
     ],
-    findFirst: async () => ({ secretReference: "env:REPOSITORY_CHECKOUT_TOKEN" }),
+    findFirst: async () => ({
+      secretReference: "env:REPOSITORY_CHECKOUT_TOKEN",
+    }),
   };
 
   public constructor(private readonly results: unknown[]) {}

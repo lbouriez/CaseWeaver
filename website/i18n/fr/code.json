@@ -1,4 +1,130 @@
 {
+  "homepage.v2.description": {
+    "message": "CaseWeaver transforme les connaissances fiables de l’entreprise en actions de support étayées par des preuves."
+  },
+  "homepage.v2.title": {
+    "message": "Des réponses de support qui tiennent la route"
+  },
+  "homepage.v2.kicker": {
+    "message": "Des opérations de support attentives aux preuves"
+  },
+  "homepage.v2.headline": {
+    "message": "Des réponses de support qui tiennent la route."
+  },
+  "homepage.v2.lede": {
+    "message": "Connectez les connaissances auxquelles votre équipe fait confiance. CaseWeaver les transforme en prochaine étape claire, avec les preuves toujours jointes."
+  },
+  "homepage.v2.primaryAction": {
+    "message": "Commencer"
+  },
+  "homepage.v2.secondaryAction": {
+    "message": "Explorer la documentation"
+  },
+  "homepage.v2.signal.evidence": {
+    "message": "Sources toujours visibles"
+  },
+  "homepage.v2.signal.control": {
+    "message": "Les opérateurs gardent le contrôle"
+  },
+  "homepage.v2.preview.active": {
+    "message": "Analyse prête"
+  },
+  "homepage.v2.preview.caseLabel": {
+    "message": "Dossier / 1042"
+  },
+  "homepage.v2.preview.caseTitle": {
+    "message": "Le client ne peut pas se connecter"
+  },
+  "homepage.v2.preview.caseCopy": {
+    "message": "L’accès échoue après un changement d’équipe."
+  },
+  "homepage.v2.preview.evidenceLabel": {
+    "message": "Éléments probants"
+  },
+  "homepage.v2.preview.knowledge": {
+    "message": "Guide d’identité"
+  },
+  "homepage.v2.preview.policy": {
+    "message": "Politique d’accès"
+  },
+  "homepage.v2.preview.answerLabel": {
+    "message": "Prochaine étape recommandée"
+  },
+  "homepage.v2.preview.answerTitle": {
+    "message": "Rétablir le rôle vérifié, puis réessayer."
+  },
+  "homepage.v2.preview.answerMeta": {
+    "message": "2 sources jointes"
+  },
+  "homepage.v2.flow.kicker": {
+    "message": "Comment cela fonctionne"
+  },
+  "homepage.v2.flow.title": {
+    "message": "Un cycle opérationnel clair."
+  },
+  "homepage.v2.flow.lede": {
+    "message": "Passez d’un dossier difficile à une réponse responsable, sans perdre le contexte qui la rend fiable."
+  },
+  "homepage.v2.flow.capture.title": {
+    "message": "Recevoir le dossier"
+  },
+  "homepage.v2.flow.capture.copy": {
+    "message": "Les tickets, planifications et événements vérifiés lancent un travail durable."
+  },
+  "homepage.v2.flow.ground.title": {
+    "message": "Ancrer la réponse"
+  },
+  "homepage.v2.flow.ground.copy": {
+    "message": "Les sources fiables et les politiques apportent le contexte utile."
+  },
+  "homepage.v2.flow.act.title": {
+    "message": "Passer à l’étape suivante"
+  },
+  "homepage.v2.flow.act.copy": {
+    "message": "Examinez, publiez et auditez une réponse que votre équipe peut expliquer."
+  },
+  "homepage.v2.routes.kicker": {
+    "message": "Trouver votre point de départ"
+  },
+  "homepage.v2.routes.title": {
+    "message": "Partez du travail qui vous attend."
+  },
+  "homepage.v2.routes.lede": {
+    "message": "Chaque guide est pratique, cadré et clair sur les capacités prises en charge aujourd’hui."
+  },
+  "homepage.v2.routes.local.label": {
+    "message": "Installation locale"
+  },
+  "homepage.v2.routes.local.title": {
+    "message": "Exécuter CaseWeaver en local"
+  },
+  "homepage.v2.routes.knowledge.label": {
+    "message": "Connaissances"
+  },
+  "homepage.v2.routes.knowledge.title": {
+    "message": "Connecter des sources fiables"
+  },
+  "homepage.v2.routes.console.label": {
+    "message": "Opérations"
+  },
+  "homepage.v2.routes.console.title": {
+    "message": "Configurer la Console"
+  },
+  "homepage.v2.close.kicker": {
+    "message": "Conçu pour un travail responsable"
+  },
+  "homepage.v2.close.title": {
+    "message": "Des réponses utiles ont besoin de contexte, de contrôles et d’une trace."
+  },
+  "homepage.v2.close.console": {
+    "message": "Ouvrir le guide de la Console"
+  },
+  "homepage.v2.close.status": {
+    "message": "Voir le statut des capacités"
+  },
+  "homepage.v2.close.selfHosting": {
+    "message": "Planifier un déploiement auto-hébergé"
+  },
   "homepage.description": {
     "message": "CaseWeaver aide les équipes de support à transformer les connaissances de l’entreprise en actions de dossier étayées par des preuves."
   },
@@ -9,16 +135,64 @@
     "message": "Des opérations de support attentives aux preuves"
   },
   "homepage.headline": {
-    "message": "Aidez chaque dossier de support à atteindre plus rapidement une prochaine étape étayée par des preuves."
+    "message": "Transformez chaque dossier de support en prochaine étape claire."
   },
   "homepage.lede": {
-    "message": "CaseWeaver réunit les bonnes connaissances de l’entreprise, les politiques opérationnelles et l’historique des dossiers afin que les équipes enquêtent avec le contexte nécessaire plutôt que de repartir de zéro."
+    "message": "CaseWeaver réunit vos connaissances, vos politiques et l’historique des dossiers pour enquêter rapidement, expliquer les preuves et agir en confiance."
   },
   "homepage.primaryAction": {
-    "message": "Explorer la documentation"
+    "message": "Démarrer en local"
   },
   "homepage.secondaryAction": {
-    "message": "Voir comment cela fonctionne"
+    "message": "Configurer la Console"
+  },
+  "homepage.allGuides": {
+    "message": "Parcourir tous les guides opérateur et de déploiement"
+  },
+  "homepage.paths.eyebrow": {
+    "message": "Choisissez votre prochaine étape"
+  },
+  "homepage.paths.title": {
+    "message": "Commencez par le travail à accomplir."
+  },
+  "homepage.paths.copy": {
+    "message": "CaseWeaver se configure par petites étapes gouvernées. Ces guides indiquent le bon point de départ sans exposer d’identifiants ni supposer votre environnement."
+  },
+  "homepage.paths.local.title": {
+    "message": "Essayer CaseWeaver en local"
+  },
+  "homepage.paths.local.copy": {
+    "message": "Lancez la pile locale, ouvrez la Console et découvrez le parcours de bout en bout."
+  },
+  "homepage.paths.local.link": {
+    "message": "Ouvrir le démarrage rapide"
+  },
+  "homepage.paths.knowledge.title": {
+    "message": "Connecter les connaissances en sécurité"
+  },
+  "homepage.paths.knowledge.copy": {
+    "message": "Ajoutez des sources fiables, organisez-les en collections et choisissez leur fréquence de mise à jour."
+  },
+  "homepage.paths.knowledge.link": {
+    "message": "Planifier une source de connaissances"
+  },
+  "homepage.paths.console.title": {
+    "message": "Configurer l’IA et les opérations"
+  },
+  "homepage.paths.console.copy": {
+    "message": "Configurez les fournisseurs, les budgets, les analyses, les autorisations et l’historique d’audit depuis un même espace."
+  },
+  "homepage.paths.console.link": {
+    "message": "Lire le guide de la Console"
+  },
+  "homepage.paths.deploy.title": {
+    "message": "Préparer un vrai déploiement"
+  },
+  "homepage.paths.deploy.copy": {
+    "message": "Séparez la configuration des secrets, puis déployez avec les guides d’auto-hébergement et de reprise pris en charge."
+  },
+  "homepage.paths.deploy.link": {
+    "message": "Ouvrir le guide de déploiement"
   },
   "homepage.proof.evidence.title": {
     "message": "Des preuves, pas des suppositions"
@@ -36,25 +210,25 @@
     "message": "Le parcours d’un dossier"
   },
   "homepage.workflow.title": {
-    "message": "D’une demande entrante à une réponse utile et révisable."
+    "message": "D’une demande entrante à une réponse fiable pour votre équipe."
   },
   "homepage.workflow.capture.title": {
-    "message": "Captez le signal"
+    "message": "Capturez le dossier"
   },
   "homepage.workflow.capture.copy": {
-    "message": "Un dossier de support, une planification ou un événement vérifié lance un travail durable sans faire porter la charge au navigateur ou au webhook."
+    "message": "Un ticket, une planification ou un événement vérifié lance un travail durable ; la plateforme s’occupe du traitement."
   },
   "homepage.workflow.connect.title": {
-    "message": "Reliez le contexte"
+    "message": "Ajoutez le contexte"
   },
   "homepage.workflow.connect.copy": {
-    "message": "Les sources approuvées et les profils de recherche font ressortir les connaissances pertinentes tout en préservant leurs limites de version et de propriété."
+    "message": "Les sources approuvées et les profils de recherche font ressortir les connaissances pertinentes, avec des limites claires de version et de propriété."
   },
   "homepage.workflow.decide.title": {
-    "message": "Examinez la prochaine étape"
+    "message": "Examinez et répondez"
   },
   "homepage.workflow.decide.copy": {
-    "message": "Les équipes reçoivent un résultat attentif aux preuves qu’elles peuvent examiner, approuver et publier par des flux de travail gouvernés."
+    "message": "Les équipes reçoivent un résultat étayé par des preuves, à examiner, approuver et publier dans un flux gouverné."
   },
   "homepage.principles.eyebrow": {
     "message": "Conçu pour inspirer confiance"
@@ -111,7 +285,10 @@
     "message": "Menu"
   },
   "navbar.repository": {
-    "message": "Dépôt"
+    "message": "Ouvrir CaseWeaver sur GitHub"
+  },
+  "navbar.documentation": {
+    "message": "Documentation"
   },
   "footer.navigation": {
     "message": "Navigation de pied de page"
@@ -123,7 +300,7 @@
     "message": "Architecture"
   },
   "footer.operations": {
-    "message": "Statut des opérations"
+    "message": "Auto-hébergement"
   },
   "footer.status": {
     "message": "Feuille de route et statut"
@@ -522,5 +699,17 @@
   },
   "homepage.start.tagline": {
     "message": "Des opérations de dossier attentives aux preuves, documentées avec soin."
+  },
+  "languageSuggestion.message": {
+    "message": "Votre navigateur préfère {suggested}. Passer cette documentation depuis {current} ?"
+  },
+  "languageSuggestion.label": {
+    "message": "Suggestion de langue"
+  },
+  "languageSuggestion.switch": {
+    "message": "Passer à {suggested}"
+  },
+  "languageSuggestion.stay": {
+    "message": "Rester en {current}"
   }
 }

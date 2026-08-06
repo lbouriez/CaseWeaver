@@ -136,7 +136,9 @@ export class RepositoryAnalysisPinnedRuntimeResolver
                     "Repository checkout configuration is unavailable.",
                   );
                 }
-                if (configuration.location.checkoutSecretReference === undefined) {
+                if (
+                  configuration.location.checkoutSecretReference === undefined
+                ) {
                   return { kind: "none" as const };
                 }
                 return {
@@ -158,7 +160,9 @@ export class RepositoryAnalysisPinnedRuntimeResolver
               : { temporaryDirectory: this.temporaryDirectory }),
           })
         : (() => {
-            const directory = this.mounts.get(configuration.location.mountAlias);
+            const directory = this.mounts.get(
+              configuration.location.mountAlias,
+            );
             if (directory === undefined) {
               throw new RepositoryRuntimeError(
                 "repository.runtimeConfiguration",
@@ -178,7 +182,11 @@ export class RepositoryAnalysisPinnedRuntimeResolver
                 : { temporaryDirectory: this.temporaryDirectory }),
             });
           })();
-    const runtime = new AttestedRepositoryRuntime(broker, this.sandbox, this.trees);
+    const runtime = new AttestedRepositoryRuntime(
+      broker,
+      this.sandbox,
+      this.trees,
+    );
     return Object.freeze({
       runtime: Object.freeze({
         repositoryId: configuration.repository.repositoryId,
@@ -264,7 +272,9 @@ export class CompositePinnedRepositoryAgentRuntimeResolver
 function legacyExecutionProjection(
   resolved: RepositoryAnalysisRuntimeExecutionConfiguration,
 ): Awaited<
-  ReturnType<RepositoryRuntimeExecutionConfigurationResolver["resolveExecution"]>
+  ReturnType<
+    RepositoryRuntimeExecutionConfigurationResolver["resolveExecution"]
+  >
 > {
   return Object.freeze({
     runtimeVersionId: resolved.runtimeVersionId,

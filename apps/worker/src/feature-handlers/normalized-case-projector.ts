@@ -112,7 +112,9 @@ export class NormalizedCaseSnapshotProjector implements CaseSnapshotProjector {
           ? [
               ...normalized.attachments,
               ...normalized.messages.flatMap((message) => message.attachments),
-            ].map((attachment) => Object.freeze({ reference: attachment.reference }))
+            ].map((attachment) =>
+              Object.freeze({ reference: attachment.reference }),
+            )
           : occurrences.map((occurrence) =>
               Object.freeze({
                 reference: occurrence.reference,

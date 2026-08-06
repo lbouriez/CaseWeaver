@@ -5,60 +5,140 @@ import type React from "react";
 
 import { CaseWeaverMark } from "../components/CaseWeaverMark";
 
-function SupportFlowVisual(): React.ReactElement {
+function ArrowIcon(): React.ReactElement {
   return (
-    <div aria-hidden="true" className="homeFlowVisual">
-      <div className="homeFlowSource homeFlowSource--knowledge">
-        <span className="homeFlowSource__icon">⌘</span>
-        <span>
-          <Translate id="homepage.visual.knowledge">Knowledge</Translate>
-        </span>
-      </div>
-      <div className="homeFlowSource homeFlowSource--policy">
-        <span className="homeFlowSource__icon">✓</span>
-        <span>
-          <Translate id="homepage.visual.policies">Policies</Translate>
-        </span>
-      </div>
-      <div className="homeFlowSource homeFlowSource--cases">
-        <span className="homeFlowSource__icon">↻</span>
-        <span>
-          <Translate id="homepage.visual.pastCases">Past cases</Translate>
-        </span>
-      </div>
-      <div className="homeFlowLines">
-        <span />
-        <span />
-        <span />
-      </div>
-      <div className="homeFlowEngine">
-        <div className="homeFlowEngine__mark">
-          <CaseWeaverMark size={42} title="" />
-        </div>
-        <span>CaseWeaver</span>
-        <small>
-          <Translate id="homepage.visual.assembly">evidence assembly</Translate>
-        </small>
-      </div>
-      <div className="homeFlowResult">
-        <div className="homeFlowResult__topline">
-          <span>
-            <Translate id="homepage.visual.case">Case</Translate>
+    <svg aria-hidden="true" focusable="false" viewBox="0 0 18 18">
+      <path
+        d="M3.25 9h10.5M9.75 5l4 4-4 4"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.7"
+      />
+    </svg>
+  );
+}
+
+function CheckIcon(): React.ReactElement {
+  return (
+    <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16">
+      <path
+        d="m3.25 8.1 2.9 2.9 6.6-6.35"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      />
+    </svg>
+  );
+}
+
+function ProductPreview(): React.ReactElement {
+  return (
+    <div aria-hidden="true" className="homePreview">
+      <div className="homePreview__glow" />
+      <div className="homePreview__window">
+        <div className="homePreview__topbar">
+          <div className="homePreview__brand">
+            <span className="homePreview__mark">
+              <CaseWeaverMark size={18} title="" />
+            </span>
+            <span>CaseWeaver</span>
+          </div>
+          <span className="homePreview__state">
+            <span />
+            <Translate id="homepage.v2.preview.active">
+              Analysis ready
+            </Translate>
           </span>
-          <span className="homeFlowResult__status">
-            <Translate id="homepage.visual.ready">Ready</Translate>
-          </span>
         </div>
-        <strong>
-          <Translate id="homepage.visual.nextStep">Clear next step</Translate>
-        </strong>
-        <p>
-          <Translate id="homepage.visual.evidence">
-            Sources attached · Confidence explained
-          </Translate>
-        </p>
+        <div className="homePreview__body">
+          <div className="homePreview__case">
+            <span className="homePreview__label">
+              <Translate id="homepage.v2.preview.caseLabel">
+                Case / 1042
+              </Translate>
+            </span>
+            <strong>
+              <Translate id="homepage.v2.preview.caseTitle">
+                Customer cannot sign in
+              </Translate>
+            </strong>
+            <p>
+              <Translate id="homepage.v2.preview.caseCopy">
+                Access fails after a team change.
+              </Translate>
+            </p>
+          </div>
+          <div className="homePreview__evidence">
+            <span className="homePreview__label">
+              <Translate id="homepage.v2.preview.evidenceLabel">
+                Supporting evidence
+              </Translate>
+            </span>
+            <div>
+              <span className="homePreview__check">
+                <CheckIcon />
+              </span>
+              <span>
+                <Translate id="homepage.v2.preview.knowledge">
+                  Identity runbook
+                </Translate>
+              </span>
+            </div>
+            <div>
+              <span className="homePreview__check">
+                <CheckIcon />
+              </span>
+              <span>
+                <Translate id="homepage.v2.preview.policy">
+                  Access policy
+                </Translate>
+              </span>
+            </div>
+          </div>
+          <div className="homePreview__answer">
+            <span className="homePreview__label">
+              <Translate id="homepage.v2.preview.answerLabel">
+                Recommended next step
+              </Translate>
+            </span>
+            <strong>
+              <Translate id="homepage.v2.preview.answerTitle">
+                Restore the verified role, then retry.
+              </Translate>
+            </strong>
+            <span className="homePreview__answerMeta">
+              <Translate id="homepage.v2.preview.answerMeta">
+                2 sources attached
+              </Translate>
+            </span>
+          </div>
+        </div>
       </div>
     </div>
+  );
+}
+
+interface FlowCardProps {
+  readonly number: string;
+  readonly title: React.ReactNode;
+  readonly children: React.ReactNode;
+}
+
+function FlowCard({
+  number,
+  title,
+  children,
+}: FlowCardProps): React.ReactElement {
+  return (
+    <article className="homeFlowCard">
+      <span className="homeFlowCard__number">{number}</span>
+      <h3>{title}</h3>
+      <p>{children}</p>
+    </article>
   );
 }
 
@@ -66,242 +146,240 @@ export default function HomePage(): React.ReactElement {
   return (
     <Layout
       description={translate({
-        id: "homepage.description",
+        id: "homepage.v2.description",
         message:
-          "CaseWeaver helps support teams turn company knowledge into evidence-backed case actions.",
+          "CaseWeaver turns trusted company knowledge into evidence-backed support actions.",
       })}
       title={translate({
-        id: "homepage.title",
-        message: "Case operations, clarified",
+        id: "homepage.v2.title",
+        message: "Support answers that hold up",
       })}
     >
-      <main>
-        <header className="homeHero">
-          <div className="container homeHero__grid">
+      <main className="homePage">
+        <section className="homeHero">
+          <div className="container homeHero__layout">
             <div className="homeHero__copy">
-              <p className="homeEyebrow">
-                <Translate id="homepage.eyebrow">
+              <p className="homeKicker">
+                <span />
+                <Translate id="homepage.v2.kicker">
                   Evidence-aware support operations
                 </Translate>
               </p>
               <h1>
-                <Translate id="homepage.headline">
-                  Help every support case reach a faster, evidence-backed next
-                  step.
+                <Translate id="homepage.v2.headline">
+                  Support answers that hold up.
                 </Translate>
               </h1>
               <p className="homeHero__lede">
-                <Translate id="homepage.lede">
-                  CaseWeaver brings the right company knowledge, operating
-                  policies, and case history together so people can investigate
-                  with context instead of starting from scratch.
+                <Translate id="homepage.v2.lede">
+                  Connect the knowledge your team trusts. CaseWeaver turns it
+                  into a clear next step—with the evidence still attached.
                 </Translate>
               </p>
               <div className="homeHero__actions">
                 <Link
-                  className="button button--primary button--lg"
-                  to="/docs/overview"
+                  className="homeAction homeAction--primary"
+                  to="/docs/quick-start"
                 >
-                  <Translate id="homepage.primaryAction">
-                    Explore the documentation
+                  <Translate id="homepage.v2.primaryAction">
+                    Get started
                   </Translate>
+                  <ArrowIcon />
                 </Link>
                 <Link
-                  className="button button--outline button--lg"
-                  to="/docs/architecture"
+                  className="homeAction homeAction--quiet"
+                  to="/docs/overview"
                 >
-                  <Translate id="homepage.secondaryAction">
-                    See how it works
+                  <Translate id="homepage.v2.secondaryAction">
+                    Explore the docs
                   </Translate>
                 </Link>
               </div>
-              <ul className="homeHero__proofs">
+              <ul className="homeHero__signals">
                 <li>
-                  <strong>
-                    <Translate id="homepage.proof.evidence.title">
-                      Evidence, not guesses
-                    </Translate>
-                  </strong>
-                  <span>
-                    <Translate id="homepage.proof.evidence.copy">
-                      Keep the source behind each recommendation visible.
-                    </Translate>
-                  </span>
+                  <CheckIcon />
+                  <Translate id="homepage.v2.signal.evidence">
+                    Sources stay visible
+                  </Translate>
                 </li>
                 <li>
-                  <strong>
-                    <Translate id="homepage.proof.boundaries.title">
-                      Clear boundaries
-                    </Translate>
-                  </strong>
-                  <span>
-                    <Translate id="homepage.proof.boundaries.copy">
-                      Secrets, permissions, and costs remain controlled.
-                    </Translate>
-                  </span>
+                  <CheckIcon />
+                  <Translate id="homepage.v2.signal.control">
+                    Operators stay in control
+                  </Translate>
                 </li>
               </ul>
             </div>
-            <SupportFlowVisual />
-          </div>
-        </header>
-
-        <section className="homeSection container">
-          <div className="homeSection__heading">
-            <p className="homeEyebrow">
-              <Translate id="homepage.workflow.eyebrow">
-                The case flow
-              </Translate>
-            </p>
-            <h2>
-              <Translate id="homepage.workflow.title">
-                From an incoming request to a useful, reviewable answer.
-              </Translate>
-            </h2>
-          </div>
-          <ol className="homeSteps">
-            <li>
-              <span className="homeSteps__number">01</span>
-              <h3>
-                <Translate id="homepage.workflow.capture.title">
-                  Capture the signal
-                </Translate>
-              </h3>
-              <p>
-                <Translate id="homepage.workflow.capture.copy">
-                  A support case, schedule, or verified event starts durable
-                  work without making the browser or webhook do the heavy
-                  lifting.
-                </Translate>
-              </p>
-            </li>
-            <li>
-              <span className="homeSteps__number">02</span>
-              <h3>
-                <Translate id="homepage.workflow.connect.title">
-                  Connect the context
-                </Translate>
-              </h3>
-              <p>
-                <Translate id="homepage.workflow.connect.copy">
-                  Approved sources and retrieval profiles surface relevant
-                  knowledge while preserving their version and ownership
-                  boundaries.
-                </Translate>
-              </p>
-            </li>
-            <li>
-              <span className="homeSteps__number">03</span>
-              <h3>
-                <Translate id="homepage.workflow.decide.title">
-                  Review the next step
-                </Translate>
-              </h3>
-              <p>
-                <Translate id="homepage.workflow.decide.copy">
-                  Teams receive an evidence-aware result they can inspect,
-                  approve, and publish through governed workflows.
-                </Translate>
-              </p>
-            </li>
-          </ol>
-        </section>
-
-        <section className="homePrinciples">
-          <div className="container homePrinciples__grid">
-            <div>
-              <p className="homeEyebrow">
-                <Translate id="homepage.principles.eyebrow">
-                  Built to be trusted
-                </Translate>
-              </p>
-              <h2>
-                <Translate id="homepage.principles.title">
-                  A support system should make decisions easier to explain.
-                </Translate>
-              </h2>
-            </div>
-            <div className="homePrinciples__cards">
-              <article>
-                <span>◌</span>
-                <h3>
-                  <Translate id="homepage.principles.audit.title">
-                    Auditable by design
-                  </Translate>
-                </h3>
-                <p>
-                  <Translate id="homepage.principles.audit.copy">
-                    Operator actions and configuration changes have explicit
-                    server-owned records.
-                  </Translate>
-                </p>
-              </article>
-              <article>
-                <span>⌁</span>
-                <h3>
-                  <Translate id="homepage.principles.vendor.title">
-                    Vendor-neutral core
-                  </Translate>
-                </h3>
-                <p>
-                  <Translate id="homepage.principles.vendor.copy">
-                    Connectors and AI providers fit through contracts instead of
-                    hard-coded product names.
-                  </Translate>
-                </p>
-              </article>
-              <article>
-                <span>↗</span>
-                <h3>
-                  <Translate id="homepage.principles.status.title">
-                    Honest capability status
-                  </Translate>
-                </h3>
-                <p>
-                  <Translate id="homepage.principles.status.copy">
-                    The portal distinguishes what is available today from work
-                    still in progress.
-                  </Translate>
-                </p>
-              </article>
-            </div>
+            <ProductPreview />
           </div>
         </section>
 
-        <section className="homeStart container">
-          <div>
-            <p className="homeEyebrow">
-              <Translate id="homepage.start.eyebrow">
-                Start with the facts
-              </Translate>
+        <section className="homeFlow container">
+          <div className="homeSectionLead">
+            <p className="homeKicker">
+              <span />
+              <Translate id="homepage.v2.flow.kicker">How it works</Translate>
             </p>
             <h2>
-              <Translate id="homepage.start.title">
-                Learn the boundaries before choosing the next delivery step.
+              <Translate id="homepage.v2.flow.title">
+                One clear operating loop.
               </Translate>
             </h2>
             <p>
-              <Translate id="homepage.start.tagline">
-                Evidence-aware case operations, documented carefully.
-              </Translate>{" "}
-              <Translate id="homepage.start.copy">
-                Read the architecture, then check the current capability status
-                before treating a workflow as supported.
+              <Translate id="homepage.v2.flow.lede">
+                Move from a difficult case to an accountable response without
+                losing the context that made it reliable.
               </Translate>
             </p>
           </div>
-          <div className="homeStart__links">
-            <Link to="/docs/architecture">
-              <Translate id="homepage.start.architecture">
-                Architecture orientation
+          <div className="homeFlow__grid">
+            <FlowCard
+              number="01"
+              title={
+                <Translate id="homepage.v2.flow.capture.title">
+                  Bring in the case
+                </Translate>
+              }
+            >
+              <Translate id="homepage.v2.flow.capture.copy">
+                Tickets, schedules, and verified events start durable work.
               </Translate>
-              <span aria-hidden="true">→</span>
+            </FlowCard>
+            <FlowCard
+              number="02"
+              title={
+                <Translate id="homepage.v2.flow.ground.title">
+                  Ground the answer
+                </Translate>
+              }
+            >
+              <Translate id="homepage.v2.flow.ground.copy">
+                Trusted sources and policies supply the context that matters.
+              </Translate>
+            </FlowCard>
+            <FlowCard
+              number="03"
+              title={
+                <Translate id="homepage.v2.flow.act.title">
+                  Take the next step
+                </Translate>
+              }
+            >
+              <Translate id="homepage.v2.flow.act.copy">
+                Review, publish, and audit an answer your team can explain.
+              </Translate>
+            </FlowCard>
+          </div>
+        </section>
+
+        <section className="homeRoutes">
+          <div className="container">
+            <div className="homeSectionLead homeSectionLead--split">
+              <div>
+                <p className="homeKicker">
+                  <span />
+                  <Translate id="homepage.v2.routes.kicker">
+                    Find your starting point
+                  </Translate>
+                </p>
+                <h2>
+                  <Translate id="homepage.v2.routes.title">
+                    Start with the work in front of you.
+                  </Translate>
+                </h2>
+              </div>
+              <p>
+                <Translate id="homepage.v2.routes.lede">
+                  Each guide is practical, scoped, and clear about what the
+                  platform supports today.
+                </Translate>
+              </p>
+            </div>
+            <div className="homeRoutes__grid">
+              <Link className="homeRoute" to="/docs/quick-start">
+                <span className="homeRoute__eyebrow">
+                  <Translate id="homepage.v2.routes.local.label">
+                    Local setup
+                  </Translate>
+                </span>
+                <h3>
+                  <Translate id="homepage.v2.routes.local.title">
+                    Run CaseWeaver locally
+                  </Translate>
+                </h3>
+                <span className="homeRoute__arrow">
+                  <ArrowIcon />
+                </span>
+              </Link>
+              <Link className="homeRoute" to="/docs/operator-knowledge-map">
+                <span className="homeRoute__eyebrow">
+                  <Translate id="homepage.v2.routes.knowledge.label">
+                    Knowledge
+                  </Translate>
+                </span>
+                <h3>
+                  <Translate id="homepage.v2.routes.knowledge.title">
+                    Connect trusted sources
+                  </Translate>
+                </h3>
+                <span className="homeRoute__arrow">
+                  <ArrowIcon />
+                </span>
+              </Link>
+              <Link className="homeRoute" to="/docs/operator-console-reference">
+                <span className="homeRoute__eyebrow">
+                  <Translate id="homepage.v2.routes.console.label">
+                    Operations
+                  </Translate>
+                </span>
+                <h3>
+                  <Translate id="homepage.v2.routes.console.title">
+                    Configure the Console
+                  </Translate>
+                </h3>
+                <span className="homeRoute__arrow">
+                  <ArrowIcon />
+                </span>
+              </Link>
+            </div>
+          </div>
+        </section>
+
+        <section className="homeClose container">
+          <div>
+            <p className="homeKicker">
+              <span />
+              <Translate id="homepage.v2.close.kicker">
+                Built for accountable work
+              </Translate>
+            </p>
+            <h2>
+              <Translate id="homepage.v2.close.title">
+                Useful answers need context, controls, and a paper trail.
+              </Translate>
+            </h2>
+          </div>
+          <div className="homeClose__actions">
+            <Link
+              className="homeAction homeAction--dark"
+              to="/docs/operator-console-reference"
+            >
+              <Translate id="homepage.v2.close.console">
+                Open the Console guide
+              </Translate>
+              <ArrowIcon />
             </Link>
-            <Link to="/docs/capability-status">
-              <Translate id="homepage.start.status">
-                Current capability status
+            <Link className="homeTextLink" to="/docs/capability-status">
+              <Translate id="homepage.v2.close.status">
+                See capability status
               </Translate>
-              <span aria-hidden="true">→</span>
+              <ArrowIcon />
+            </Link>
+            <Link className="homeTextLink" to="/docs/self-hosting">
+              <Translate id="homepage.v2.close.selfHosting">
+                Plan a self-hosted deployment
+              </Translate>
+              <ArrowIcon />
             </Link>
           </div>
         </section>

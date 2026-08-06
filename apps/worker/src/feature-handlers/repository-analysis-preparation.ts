@@ -64,7 +64,10 @@ export class RuntimeRepositoryAnalysisPreparation
               signal,
             });
       if (signal.aborted) throw signal.reason;
-      await this.inputs.finalize({ claim, ...(repositoryRun === undefined ? {} : { repositoryRun }) });
+      await this.inputs.finalize({
+        claim,
+        ...(repositoryRun === undefined ? {} : { repositoryRun }),
+      });
     } catch (error) {
       if (!signal.aborted) {
         await this.inputs.fail({ claim, error: safeFailure(error) });

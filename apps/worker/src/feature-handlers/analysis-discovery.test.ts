@@ -1,5 +1,12 @@
 import type { CaseDiscoveryStateStore } from "@caseweaver/application";
-import { createEnvelope, causationId, correlationId, outboxEnvelopeId, utcInstant, workspaceId } from "@caseweaver/domain";
+import {
+  createEnvelope,
+  causationId,
+  correlationId,
+  outboxEnvelopeId,
+  utcInstant,
+  workspaceId,
+} from "@caseweaver/domain";
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -42,7 +49,9 @@ function state(): CaseDiscoveryStateStore {
 describe("RuntimeCaseDiscoveryService", () => {
   it("converts a discovered case into an exact pinned trigger request before advancing its private cursor", async () => {
     const cursorState = state();
-    const requestTrigger = { execute: vi.fn(async () => ({ replayed: false })) };
+    const requestTrigger = {
+      execute: vi.fn(async () => ({ replayed: false })),
+    };
     const source = {
       async *discoverCases() {
         yield {

@@ -551,7 +551,10 @@ async function createAdministrationOperations(
       persistence.administrationReadStore.workspaceName(id),
     permissionsFor: (input) =>
       persistence.administrationReadStore.permissionsFor(input),
-    secureCookies: config.nodeEnv !== "development",
+    sessionCookie: {
+      secure: config.nodeEnv !== "development",
+      sameSite: config.adminSessionCookieSameSite,
+    },
     allowedOrigins: config.allowedAdminOrigins,
     ...(config.localAuthentication === undefined
       ? {}

@@ -1,13 +1,6 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import {
-  mkdir,
-  readFile,
-  realpath,
-  rm,
-  stat,
-  writeFile,
-} from "node:fs/promises";
+import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,6 +23,7 @@ import {
 import {
   createPrivatePreparedRepositoryTree,
   publishPreparedRepositoryTree,
+  removePrivatePreparedRepositoryTree,
 } from "./prepared-tree.js";
 import { isSafeRepositoryTextFile } from "./tree-sanitizer.js";
 
@@ -349,13 +343,9 @@ export class LocalPreparedRepositoryTreeStore {
 
   public async remove(treeId: string): Promise<void> {
     const value = this.entries.get(treeId);
-    this.entries.delete(treeId);
     if (value !== undefined) {
-      await rm(value.cleanupDirectory, {
-        recursive: true,
-        force: true,
-        maxRetries: 2,
-      });
+      await removePrivatePreparedRepositoryTree(value.cleanupDirectory);
+      this.entries.delete(treeId);
     }
   }
 }
@@ -545,11 +535,7 @@ export class LocalGitPinnedRepositoryCheckoutBroker
       });
       return tree;
     } catch (error) {
-      await rm(preparedTree.parentDirectory, {
-        recursive: true,
-        force: true,
-        maxRetries: 2,
-      });
+      await removePrivatePreparedRepositoryTree(preparedTree.parentDirectory);
       throw error;
     }
   }

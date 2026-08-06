@@ -20,7 +20,10 @@ interface CursorClaimRow {
   readonly cursor_value: string | null;
 }
 
-function validCursor(value: { readonly version: string; readonly value: string }): boolean {
+function validCursor(value: {
+  readonly version: string;
+  readonly value: string;
+}): boolean {
   return (
     value.version.length > 0 &&
     value.version.length <= 200 &&
@@ -127,9 +130,7 @@ export class PostgresCaseDiscoveryStateStore
       ) {
         return { kind: "alreadyRunning" };
       }
-      if (
-        (pinned.cursor_version === null) !== (pinned.cursor_value === null)
-      ) {
+      if ((pinned.cursor_version === null) !== (pinned.cursor_value === null)) {
         return { kind: "unavailable" };
       }
       const claimed = await transaction.$queryRaw<readonly CursorClaimRow[]>`

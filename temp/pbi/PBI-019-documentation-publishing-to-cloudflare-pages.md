@@ -12,11 +12,23 @@ receive application secrets.
 
 ## State and dependencies
 
-**In progress.** The isolated verification/publishing workflow is implemented. A
-repository owner must still create the Cloudflare Pages project, the GitHub deployment
-environments, and the required repository or environment variables before real
-deployments and cleanup can occur. Operational setup details live in the website's
-internal documentation, not in the public docs portal.
+**In progress — repository governance is configured; live release evidence remains.**
+All PBI-owned workflow, documentation, and automated-validation work is complete. The
+pre-provisioned `caseweaver-website` Cloudflare Pages project, all four required
+repository secrets, and both Pages environments exist. GitHub Actions run `29528380369`
+published the portal successfully on 2026-07-16 and scheduled cleanup run `30603295655`
+succeeded on 2026-07-31.
+
+On 2026-08-05, repository configuration added public Pages variables for the production
+origin, account, and project; protected `main` with pull-request-only updates, linear
+history, conversation resolution, and no force-push or deletion; and restricted
+`cloudflare-pages-production` to protected branches. The existing Cloudflare token
+remains a GitHub secret and is neither read nor re-created by this delivery. The next
+deployment will therefore reach the protected production environment only from `main`.
+Pull-request run `31037118902` verified the portal and published its artifact to the
+same-repository preview branch; the resulting HTTPS preview responded successfully.
+Manual cleanup dry run `31037250898` completed successfully without deleting a
+deployment.
 
 Depends on:
 
@@ -50,14 +62,25 @@ Depends on:
       trigger a production deployment.
 - [x] Pull requests from the same repository can deploy preview builds and comment the
       preview URL back on the PR.
-- [x] Only default-branch pushes and a deliberate manual dispatch from that branch can
-      reach the protected production deployment environment.
+- [x] Only a protected default-branch push and a deliberate manual dispatch from that
+      protected branch can reach the production deployment environment. `main` is
+      protected and the production environment accepts protected branches only.
 - [x] The workflow is concurrency-safe, has minimum required GitHub permissions, and
       uses immutable-SHA-pinned actions.
 - [x] A cleanup workflow removes closed-PR preview deployments, stale preview
       deployments, and older production deployments on a schedule or manual trigger.
 - [x] The workflow cannot deploy an application container, call a CaseWeaver API, read
       a database, or access a connector/provider credential.
+
+## Remaining release verification
+
+1. Associate `caseweaver.weeboo.fr` with `caseweaver-website` through the Cloudflare
+   Pages **Custom domains** flow. Cloudflare requires this initial domain association
+   through its dashboard before the managed DNS record can serve Pages.
+2. Merge the verified documentation change through the protected `main` branch and
+   inspect its artifact-only production publish at the configured HTTPS origin.
+3. After the first protected publish, inspect its URL, and keep the successful cleanup
+   dry-run evidence with the release record before relying on the nightly schedule.
 
 ## Excluded
 

@@ -31,9 +31,9 @@ describe("repository analysis deployment configuration", () => {
         eligibleForActivation: true,
       },
     ]);
-    expect(JSON.stringify(await registry.listMountedRepositories())).not.toContain(
-      "/srv/caseweaver/support",
-    );
+    expect(
+      JSON.stringify(await registry.listMountedRepositories()),
+    ).not.toContain("/srv/caseweaver/support");
     expect(configuration.gitRemoteCacheDirectory).toBe(
       "/var/cache/caseweaver/git",
     );

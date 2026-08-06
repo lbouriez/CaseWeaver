@@ -1,12 +1,16 @@
 ---
-sidebar_position: 5
-title: Contribuer à la documentation
+sidebar_position: 16
+title: Contribuer
 ---
 
-# Contribuer à la documentation
+# Contribuer à CaseWeaver
 
-Le portail est un projet Docusaurus TypeScript indépendant. Travaillez depuis la racine
-du dépôt et utilisez ses propres commandes de package :
+Lisez `AGENTS.md`, le guide `.features` pertinent, le README du dossier et le livrable
+avant de modifier. Les dépendances pointent vers l'intérieur : applications/adaptateurs
+dépendent des fonctionnalités, qui dépendent du domaine. Le domaine ne dépend jamais de
+HTTP, PostgreSQL, d'un connecteur ou fournisseur IA.
+
+## Site documentaire
 
 ```powershell
 pnpm --dir website install
@@ -15,15 +19,16 @@ pnpm --dir website test
 pnpm --dir website build
 ```
 
-Gardez les pages concises et orientées tâche. Avant d'ajouter une affirmation destinée
-aux opérateurs, vérifiez-la par rapport à l'implémentation actuelle, à la validation de
-configuration et au contrat de livraison accepté. Marquez le comportement incomplet comme
-indisponible plutôt que d'écrire un parcours de clics spéculatif.
+L'anglais est canonique. Le français est de la documentation rédigée, jamais une
+traduction navigateur. Après une modification anglaise, exécutez
+`pnpm --dir website translations:plan -- --dry-run`. Après validation humaine des pages
+françaises, exécutez `pnpm --dir website translations:manifest`. Le manifeste enregistre
+uniquement le hash anglais ; il ne traduit rien et n'appelle aucun fournisseur IA.
 
-Les traductions sont un travail de rédaction volontaire. La structure de langue existe ;
-une révision humaine est requise avant la publication d'une page traduite. Après la
-modification d'une page anglaise, exécutez
-`pnpm --dir website translations:status`. Mettez à jour la page locale, faites-la relire,
-puis exécutez `pnpm --dir website translations:manifest` pour enregistrer la révision
-anglaise exacte qui a été approuvée. Ces commandes n'appellent jamais un fournisseur d'IA
-et ne lisent aucune clé d'API.
+## Changements produit
+
+Préférez les tests unitaires ciblés pour les invariants, les contrats pour les familles
+d'adaptateurs, PostgreSQL réel pour la persistance et un petit ensemble E2E critique.
+Les tests IA live sont opt-in et plafonnés ; ils passent par
+`@caseweaver/ai-execution`. N'ajoutez jamais secret, URL avec identifiants, chaîne de
+connexion production ou contournement navigateur à la documentation.

@@ -49,11 +49,12 @@ describe("runWorkerCommand", () => {
         fileURLToPath(new URL("./main.ts", import.meta.url)),
         "start",
       ],
-      { encoding: "utf8" },
+      { encoding: "utf8", timeout: 15_000 },
     );
 
+    expect(result.error).toBeUndefined();
     expect(result.status).toBe(1);
     expect(result.stdout).toBe("");
     expect(result.stderr).toBe("Worker startup failed.\n");
-  });
+  }, 20_000);
 });

@@ -1,5 +1,12 @@
 import type { AnalysisProfile } from "@caseweaver/analysis";
-import { causationId, correlationId, createEnvelope, outboxEnvelopeId, utcInstant, workspaceId } from "@caseweaver/domain";
+import {
+  causationId,
+  correlationId,
+  createEnvelope,
+  outboxEnvelopeId,
+  utcInstant,
+  workspaceId,
+} from "@caseweaver/domain";
 import { describe, expect, it, vi } from "vitest";
 
 import { RuntimeRepositoryAnalysisPreparation } from "./repository-analysis-preparation.js";
@@ -112,12 +119,17 @@ describe("RuntimeRepositoryAnalysisPreparation", () => {
     await service.prepare(command, new AbortController().signal);
 
     expect(repositories.resolve).toHaveBeenCalledWith(
-      expect.objectContaining({ runtimeVersionId: "recipe-version-1", profile }),
+      expect.objectContaining({
+        runtimeVersionId: "recipe-version-1",
+        profile,
+      }),
     );
     expect(inputs.finalize).toHaveBeenCalledWith(
       expect.objectContaining({
         claim: expect.objectContaining({ id: "input-1", fence: 1n }),
-        repositoryRun: expect.objectContaining({ pinnedCommit: "a".repeat(40) }),
+        repositoryRun: expect.objectContaining({
+          pinnedCommit: "a".repeat(40),
+        }),
       }),
     );
     expect(inputs.fail).not.toHaveBeenCalled();

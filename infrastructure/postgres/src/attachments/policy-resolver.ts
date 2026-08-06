@@ -37,12 +37,15 @@ function unavailable(): never {
 
 function safeInteger(value: bigint, maximum: number): number {
   const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > maximum) unavailable();
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > maximum)
+    unavailable();
   return parsed;
 }
 
 function policyHash(value: object): string {
-  return createHash("sha256").update(JSON.stringify(value), "utf8").digest("hex");
+  return createHash("sha256")
+    .update(JSON.stringify(value), "utf8")
+    .digest("hex");
 }
 
 export interface AttachmentPolicyVersionRecord {
@@ -110,7 +113,9 @@ export function resolveEnabledAttachmentPolicy(input: {
   });
 }
 
-function disabledPolicy(recipeVersionId: string): ResolvedAttachmentPreparationPolicy {
+function disabledPolicy(
+  recipeVersionId: string,
+): ResolvedAttachmentPreparationPolicy {
   if (!identifier.test(recipeVersionId)) unavailable();
   return Object.freeze({
     mode: "disabled",
@@ -148,15 +153,16 @@ export class PostgresAttachmentPolicyResolver {
       unavailable();
     }
     try {
-      const mapping = await this.client.caseAnalysisTriggerRecipeVersion.findUnique({
-        where: {
-          workspaceId_analysisTriggerVersionId: {
-            workspaceId: input.workspaceId,
-            analysisTriggerVersionId: input.analysisTriggerVersionId,
+      const mapping =
+        await this.client.caseAnalysisTriggerRecipeVersion.findUnique({
+          where: {
+            workspaceId_analysisTriggerVersionId: {
+              workspaceId: input.workspaceId,
+              analysisTriggerVersionId: input.analysisTriggerVersionId,
+            },
           },
-        },
-        select: { analysisRecipeVersionId: true },
-      });
+          select: { analysisRecipeVersionId: true },
+        });
       if (mapping === null) return undefined;
       const recipe = await this.client.analysisRecipeVersion.findUnique({
         where: {
@@ -210,7 +216,8 @@ export class PostgresAttachmentPolicyResolver {
         policy,
       });
     } catch (error) {
-      if (error instanceof PostgresAttachmentPolicyUnavailableError) throw error;
+      if (error instanceof PostgresAttachmentPolicyUnavailableError)
+        throw error;
       unavailable();
     }
   }
@@ -256,7 +263,8 @@ export class PostgresAttachmentPolicyResolver {
       if (resolved.accessPolicyHash !== input.accessPolicyHash) unavailable();
       return resolved;
     } catch (error) {
-      if (error instanceof PostgresAttachmentPolicyUnavailableError) throw error;
+      if (error instanceof PostgresAttachmentPolicyUnavailableError)
+        throw error;
       unavailable();
     }
   }

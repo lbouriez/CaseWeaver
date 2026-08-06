@@ -20,12 +20,7 @@ on:
         type: string
 
 permissions:
-  contents: read
   pull-requests: read
-
-concurrency:
-  group: docs-pages-cleanup
-  cancel-in-progress: true
 
 jobs:
   cleanup-pr:
@@ -36,8 +31,11 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: cloudflare-pages-preview
+    concurrency:
+      group: cloudflare-pages-preview
+      cancel-in-progress: false
     steps:
-      - name: Check Cloudflare cleanup configuration
+      - name: Check preview cleanup configuration
         id: configuration
         shell: bash
         env:
@@ -45,17 +43,32 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT || secrets.CLOUDFLARE_PAGES_PROJECT }}
         run: |
-          missing=()
-          for variable in CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN CLOUDFLARE_PAGES_PROJECT; do
-            if [ -z "${!variable}" ]; then
-              missing+=("$variable")
-            fi
-          done
-          if [ "${#missing[@]}" -gt 0 ]; then
+          set -euo pipefail
+
+          is_safe_account_id() {
+            [[ "$1" =~ ^[A-Fa-f0-9]{32}$ ]]
+          }
+
+          is_safe_project_slug() {
+            [[ "$1" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]
+          }
+
+          if [ -z "$CLOUDFLARE_ACCOUNT_ID" ] || [ -z "$CLOUDFLARE_PAGES_PROJECT" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "Cloudflare cleanup is not configured; skipping external deletion (${missing[*]} missing)."
+            echo "Cloudflare preview metadata is absent; skipping external deletion."
             exit 0
           fi
+
+          if ! is_safe_account_id "$CLOUDFLARE_ACCOUNT_ID" || ! is_safe_project_slug "$CLOUDFLARE_PAGES_PROJECT"; then
+            echo "Cloudflare preview cleanup metadata is invalid." >&2
+            exit 1
+          fi
+
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "The preview Cloudflare API token is unavailable." >&2
+            exit 1
+          fi
+
           echo "configured=true" >> "$GITHUB_OUTPUT"
       - name: Delete preview deployments for the closed PR
         if: steps.configuration.outputs.configured == 'true'
@@ -66,66 +79,130 @@ jobs:
           CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT || secrets.CLOUDFLARE_PAGES_PROJECT }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
+          set -euo pipefail
+
+          [[ "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo "Pull request metadata is invalid." >&2; exit 1; }
           BRANCH="pr-${PR_NUMBER}"
-          RESPONSE=$(curl -fsS -X GET \
-            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$CLOUDFLARE_PAGES_PROJECT/deployments?env=preview" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            -H "Content-Type: application/json")
 
-          echo "$RESPONSE" | jq -r --arg branch "$BRANCH" '
-            .result[]? |
-            select(.deployment_trigger.metadata.branch == $branch) |
-            .id
-          ' | while IFS= read -r DEPLOYMENT_ID; do
-            if [ -n "$DEPLOYMENT_ID" ]; then
-              echo "Deleting preview deployment: $DEPLOYMENT_ID"
-              curl -fsS -X DELETE \
-                "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$CLOUDFLARE_PAGES_PROJECT/deployments/$DEPLOYMENT_ID?force=true" \
-                -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-                -H "Content-Type: application/json" >/dev/null
-            fi
-          done
+          fetch_deployments() {
+            local environment="$1"
+            local page=1
+            local deployments='[]'
+            local endpoint="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${CLOUDFLARE_PAGES_PROJECT}/deployments"
 
-  cleanup-stale:
-    name: Cleanup stale previews and old production deployments
+            while :; do
+              local response
+              response="$(curl --fail-with-body --silent --show-error --get "$endpoint" \
+                --data-urlencode "env=${environment}" \
+                --data-urlencode "page=${page}" \
+                --data-urlencode 'per_page=100' \
+                -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                -H 'Content-Type: application/json')"
+              printf '%s' "$response" | jq -e '.success == true and (.result | type == "array")' >/dev/null || {
+                echo "Cloudflare rejected the deployment list request." >&2
+                exit 1
+              }
+              deployments="$(jq -cn --argjson existing "$deployments" --argjson next "$(printf '%s' "$response" | jq -c '.result')" '$existing + $next')"
+
+              local total_pages
+              total_pages="$(printf '%s' "$response" | jq -r '.result_info.total_pages // 1')"
+              [[ "$total_pages" =~ ^[1-9][0-9]*$ ]] || { echo "Cloudflare pagination metadata is invalid." >&2; exit 1; }
+              (( page < total_pages )) || break
+              (( page < 1000 )) || { echo "Cloudflare pagination exceeds the safety limit." >&2; exit 1; }
+              page=$((page + 1))
+            done
+
+            printf '%s' "$deployments"
+          }
+
+          delete_deployment() {
+            local deployment_id="$1"
+            local response
+            local endpoint="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${CLOUDFLARE_PAGES_PROJECT}/deployments/${deployment_id}?force=true"
+
+            [[ "$deployment_id" =~ ^[A-Za-z0-9_-]{1,128}$ ]] || { echo "Cloudflare returned an invalid deployment identifier." >&2; exit 1; }
+            response="$(curl --fail-with-body --silent --show-error -X DELETE "$endpoint" \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              -H 'Content-Type: application/json')"
+            printf '%s' "$response" | jq -e '.success == true' >/dev/null || {
+              echo "Cloudflare rejected a deployment deletion request." >&2
+              exit 1
+            }
+          }
+
+          while IFS= read -r deployment_id; do
+            [ -n "$deployment_id" ] || continue
+            echo "Deleting the closed pull request preview deployment."
+            delete_deployment "$deployment_id"
+          done < <(
+            fetch_deployments preview | jq -r --arg branch "$BRANCH" '
+              .[]? |
+              select(.deployment_trigger.metadata.branch == $branch) |
+              .id
+            '
+          )
+
+  cleanup-stale-previews:
+    name: Cleanup stale documentation previews
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment:
       name: cloudflare-pages-preview
+    concurrency:
+      group: cloudflare-pages-preview
+      cancel-in-progress: false
     steps:
-      - name: Check Cloudflare cleanup configuration
+      - name: Check preview cleanup configuration
         id: configuration
         shell: bash
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT || secrets.CLOUDFLARE_PAGES_PROJECT }}
-          KEEP_PRODUCTION: ${{ inputs.keep_production || '5' }}
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
         run: |
-          missing=()
-          for variable in CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN CLOUDFLARE_PAGES_PROJECT; do
-            if [ -z "${!variable}" ]; then
-              missing+=("$variable")
-            fi
-          done
-          case "$KEEP_PRODUCTION" in
-            ''|*[!0-9]*) echo "keep_production must be a non-negative integer." >&2; exit 1 ;;
-          esac
-          if [ "${#missing[@]}" -gt 0 ]; then
+          set -euo pipefail
+
+          is_safe_account_id() {
+            [[ "$1" =~ ^[A-Fa-f0-9]{32}$ ]]
+          }
+
+          is_safe_project_slug() {
+            [[ "$1" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]
+          }
+
+          if [ "$DRY_RUN" != 'true' ] && [ "$DRY_RUN" != 'false' ]; then
+            echo "dry_run must be true or false." >&2
+            exit 1
+          fi
+
+          if [ -z "$CLOUDFLARE_ACCOUNT_ID" ] || [ -z "$CLOUDFLARE_PAGES_PROJECT" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "Cloudflare cleanup is not configured; skipping external deletion (${missing[*]} missing)."
+            echo "Cloudflare preview metadata is absent; skipping external deletion."
             exit 0
           fi
-          echo "configured=true" >> "$GITHUB_OUTPUT"
+
+          if ! is_safe_account_id "$CLOUDFLARE_ACCOUNT_ID" || ! is_safe_project_slug "$CLOUDFLARE_PAGES_PROJECT"; then
+            echo "Cloudflare preview cleanup metadata is invalid." >&2
+            exit 1
+          fi
+
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "The preview Cloudflare API token is unavailable." >&2
+            exit 1
+          fi
+
+          printf 'configured=true\ndry_run=%s\n' "$DRY_RUN" >> "$GITHUB_OUTPUT"
       - name: Fetch open pull requests
         if: steps.configuration.outputs.configured == 'true'
         id: open_prs
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          OPEN_PRS=$(gh pr list --repo "${{ github.repository }}" --state open --json number --jq '[.[].number]')
-          echo "open_prs=$OPEN_PRS" >> "$GITHUB_OUTPUT"
-
+          set -euo pipefail
+          open_prs="$(gh pr list --repo "${{ github.repository }}" --state open --limit 1000 --json number --jq '[.[].number]')"
+          printf '%s' "$open_prs" | jq -e 'type == "array" and all(.[]; type == "number")' >/dev/null
+          printf 'open_prs=%s\n' "$open_prs" >> "$GITHUB_OUTPUT"
       - name: Clean up preview deployments
         if: steps.configuration.outputs.configured == 'true'
         shell: bash
@@ -134,52 +211,100 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT || secrets.CLOUDFLARE_PAGES_PROJECT }}
           OPEN_PRS: ${{ steps.open_prs.outputs.open_prs }}
-          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+          DRY_RUN: ${{ steps.configuration.outputs.dry_run }}
         run: |
-          RESPONSE=$(curl -fsS -X GET \
-            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$CLOUDFLARE_PAGES_PROJECT/deployments?env=preview" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            -H "Content-Type: application/json")
+          set -euo pipefail
+
+          fetch_deployments() {
+            local page=1
+            local deployments='[]'
+            local endpoint="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${CLOUDFLARE_PAGES_PROJECT}/deployments"
+
+            while :; do
+              local response
+              response="$(curl --fail-with-body --silent --show-error --get "$endpoint" \
+                --data-urlencode 'env=preview' \
+                --data-urlencode "page=${page}" \
+                --data-urlencode 'per_page=100' \
+                -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                -H 'Content-Type: application/json')"
+              printf '%s' "$response" | jq -e '.success == true and (.result | type == "array")' >/dev/null || {
+                echo "Cloudflare rejected the preview deployment list request." >&2
+                exit 1
+              }
+              deployments="$(jq -cn --argjson existing "$deployments" --argjson next "$(printf '%s' "$response" | jq -c '.result')" '$existing + $next')"
+
+              local total_pages
+              total_pages="$(printf '%s' "$response" | jq -r '.result_info.total_pages // 1')"
+              [[ "$total_pages" =~ ^[1-9][0-9]*$ ]] || { echo "Cloudflare pagination metadata is invalid." >&2; exit 1; }
+              (( page < total_pages )) || break
+              (( page < 1000 )) || { echo "Cloudflare pagination exceeds the safety limit." >&2; exit 1; }
+              page=$((page + 1))
+            done
+
+            printf '%s' "$deployments"
+          }
+
+          delete_deployment() {
+            local deployment_id="$1"
+            local response
+            local endpoint="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${CLOUDFLARE_PAGES_PROJECT}/deployments/${deployment_id}?force=true"
+
+            [[ "$deployment_id" =~ ^[A-Za-z0-9_-]{1,128}$ ]] || { echo "Cloudflare returned an invalid deployment identifier." >&2; exit 1; }
+            response="$(curl --fail-with-body --silent --show-error -X DELETE "$endpoint" \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              -H 'Content-Type: application/json')"
+            printf '%s' "$response" | jq -e '.success == true' >/dev/null || {
+              echo "Cloudflare rejected a deployment deletion request." >&2
+              exit 1
+            }
+          }
 
           declare -A seen_branches=()
+          while IFS=$'\t' read -r deployment_id branch; do
+            [ -n "$deployment_id" ] && [ -n "$branch" ] || continue
 
-          while IFS=$'\t' read -r DEPLOYMENT_ID BRANCH CREATED_ON; do
-            if [ -z "$DEPLOYMENT_ID" ] || [ -z "$BRANCH" ]; then
+            pr_number="${branch#pr-}"
+            if ! printf '%s' "$OPEN_PRS" | jq -e --argjson pr "$pr_number" 'index($pr)' >/dev/null; then
+              action='stale'
+            elif [ -n "${seen_branches[$branch]:-}" ]; then
+              action='duplicate'
+            else
+              seen_branches["$branch"]=1
               continue
             fi
 
-            PR_NUMBER="${BRANCH#pr-}"
-            if ! echo "$OPEN_PRS" | jq -e --argjson pr "$PR_NUMBER" 'index($pr)' >/dev/null; then
-              ACTION="stale"
-            elif [ -n "${seen_branches[$BRANCH]:-}" ]; then
-              ACTION="duplicate"
+            if [ "$DRY_RUN" = 'true' ]; then
+              echo "Would delete a ${action} preview deployment."
             else
-              seen_branches["$BRANCH"]=1
-              continue
-            fi
-
-            if [ "$DRY_RUN" = "true" ]; then
-              echo "Would delete $ACTION preview deployment: $DEPLOYMENT_ID ($BRANCH, created $CREATED_ON)"
-            else
-              echo "Deleting $ACTION preview deployment: $DEPLOYMENT_ID ($BRANCH, created $CREATED_ON)"
-              curl -fsS -X DELETE \
-                "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$CLOUDFLARE_PAGES_PROJECT/deployments/$DEPLOYMENT_ID?force=true" \
-                -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-                -H "Content-Type: application/json" >/dev/null
+              echo "Deleting a ${action} preview deployment."
+              delete_deployment "$deployment_id"
             fi
           done < <(
-            printf '%s\n' "$RESPONSE" | jq -r '
-              .result // [] |
+            fetch_deployments | jq -r '
               map(select(.deployment_trigger.metadata.branch != null)) |
               map(select(.deployment_trigger.metadata.branch | test("^pr-[0-9]+$"))) |
               sort_by(.created_on) | reverse |
               .[] |
-              "\(.id)\t\(.deployment_trigger.metadata.branch)\t\(.created_on)"
+              "\(.id)\t\(.deployment_trigger.metadata.branch)"
             '
           )
 
-      - name: Clean up old production deployments
-        if: steps.configuration.outputs.configured == 'true'
+  cleanup-old-production:
+    name: Cleanup old documentation production deployments
+    if: |
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
+      github.ref == 'refs/heads/main' &&
+      github.ref_protected
+    runs-on: ubuntu-latest
+    environment:
+      name: cloudflare-pages-production
+    concurrency:
+      group: cloudflare-pages-production
+      cancel-in-progress: false
+    steps:
+      - name: Check protected production cleanup configuration
+        id: configuration
         shell: bash
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -188,37 +313,119 @@ jobs:
           DRY_RUN: ${{ inputs.dry_run || 'false' }}
           KEEP_PRODUCTION: ${{ inputs.keep_production || '5' }}
         run: |
-          RESPONSE=$(curl -fsS -X GET \
-            "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$CLOUDFLARE_PAGES_PROJECT/deployments?env=production" \
-            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-            -H "Content-Type: application/json")
+          set -euo pipefail
 
-          KEEP_COUNT=0
-          while IFS=$'\t' read -r DEPLOYMENT_ID CREATED_ON; do
-            if [ -z "$DEPLOYMENT_ID" ]; then
+          is_safe_account_id() {
+            [[ "$1" =~ ^[A-Fa-f0-9]{32}$ ]]
+          }
+
+          is_safe_project_slug() {
+            [[ "$1" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]]
+          }
+
+          if [ "$DRY_RUN" != 'true' ] && [ "$DRY_RUN" != 'false' ]; then
+            echo "dry_run must be true or false." >&2
+            exit 1
+          fi
+
+          if ! [[ "$KEEP_PRODUCTION" =~ ^[1-9][0-9]*$ ]]; then
+            echo "keep_production must be a positive integer." >&2
+            exit 1
+          fi
+
+          if [ -z "$CLOUDFLARE_ACCOUNT_ID" ] || [ -z "$CLOUDFLARE_PAGES_PROJECT" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "Cloudflare production metadata is absent; skipping external deletion."
+            exit 0
+          fi
+
+          if ! is_safe_account_id "$CLOUDFLARE_ACCOUNT_ID" || ! is_safe_project_slug "$CLOUDFLARE_PAGES_PROJECT"; then
+            echo "Cloudflare production cleanup metadata is invalid." >&2
+            exit 1
+          fi
+
+          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+            echo "The protected Cloudflare API token is unavailable." >&2
+            exit 1
+          fi
+
+          printf 'configured=true\ndry_run=%s\nkeep_production=%s\n' "$DRY_RUN" "$KEEP_PRODUCTION" >> "$GITHUB_OUTPUT"
+      - name: Clean up old production deployments
+        if: steps.configuration.outputs.configured == 'true'
+        shell: bash
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID || secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_PAGES_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT || secrets.CLOUDFLARE_PAGES_PROJECT }}
+          DRY_RUN: ${{ steps.configuration.outputs.dry_run }}
+          KEEP_PRODUCTION: ${{ steps.configuration.outputs.keep_production }}
+        run: |
+          set -euo pipefail
+
+          fetch_deployments() {
+            local page=1
+            local deployments='[]'
+            local endpoint="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${CLOUDFLARE_PAGES_PROJECT}/deployments"
+
+            while :; do
+              local response
+              response="$(curl --fail-with-body --silent --show-error --get "$endpoint" \
+                --data-urlencode 'env=production' \
+                --data-urlencode "page=${page}" \
+                --data-urlencode 'per_page=100' \
+                -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+                -H 'Content-Type: application/json')"
+              printf '%s' "$response" | jq -e '.success == true and (.result | type == "array")' >/dev/null || {
+                echo "Cloudflare rejected the production deployment list request." >&2
+                exit 1
+              }
+              deployments="$(jq -cn --argjson existing "$deployments" --argjson next "$(printf '%s' "$response" | jq -c '.result')" '$existing + $next')"
+
+              local total_pages
+              total_pages="$(printf '%s' "$response" | jq -r '.result_info.total_pages // 1')"
+              [[ "$total_pages" =~ ^[1-9][0-9]*$ ]] || { echo "Cloudflare pagination metadata is invalid." >&2; exit 1; }
+              (( page < total_pages )) || break
+              (( page < 1000 )) || { echo "Cloudflare pagination exceeds the safety limit." >&2; exit 1; }
+              page=$((page + 1))
+            done
+
+            printf '%s' "$deployments"
+          }
+
+          delete_deployment() {
+            local deployment_id="$1"
+            local response
+            local endpoint="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/pages/projects/${CLOUDFLARE_PAGES_PROJECT}/deployments/${deployment_id}?force=true"
+
+            [[ "$deployment_id" =~ ^[A-Za-z0-9_-]{1,128}$ ]] || { echo "Cloudflare returned an invalid deployment identifier." >&2; exit 1; }
+            response="$(curl --fail-with-body --silent --show-error -X DELETE "$endpoint" \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              -H 'Content-Type: application/json')"
+            printf '%s' "$response" | jq -e '.success == true' >/dev/null || {
+              echo "Cloudflare rejected a deployment deletion request." >&2
+              exit 1
+            }
+          }
+
+          keep_count=0
+          while IFS= read -r deployment_id; do
+            [ -n "$deployment_id" ] || continue
+
+            if [ "$keep_count" -lt "$KEEP_PRODUCTION" ]; then
+              keep_count=$((keep_count + 1))
               continue
             fi
 
-            if [ "$KEEP_COUNT" -lt "$KEEP_PRODUCTION" ]; then
-              KEEP_COUNT=$((KEEP_COUNT + 1))
-              echo "Keeping production deployment: $DEPLOYMENT_ID ($CREATED_ON)"
-              continue
-            fi
-
-            if [ "$DRY_RUN" = "true" ]; then
-              echo "Would delete old production deployment: $DEPLOYMENT_ID ($CREATED_ON)"
+            if [ "$DRY_RUN" = 'true' ]; then
+              echo "Would delete an old production deployment."
             else
-              echo "Deleting old production deployment: $DEPLOYMENT_ID ($CREATED_ON)"
-              curl -fsS -X DELETE \
-                "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/pages/projects/$CLOUDFLARE_PAGES_PROJECT/deployments/$DEPLOYMENT_ID?force=true" \
-                -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
-                -H "Content-Type: application/json" >/dev/null
+              echo "Deleting an old production deployment."
+              delete_deployment "$deployment_id"
             fi
           done < <(
-            printf '%s\n' "$RESPONSE" | jq -r '
-              .result // [] |
+            fetch_deployments | jq -r '
               sort_by(.created_on) | reverse |
               .[] |
-              "\(.id)\t\(.created_on)"
+              .id
             '
           )

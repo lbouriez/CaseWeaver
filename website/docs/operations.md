@@ -1,15 +1,18 @@
 ---
-sidebar_position: 4
-title: Operations status
+sidebar_position: 11
+title: Operations overview
 ---
 
-# Operations status
+# Operations overview
 
-The production self-hosting and recovery guide is not published yet. The existing local
-development aids are not a supported production installation, and this portal will not
-invent a deployment path while the runtime and release contracts are still being
-completed.
+Use [Self-hosting](./self-hosting.md) for installation, [Persistence and recovery](./persistence-recovery.md)
+for data safety, and [Troubleshooting](./troubleshooting.md) for a bounded first check.
 
-When the relevant delivery work is accepted, this section will provide verified guidance
-for installation, authentication, configuration, logs, health checks, backups, upgrades,
-and recovery.
+An operator can inspect jobs, dead letters, costs, retention, privacy, diagnostics, and
+the append-only audit log only when their workspace permissions allow it. Sensitive
+reads and downloads fail closed when their required audit record cannot be persisted.
+
+The supported production path uses a private database, one public TLS edge, static
+Admin assets, separate migration/runtime database roles, explicit forward migration,
+and exactly one runtime mode. Do not treat `compose.test.yml`, `compose.admin.yml`, or a
+locally built image as a production installation.

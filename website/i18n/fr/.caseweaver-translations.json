@@ -2,25 +2,85 @@
   "schemaVersion": 1,
   "locale": "fr",
   "sources": {
+    "access-and-secrets.md": {
+      "sourceHash": "7a5667c98e1f1bdaa9bf784316e181e3d1650adee7e97570472242e65526e863",
+      "translationPath": "access-and-secrets.md"
+    },
+    "ai-and-cost.md": {
+      "sourceHash": "edeacb5578a0eaa6ac57f72babc1f793c192f30cbb6133debd7446c46aa71f4b",
+      "translationPath": "ai-and-cost.md"
+    },
     "architecture.md": {
-      "sourceHash": "b9667fd199da5dca55242885774cd7b0428051350fafb33f2084860c6154510a",
+      "sourceHash": "39b1da4a9f21e3113f06497f41cb3ee89ccdc4d8e139415c366e43b452eb5192",
       "translationPath": "architecture.md"
     },
     "capability-status.md": {
-      "sourceHash": "65c5207f4878be82d437e50c60bec86aae3b06f2a772fdf0f5327e921769ad4f",
+      "sourceHash": "0bb50e3b3cd3c917edc20a2732db5aad6bf7da0c71768ec334534699749eebe0",
       "translationPath": "capability-status.md"
     },
+    "configuration-reference.md": {
+      "sourceHash": "d71a760f7c1a5668cb241c9bd24c334cd84847bc38680cb5bf822136606383fc",
+      "translationPath": "configuration-reference.md"
+    },
+    "connectors.md": {
+      "sourceHash": "53261e4915c3f74cd791d8dc9d5ac4e0f34600d9589bde900ea85c01c0ff2574",
+      "translationPath": "connectors.md"
+    },
     "contributing.md": {
-      "sourceHash": "4b19c721db1963214076961b2b2cbe8dd886bf0e27c545c8c6c48e87f9e27f21",
+      "sourceHash": "205f33571ade369a574f7ea53a0b6aa61455a2925785a31af947f38bec7bffc4",
       "translationPath": "contributing.md"
     },
+    "deployment-reference.md": {
+      "sourceHash": "e5964e2b341d72bbdfdc77b72b25df7207187a0dbe843567f6173ee0ffd73693",
+      "translationPath": "deployment-reference.md"
+    },
+    "git-markdown.md": {
+      "sourceHash": "e46fec295e89f178860d4538efc24ffe7baefd50d852be35df8390e0a86daae5",
+      "translationPath": "git-markdown.md"
+    },
+    "jitbit.md": {
+      "sourceHash": "088707d9930e2c33971587b881757dee0c8a897c5505df99f91c04320db8ca91",
+      "translationPath": "jitbit.md"
+    },
+    "knowledge-analysis.md": {
+      "sourceHash": "8936150029fb82f5049b1c43385fb014199dc53b0d65509f385018bbe75c640d",
+      "translationPath": "knowledge-analysis.md"
+    },
     "operations.md": {
-      "sourceHash": "a593fb098aab15096816b613c08c1a3509690ed246b64083efe8776ba983d0b3",
+      "sourceHash": "bbb10a277965e4c779a6e34809e9cc382458760f5c64805c750ac082d0ea8b81",
       "translationPath": "operations.md"
     },
+    "operator-console-reference.md": {
+      "sourceHash": "2195388abefb3c429f6f42ccbcd3aec43988d195c42d1f6c06b0f5708c6b1914",
+      "translationPath": "operator-console-reference.md"
+    },
+    "operator-knowledge-map.md": {
+      "sourceHash": "1389340df0c293fba6fb1f164131cb1f24ec1bab130d3bc5ba5791a7a2e4d12f",
+      "translationPath": "operator-knowledge-map.md"
+    },
     "overview.md": {
-      "sourceHash": "dac5472bbb1aefae9de1d5023215b8c0cd1436f96a6c3a4fd5794cf35ef02173",
+      "sourceHash": "0cc8b97a733ff8e8bf32642bdce949ed8a9383e0087a10ae07e87fcb53b37980",
       "translationPath": "overview.md"
+    },
+    "persistence-recovery.md": {
+      "sourceHash": "fc84b39e6378f7399b3d072e1681707b1a7d2b83604e9b0703e74264f496e0b7",
+      "translationPath": "persistence-recovery.md"
+    },
+    "quick-start.md": {
+      "sourceHash": "5373248c387f5646f1c6c737fc6d0104007b69f6106a0b629e38204cc7fb4663",
+      "translationPath": "quick-start.md"
+    },
+    "self-hosting.md": {
+      "sourceHash": "69d7aa74ed33a79cb743bb298fe186f2703f6fe8abbf6267ab4eeacdbf995825",
+      "translationPath": "self-hosting.md"
+    },
+    "testing.md": {
+      "sourceHash": "0a6e333bd82c9e20e3a0a80751ec115ee9fd0b5a61577800b357ec200f2cba5f",
+      "translationPath": "testing.md"
+    },
+    "troubleshooting.md": {
+      "sourceHash": "22bf1c3d39883c879c56a71970a3bd0655d78375cbb671c6236e61e079a0b372",
+      "translationPath": "troubleshooting.md"
     }
   }
 }

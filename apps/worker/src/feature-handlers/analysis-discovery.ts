@@ -54,7 +54,11 @@ function hash(value: string): string {
 function triggerDigests(input: {
   readonly command: AnalysisDiscoveryCommand;
   readonly item: DiscoveredCase;
-}): Readonly<{ readonly idempotency: ReturnType<typeof sha256Digest>; readonly request: ReturnType<typeof sha256Digest>; readonly occurrenceKey: string }> {
+}): Readonly<{
+  readonly idempotency: ReturnType<typeof sha256Digest>;
+  readonly request: ReturnType<typeof sha256Digest>;
+  readonly occurrenceKey: string;
+}> {
   const fingerprint =
     input.item.fingerprint === undefined
       ? ""

@@ -26,15 +26,44 @@ export interface StandaloneHostRuntime {
   stop(): Promise<void>;
 }
 
+const standaloneStartupStages = [
+  "worker.compose",
+  "scheduler.compose",
+  "api.compose",
+  "webhook.compose",
+  "worker.start",
+  "scheduler.start",
+  "api.start",
+  "webhook.start",
+] as const;
+
+export type StandaloneStartupStage = (typeof standaloneStartupStages)[number];
+
+/** A finite, safe-to-log startup phase; it intentionally retains no cause. */
+export class StandaloneStartupError extends Error {
+  public readonly code: `standalone.${StandaloneStartupStage}`;
+
+  public constructor(stage: StandaloneStartupStage) {
+    super("Standalone lifecycle startup failed.");
+    this.name = "StandaloneStartupError";
+    this.code = `standalone.${stage}`;
+  }
+}
+
+interface NamedManagedProcess {
+  readonly stage: Extract<StandaloneStartupStage, `${string}.start`>;
+  readonly process: ManagedProcess;
+}
+
 class ProductionStandaloneHost implements StandaloneHostRuntime {
-  private readonly started: ManagedProcess[] = [];
+  private readonly started: NamedManagedProcess[] = [];
   private telemetry: Awaited<ReturnType<typeof startOpenTelemetry>>;
   private stopping = false;
   private active = false;
 
   public constructor(
     private readonly environment: NodeJS.ProcessEnv,
-    private readonly processes: readonly ManagedProcess[],
+    private readonly processes: readonly NamedManagedProcess[],
   ) {}
 
   public async start(): Promise<void> {
@@ -45,9 +74,13 @@ class ProductionStandaloneHost implements StandaloneHostRuntime {
       this.telemetry = await startOpenTelemetry(
         resolveOpenTelemetryConfig(this.environment, "caseweaver-standalone"),
       );
-      for (const process of this.processes) {
-        await process.start();
-        this.started.push(process);
+      for (const item of this.processes) {
+        try {
+          await item.process.start();
+        } catch {
+          throw new StandaloneStartupError(item.stage);
+        }
+        this.started.push(item);
       }
       this.active = true;
     } catch (error) {
@@ -64,9 +97,9 @@ class ProductionStandaloneHost implements StandaloneHostRuntime {
   private async close(): Promise<void> {
     this.stopping = true;
     const failures: unknown[] = [];
-    for (const process of this.started.splice(0).reverse()) {
+    for (const item of this.started.splice(0).reverse()) {
       try {
-        await process.stop();
+        await item.process.stop();
       } catch (error) {
         failures.push(error);
       }
@@ -95,18 +128,35 @@ class ProductionStandaloneHost implements StandaloneHostRuntime {
 export async function createStandaloneRuntimeFromEnvironment(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<StandaloneHostRuntime> {
-  const [worker, scheduler, api, webhook] = await Promise.all([
+  const worker = await composeStandaloneProcess("worker.compose", () =>
     createProductionWorkerRuntimeFromEnvironment(environment),
+  );
+  const scheduler = await composeStandaloneProcess("scheduler.compose", () =>
     createSchedulerRuntimeFromEnvironment(environment),
+  );
+  const api = await composeStandaloneProcess("api.compose", () =>
     createApiRuntimeFromEnvironment(environment, { startTelemetry: false }),
+  );
+  const webhook = await composeStandaloneProcess("webhook.compose", () =>
     createWebhookRuntimeFromEnvironment(environment),
-  ]);
+  );
   return new ProductionStandaloneHost(environment, [
-    asManaged(worker),
-    asManaged(scheduler),
-    asManaged(api),
-    asManaged(webhook),
+    { stage: "worker.start", process: asManaged(worker) },
+    { stage: "scheduler.start", process: asManaged(scheduler) },
+    { stage: "api.start", process: asManaged(api) },
+    { stage: "webhook.start", process: asManaged(webhook) },
   ]);
+}
+
+async function composeStandaloneProcess<T>(
+  stage: Extract<StandaloneStartupStage, `${string}.compose`>,
+  compose: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await compose();
+  } catch {
+    throw new StandaloneStartupError(stage);
+  }
 }
 
 function asManaged(

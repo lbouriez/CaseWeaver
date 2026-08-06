@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { StandaloneStartupError } from "./index.js";
 import { runStandalone } from "./main.js";
 
 describe("standalone command", () => {
@@ -27,17 +28,46 @@ describe("standalone command", () => {
     const output = { log: vi.fn(), error: vi.fn() };
 
     await expect(
-      runStandalone(
-        ["migrate-queue"],
-        output,
-        {},
-        vi.fn(),
-        async () => {
-          throw new Error("postgresql://secret@host/database");
-        },
-      ),
+      runStandalone(["migrate-queue"], output, {}, vi.fn(), async () => {
+        throw new Error("postgresql://secret@host/database");
+      }),
     ).resolves.toBe(1);
 
     expect(output.error).toHaveBeenCalledWith("Queue migration failed.");
+  });
+
+  it("reports only an allow-listed startup configuration outcome", async () => {
+    const output = { log: vi.fn(), error: vi.fn() };
+    const configurationFailure = new Error(
+      "postgresql://caseweaver_runtime:secret@postgres/caseweaver",
+    );
+    configurationFailure.name = "ObjectStorageConfigurationError";
+
+    await expect(
+      runStandalone(["start"], output, {}, async () => {
+        throw configurationFailure;
+      }),
+    ).resolves.toBe(1);
+
+    expect(output.error).toHaveBeenCalledWith(
+      "Standalone startup failed (objectStorage.invalidConfiguration).",
+    );
+    expect(output.error).not.toHaveBeenCalledWith(
+      expect.stringContaining("secret"),
+    );
+  });
+
+  it("reports an owned standalone startup phase without its cause", async () => {
+    const output = { log: vi.fn(), error: vi.fn() };
+
+    await expect(
+      runStandalone(["start"], output, {}, async () => {
+        throw new StandaloneStartupError("worker.compose");
+      }),
+    ).resolves.toBe(1);
+
+    expect(output.error).toHaveBeenCalledWith(
+      "Standalone startup failed (standalone.worker.compose).",
+    );
   });
 });

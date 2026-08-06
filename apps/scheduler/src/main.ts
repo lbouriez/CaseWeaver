@@ -1,5 +1,10 @@
 import { pathToFileURL } from "node:url";
 
+import { Pool } from "pg";
+import {
+  PostgresSchedulerReadinessProbe,
+  type SchedulerDatabaseReadinessProbe,
+} from "./database-readiness.js";
 import {
   attachSchedulerShutdownSignals,
   createSchedulerRuntimeFromEnvironment,
@@ -11,11 +16,37 @@ export interface SchedulerOutput {
   error(message: string): void;
 }
 
-export function runSchedulerCommand(
+export async function runSchedulerCommand(
   arguments_: readonly string[],
   output: SchedulerOutput,
-): number {
+  environment: NodeJS.ProcessEnv = process.env,
+  readiness?: SchedulerDatabaseReadinessProbe,
+): Promise<number> {
   if (arguments_.length === 1 && arguments_[0] === "health") {
+    const databaseUrl = environment.DATABASE_URL;
+    if (databaseUrl === undefined || databaseUrl.length === 0) {
+      output.error("Scheduler database is unavailable.");
+      return 1;
+    }
+    let result: "ready" | "unavailable";
+    if (readiness !== undefined) {
+      result = await readiness.check();
+    } else {
+      const pool = new Pool({
+        connectionString: databaseUrl,
+        max: 1,
+        connectionTimeoutMillis: 3_000,
+      });
+      try {
+        result = await new PostgresSchedulerReadinessProbe(pool, 3_000).check();
+      } finally {
+        await pool.end();
+      }
+    }
+    if (result !== "ready") {
+      output.error("Scheduler database is unavailable.");
+      return 1;
+    }
     output.log('{"status":"ok"}');
     return 0;
   }
@@ -38,7 +69,7 @@ export async function runScheduler(
   ) => Promise<SchedulerProcess> = createSchedulerRuntimeFromEnvironment,
 ): Promise<number> {
   if (arguments_.length === 1 && arguments_[0] === "health") {
-    return runSchedulerCommand(arguments_, output);
+    return runSchedulerCommand(arguments_, output, environment);
   }
   if (arguments_.length !== 1 || arguments_[0] !== "start") {
     output.error("Usage: caseweaver-scheduler health | start");

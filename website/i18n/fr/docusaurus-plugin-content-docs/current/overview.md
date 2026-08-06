@@ -1,33 +1,51 @@
 ---
 sidebar_position: 1
-title: Présentation
+title: Bienvenue
 ---
 
-# Documentation CaseWeaver
+# CaseWeaver en une page
 
-CaseWeaver est conçu comme un système durable d'opérations sur les dossiers, attentif
-aux preuves. Sa documentation doit distinguer une capacité livrée, un travail disponible
-uniquement pour une évaluation de développement et un travail planifié.
+CaseWeaver aide une équipe de support à enquêter sur un dossier avec les connaissances
+pertinentes de l'entreprise, tout en conservant les preuves et décisions opérationnelles
+avec le résultat. Ce n'est ni une extension de navigateur, ni un coffre de mots de passe,
+ni un chatbot générique.
 
-Cette première version du portail fournit le vocabulaire commun, une orientation
-architecturale et la limite de statut des capacités. Elle ne remplace pas encore les
-guides opérateurs vérifiés qui dépendent des contrats de runtime, d'administration et
-d'auto-hébergement acceptés.
+```text
+connaissances / dossiers / événements vérifiés
+                    |
+             travail durable en file
+                    |
+ preuves, IA bornée, résultat gouverné
+                    |
+       revue ou publication interne
+```
 
-## À lire en premier
+Le navigateur n'est que la console opérateur. Il reçoit une session gérée par le serveur
+et des enregistrements de configuration expurgés, jamais une URL de base de données, un
+jeton de connecteur, une clé de fournisseur ou un jeton OAuth.
 
-1. Consultez [l'architecture](./architecture.md) pour les principes durables de
-   traitement et de sécurité.
-2. Vérifiez le [statut des capacités](./capability-status.md) avant de considérer qu'un
-   chemin de configuration est pris en charge.
-3. Lisez le [statut des opérations](./operations.md) avant de planifier un déploiement
-   auto-hébergé.
+## Commencer au bon endroit
 
-## Principes de documentation
+- Nouveau dans le projet : [Démarrage rapide](./quick-start.md).
+- Connexion ou référence de secret : [Accès et secrets](./access-and-secrets.md).
+- Connexion de contenu : [matrice des connecteurs](./connectors.md).
+- Installation durable : [Auto-hébergement](./self-hosting.md), et non Compose de développement.
 
-- Les clients navigateurs ne reçoivent jamais de secrets opérationnels, de jetons de
-  fournisseur ou d'identifiants de base de données.
-- Les données de dossiers, les preuves, les versions de configuration et le travail
-  durable conservent des limites explicites de propriété et d'audit.
-- Les instructions publiques indiquent les prérequis, les résultats sûrs attendus et le
-  moment où une capacité n'est pas encore prise en charge.
+## Vocabulaire
+
+| Terme | Signification |
+| --- | --- |
+| Instance de connecteur | Connexion testée et versionnée à un système externe. |
+| Source de connaissance | Contenu et filtre choisis depuis un connecteur. |
+| Collection | Identité immuable de l'espace d'embeddings indexé. |
+| Planification | Déclencheur durable distinct pour une source ou un intake. |
+| Profil d'analyse/publication | Politique versionnée pour produire/envoyer un résultat approuvé. |
+| Référence de secret | Pointeur opaque vers une valeur du backend de secrets. |
+
+## Libellés de disponibilité
+
+**Disponible** signifie que l'API annonce un flux géré. **Lecture seule** signifie que
+la console affiche l'enregistrement sans pouvoir le modifier sûrement. **Indisponible**
+signifie qu'il n'existe aucun contournement navigateur documenté. Consultez le
+[statut des capacités](./capability-status.md) avant de traiter une capacité prévue
+comme une tâche opérateur.

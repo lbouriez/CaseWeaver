@@ -9,7 +9,9 @@ if (databaseUrl === undefined) {
   throw new Error("PostgreSQL integration tests require DATABASE_URL.");
 }
 if (!new URL(databaseUrl).pathname.toLowerCase().includes("test")) {
-  throw new Error("PostgreSQL integration DATABASE_URL must name a test database.");
+  throw new Error(
+    "PostgreSQL integration DATABASE_URL must name a test database.",
+  );
 }
 
 const pool = new Pool({ connectionString: databaseUrl });
@@ -69,10 +71,10 @@ async function configuration(input: {
 
 async function seed(): Promise<void> {
   await pool.query("INSERT INTO workspaces (id) VALUES ($1)", [workspace]);
-  await pool.query("INSERT INTO principals (id, workspace_id) VALUES ($1, $2)", [
-    principal,
-    workspace,
-  ]);
+  await pool.query(
+    "INSERT INTO principals (id, workspace_id) VALUES ($1, $2)",
+    [principal, workspace],
+  );
   await pool.query(
     `INSERT INTO administration_descriptor_revisions (
        kind, type, version, descriptor, descriptor_hash
@@ -157,7 +159,14 @@ async function seed(): Promise<void> {
      ) VALUES ($1, $2, $3, $4, $5, $6,
        '{"kind":"interval","intervalMs":60000,"overlapPolicy":"skip"}'::jsonb,
        '2026-07-17T18:00:00.000Z', true)`,
-    [scheduleVersion, workspace, schedule, scheduleVersion, triggerVersion, principal],
+    [
+      scheduleVersion,
+      workspace,
+      schedule,
+      scheduleVersion,
+      triggerVersion,
+      principal,
+    ],
   );
 }
 

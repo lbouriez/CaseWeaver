@@ -347,7 +347,7 @@ describe("administration API routes", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.headers["cache-control"]).toBe("no-store, private");
-    expect(response.headers.vary).toBe("Cookie");
+    expect(response.headers.vary).toBe("Origin, Cookie");
     expect(built.operations.session).toHaveBeenCalledWith(expect.anything());
     await built.app.close();
   });

@@ -363,7 +363,10 @@ function assertAttachmentStage(value: KnowledgeSourceAttachmentStage): void {
   ) {
     throw new RangeError("Knowledge source attachment stage is invalid.");
   }
-  assertIdentifier(value.attachmentPolicyId, "Knowledge source attachment policy");
+  assertIdentifier(
+    value.attachmentPolicyId,
+    "Knowledge source attachment policy",
+  );
   assertIdentifier(
     value.attachmentPolicyConfigurationVersionId,
     "Knowledge source attachment policy version",

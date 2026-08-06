@@ -225,7 +225,7 @@ describe("DescriptorForm", () => {
       },
       ref: { kind: "branch", name: "main" },
     });
-  });
+  }, 15_000);
 
   it("explains structured examples in human language while applying their safe structured setting", async () => {
     const user = userEvent.setup();

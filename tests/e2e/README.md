@@ -1,6 +1,6 @@
 # End-to-end tests
 
-**PBIs:** 013, 016, 021
+**PBIs:** 013, 016, 017, 021, 022
 
 Docker-based workflows from source synchronization through analysis and destination
 publication, plus webhook, scheduler, failure recovery, and security-boundary scenarios.
@@ -11,6 +11,28 @@ OIDC/persistence/audit fixture composes the real API route tree and session serv
 neither enables a production fake-auth mode nor calls a real identity provider. It
 verifies browser cookie handling, callback return to the trusted console origin,
 CSRF-protected workspace rotation, logout, and server-owned audit actions.
+
+## Portainer backend and separately hosted Admin acceptance
+
+`portainer-pages.spec.ts` and `run-portainer-pages-e2e.mjs` validate the external
+hosting contract without reaching Cloudflare or a real identity provider:
+
+```powershell
+pnpm test:e2e:portainer-pages
+```
+
+The runner builds the release `migration`, `attachment-processor`, `standalone`, and
+static `admin` images, layers a private HTTPS OIDC fixture and Pages-like static host
+over `compose.portainer.yml`, and creates a unique named PostgreSQL volume plus secret
+files. Chromium proves an API-only backend root returns `404`, completes Authorization
+Code + PKCE through the API, receives an HttpOnly `Secure; SameSite=None` host-only
+cookie, performs an audited Admin mutation, rejects an attacker Pages origin, and signs
+out without storing a token or secret in browser-visible state. Every fixture key,
+certificate, database, and volume is generated for the run and removed afterwards.
+
+Set `CASEWEAVER_E2E_KEEP_STACK=true` only to diagnose a failure. While iterating on
+Compose wiring after images were just built, `CASEWEAVER_E2E_SKIP_IMAGE_BUILD=true`
+avoids rebuilding them; full acceptance must run without that override.
 
 `admin-compose.spec.ts` is the complementary real-deployment journey. After
 `compose.local.yml` is healthy, set `CASEWEAVER_E2E_COMPOSE_ORIGIN` to its loopback
@@ -116,3 +138,35 @@ separate, intentionally metered operator action.
 The default chat capability model is `openai/gpt-4o-mini`; override it with
 `CASEWEAVER_E2E_OPENROUTER_CHAT_MODEL` when the configured account does not expose that
 model. The test never guesses an identifier from a global price catalog.
+
+## Production Compose delivery acceptance
+
+`production-compose.spec.ts` and `run-production-compose-e2e.mjs` are PBI-017's
+deployment-risk test. They are independent of the normal local stack and use
+`deploy/docker/compose.production.yml` with the test-only
+`compose.production.e2e.yml` overlay:
+
+```powershell
+pnpm test:e2e:production
+```
+
+The runner builds all eight release targets from the current checkout, verifies every
+final image's non-root identity and OCI source metadata, then rebuilds the API and
+Admin artifact stages without their build-stage cache and compares the final payload
+fingerprints. It creates a unique Compose project, temporary operator environment,
+private CA/certificate, signed OIDC issuer, Docker secret files, application-secret
+directory, and S3-compatible fixture. It validates only the TLS edge has a public
+application port, proves HTTP redirects to HTTPS/HSTS, completes password and OIDC
+browser sessions without browser token storage, and checks the runtime database role
+cannot create a table. It then writes an object, backs up PostgreSQL plus the object
+prefix through the explicit operations profile, deletes the source object, restores into
+an isolated project, and verifies the restored object, audit data, and readiness.
+Finally it starts a clean distributed profile to exercise API, webhook, scheduler,
+worker, attachment processor, and edge health.
+
+Fixtures contain generated test values only. The runner strips test material on cleanup;
+set `CASEWEAVER_E2E_KEEP_STACK=true` only to inspect a failing unique project, and
+remove it with the project's exact Docker labels afterwards. Set
+`CASEWEAVER_E2E_SKIP_IMAGE_BUILD=true` only while iterating on Compose/test wiring when
+the eight local `caseweaver-*:production-e2e` images were just built. Full acceptance
+and CI always build them first.

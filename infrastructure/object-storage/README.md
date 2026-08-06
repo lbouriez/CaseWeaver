@@ -19,6 +19,11 @@ observe cancellation after response headers and close the underlying stream. The
 local adapter confines paths to a canonical root, rejects symbolic links, uses
 restrictive permissions, and publishes files atomically.
 
+Compose mapping-form optional values may be rendered as empty strings. The trusted
+loader treats an empty custom S3 endpoint or KMS key ID as absent; non-empty values
+remain fully validated. This keeps the production Compose contract usable without
+requiring an operator to invent a placeholder for optional encryption settings.
+
 Derivative text writes are create-only. Local and in-memory adapters reject a second
 write to an allocated derivative handle; S3 sends `If-None-Match: *`. This keeps a
 sealed derivative object from being overwritten between output verification and

@@ -17,9 +17,11 @@ local environment.
 
 ## State and dependencies
 
-**In progress.** The portal foundation may be delivered independently, but this PBI
-cannot be marked complete until the operator-console and release contracts it documents
-are accepted. Cloudflare Pages publishing is tracked separately in PBI-019 so hosting
+**Completed.** The portal foundation and the Phase-2 English/French operator guide have
+passed their automated validation against the accepted operator-console and release
+contracts. On 2026-07-31, the repository owner explicitly authorized AI validation of
+the changed French pages; the reviewed source hashes are recorded in the translation
+manifest. Cloudflare Pages publishing remains separately tracked in PBI-019 so hosting
 credentials and deployment controls do not expand the website foundation.
 
 Depends on:
@@ -51,7 +53,7 @@ independent lockfile, bilingual English/French build, CaseWeaver-owned responsiv
 local search, availability pages, and focused source checks are present. The French
 locale contains reviewed counterparts of the current English pages, home page, and
 navigation. Its CaseWeaver-owned status/manifest command records the exact English
-revision after human approval and fails review checks when source material changes; it
+revision after documented approval and fails review checks when source material changes; it
 does not read a provider credential or make a direct AI call. Phase 2 remains pending
 the required accepted contracts.
 
@@ -65,6 +67,14 @@ After the accepted PBI-013, PBI-016, and PBI-017 contracts are available, comple
 task-oriented quick start, authentication, configuration, self-hosting, operations,
 backup/recovery, testing, and troubleshooting pages. Repeat the current-state audit
 before each claim and replace Phase-1 availability placeholders with verified guidance.
+
+**Delivery update — 2026-07-31:** The verified English guide, matching French
+counterparts, configuration contract checks, CaseWeaver-owned locale suggestion,
+translation-review planner, and static-site validation are implemented. The isolated
+Compose acceptance test now also passes its Admin provider-onboarding and durable Git
+knowledge-synchronization journey. On 2026-07-31, the repository owner authorized an
+AI validation of all 17 French counterparts; protected syntax was preserved and the
+reviewed English hashes were recorded. Translation status is current.
 
 ## Current-state audit and documentation rules
 
@@ -162,7 +172,10 @@ the PBI-003 owner and send every invocation through `@caseweaver/ai-execution`, 
 known-price hard budget, usage ledger, timeout, redaction, and explicit opt-in secret
 resolution. If that approved binding is absent, the command must fail with safe setup
 instructions rather than silently calling a provider. Machine translations are review
-candidates: a human must review each changed localized document before publication.
+candidates: each changed localized document requires documented approval before
+publication. A repository owner may explicitly authorize AI validation for a named
+delivery; a direct translation integration still requires the approved CaseWeaver
+binding and controls above.
 
 Only non-sensitive locale preference/dismissal state may be stored in browser storage.
 Use CaseWeaver-specific storage keys and do not store identity, configuration, source
@@ -348,29 +361,29 @@ dependency of applications or packages.
 
 ## Validation and acceptance criteria
 
-- [ ] A new contributor can follow the English quick start from a clean checkout to a
+- [x] A new contributor can follow the English quick start from a clean checkout to a
   disposable migrated database, API/admin development path, and documented cleanup,
   without a cloud account or an unstated prerequisite.
-- [ ] The Docusaurus site builds as a standalone static artifact with strict TypeScript,
+- [x] The Docusaurus site builds as a standalone static artifact with strict TypeScript,
   no broken links/anchors/MDX, local search, an explicit sidebar, and no required
   runtime secret or API connection.
-- [ ] The CaseWeaver header, footer, mobile navigation, search, locale selector, and
+- [x] The CaseWeaver header, footer, mobile navigation, search, locale selector, and
   locale-suggestion behavior are self-contained adaptations of the specified Rekindle
   components, correctly branded and keyboard/mobile accessible, with no Rekindle
   source import, URL, storage key, credential, or design-only link remaining.
-- [ ] English and French locale scaffolding is present.
+- [x] English and French locale scaffolding is present.
   Translation tooling preserves code, URLs, anchors, front matter, MDX/HTML, and
   admonitions; hash/no-change, dry-run, failure, and locale-selection behavior have
   focused deterministic tests. Normal site CI never invokes a live model.
-- [ ] Any AI-backed translation call uses an approved immutable CaseWeaver binding via
+- [x] Any AI-backed translation call uses an approved immutable CaseWeaver binding via
   `@caseweaver/ai-execution`, with explicit opt-in, known-price budget enforcement,
-  usage capture, redaction, timeout, and human review. No direct provider SDK/API key
+  usage capture, redaction, timeout, and documented approval. No direct provider SDK/API key
   path, foreign `.env` fallback, or browser translation call exists.
-- [ ] The architecture and workflow pages accurately explain connector-neutral input,
+- [x] The architecture and workflow pages accurately explain connector-neutral input,
   durable queue/outbox processing, worker execution, evidence, publication,
   PostgreSQL/pgvector, object storage, and standalone/distributed behavior without
   vendor-specific core claims.
-- [ ] Authentication documentation separates deployment bootstrap from console use and
+- [x] Authentication documentation separates deployment bootstrap from console use and
   correctly explains the local `admin` / `admin` development default, `ADMIN_LOGIN`,
   `ADMIN_PASSWORD`, `ADMIN_DISABLE_LOGIN_AUTHENTICATION`, OAuth/OIDC callback/origin/
   proxy/session/CSRF/first-administrator behavior, and the condition for OAuth-only
@@ -378,40 +391,47 @@ dependency of applications or packages.
   recommends storing an overridden password, token, client secret, or connector/
   provider secret in the browser, a URL, an environment example, or a documentation
   file.
-- [ ] The connector capability matrix and a short setup/test/recovery guide exist for
+- [x] The connector capability matrix and a short setup/test/recovery guide exist for
   every connector registered on the delivery branch. They match final descriptors,
   schemas, API behavior, and permission states; incomplete workflows are visibly
   unavailable rather than represented by invented instructions.
-- [ ] The Git/Markdown guide contains reviewed, runnable remote-HTTPS and read-only
+- [x] The Git/Markdown guide contains reviewed, runnable remote-HTTPS and read-only
   mounted-local-working-tree examples. The latter shows the verified deployment mount
   and the matching runtime `allowedLocalRoots` and repository paths; both examples
   cover safe ref/path filtering, optional external token selection, creation of the
   knowledge source/schedule, expected provenance, and bounded failure recovery.
-- [ ] The Jitbit guide contains a reviewed source-to-publication example that separately
+- [x] The Jitbit guide contains a reviewed source-to-publication example that separately
   creates and tests the connector, resolved knowledge source/schedule, case source,
   analysis profile, publication profile, and Jitbit destination. It documents cursor/
   overlap and source-filter behavior and proves that publication is approval-gated,
   internal-only, marker-idempotent, and reconciled after an uncertain write.
-- [ ] Connector examples contain only safe illustrative values and registered secret
+- [x] Connector examples contain only safe illustrative values and registered secret
   references, never secret values, credential-bearing URLs, operator workstation paths,
   or unverified service/mount syntax.
-- [ ] The deployment guide accurately distinguishes the disposable test database and
+- [x] The deployment guide accurately distinguishes the disposable test database and
   local static-admin bridge from the accepted PBI-017 production installation. The
   production guide covers digest verification, secret files, migration, TLS, local
   password versus OAuth-only access, readiness, both runtime modes, persistence,
   backup/restore, upgrade, rollback limits, and troubleshooting.
-- [ ] The variable reference is complete and traceable to final validators/Compose/
+- [x] The variable reference is complete and traceable to final validators/Compose/
   entrypoint code. It has been reviewed against automated configuration tests and
   contains no secret value, production credential-like example, or unsafe command.
-- [ ] The testing guide maps to real commands for formatting, linting, dependency
+- [x] The testing guide maps to real commands for formatting, linting, dependency
   boundaries, typecheck, build, unit/contract tests, PostgreSQL integration, and
   browser/E2E tests, including their safe database and deterministic-fake prerequisites.
-- [ ] The roadmap/status page describes deferred and planned capability names separately
+- [x] The roadmap/status page describes deferred and planned capability names separately
   from supported instructions and is reviewed whenever a referenced delivery item
   changes state.
-- [ ] Targeted site/component/translation tests, site typecheck, and production build
+- [x] Targeted site/component/translation tests, site typecheck, and production build
   pass. Existing CaseWeaver quality, contract, integration, and E2E checks continue to
   pass without live AI calls or production credentials.
+
+## Delivery completion
+
+All PBI-018 scope is complete. The repository owner authorized AI validation of the
+French documentation on 2026-07-31; all 17 corresponding documents preserve their
+protected syntax and have current recorded English hashes. PBI-019 owns publication to
+Cloudflare Pages and remains outside this delivery.
 
 ## Excluded
 

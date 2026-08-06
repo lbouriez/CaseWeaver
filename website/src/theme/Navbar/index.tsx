@@ -13,11 +13,13 @@ import clsx from "clsx";
 import type React from "react";
 
 import { CaseWeaverMark } from "../../components/CaseWeaverMark";
+import { GitHubMark } from "../../components/GitHubMark";
 import {
   isSupportedLocale,
   languageNames,
   supportedLocales,
 } from "../../localization/languages";
+import { storeLocalePreference } from "../../localization/language-preference";
 import styles from "./styles.module.css";
 
 function LocaleChooser(): React.ReactElement {
@@ -40,6 +42,7 @@ function LocaleChooser(): React.ReactElement {
         onChange={(event) => {
           const locale = event.currentTarget.value;
           if (!isSupportedLocale(locale)) return;
+          storeLocalePreference(locale);
           window.location.assign(
             alternatePageUtils.createUrl({
               locale,
@@ -117,17 +120,31 @@ export default function Navbar(): React.ReactElement {
             </Link>
           </div>
           <div className={styles.rightSection}>
+            <Link className={styles.docsLink} to="/docs/overview">
+              <Translate id="navbar.documentation">Documentation</Translate>
+            </Link>
             <div className={styles.search}>
               <SearchBar />
             </div>
             <LocaleChooser />
             <a
+              aria-label={translate({
+                id: "navbar.repository",
+                message: "Open CaseWeaver on GitHub",
+              })}
               className={styles.repositoryLink}
               href={repositoryUrl}
               rel="noreferrer"
               target="_blank"
+              title={translate({
+                id: "navbar.repository.title",
+                message: "View the CaseWeaver source on GitHub",
+              })}
             >
-              <Translate id="navbar.repository">Repository</Translate>
+              <GitHubMark />
+              <span className={styles.repositoryLabel}>
+                <Translate id="navbar.repository.shortLabel">Source</Translate>
+              </span>
             </a>
           </div>
         </div>

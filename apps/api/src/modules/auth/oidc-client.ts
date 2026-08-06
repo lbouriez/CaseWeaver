@@ -60,6 +60,18 @@ function boundedDisplayName(value: unknown, subject: string): string {
   return normalized.length === 0 ? subject : normalized.slice(0, 160);
 }
 
+function trustedOidcEndpoint(value: string, label: string): URL {
+  const url = new URL(value);
+  if (
+    url.protocol !== "https:" ||
+    url.username.length > 0 ||
+    url.password.length > 0
+  ) {
+    throw new Error(`${label} must use HTTPS without credentials.`);
+  }
+  return url;
+}
+
 /** Provider-neutral OIDC client. Token material is never returned to callers. */
 export class StandardsOidcClient implements OidcAuthorizationCodeClient {
   private readonly fetchImplementation: typeof fetch;
@@ -67,11 +79,8 @@ export class StandardsOidcClient implements OidcAuthorizationCodeClient {
   private discovery: Promise<Discovery> | undefined;
 
   public constructor(private readonly configuration: OidcClientConfiguration) {
-    const issuer = new URL(configuration.issuer);
-    const callback = new URL(configuration.redirectUri);
-    if (issuer.protocol !== "https:" || callback.protocol !== "https:") {
-      throw new Error("OIDC issuer and callback URL must use HTTPS.");
-    }
+    trustedOidcEndpoint(configuration.issuer, "OIDC issuer");
+    trustedOidcEndpoint(configuration.redirectUri, "OIDC callback URL");
     if (
       configuration.scopes.length === 0 ||
       !configuration.scopes.includes("openid")
@@ -130,6 +139,7 @@ export class StandardsOidcClient implements OidcAuthorizationCodeClient {
       method: "POST",
       headers,
       body: body.toString(),
+      redirect: "error",
     });
     if (!response.ok) throw new Error("OIDC token exchange failed.");
     const token = tokenSchema.parse(await response.json()).id_token;
@@ -137,21 +147,42 @@ export class StandardsOidcClient implements OidcAuthorizationCodeClient {
   }
 
   private async getDiscovery(): Promise<Discovery> {
-    this.discovery ??= this.loadDiscovery();
-    return this.discovery;
+    const discovery = this.discovery ?? this.loadDiscovery();
+    this.discovery ??= discovery;
+    try {
+      return await discovery;
+    } catch (error) {
+      // Do not poison the client after a transient discovery outage. A later
+      // login can retry discovery, while concurrent callers still share the
+      // same in-flight request.
+      if (this.discovery === discovery) this.discovery = undefined;
+      throw error;
+    }
   }
 
   private async loadDiscovery(): Promise<Discovery> {
-    const issuer = new URL(this.configuration.issuer);
+    const issuer = trustedOidcEndpoint(
+      this.configuration.issuer,
+      "OIDC issuer",
+    );
     const wellKnown = new URL(
       ".well-known/openid-configuration",
       issuer.toString().endsWith("/") ? issuer : new URL(`${issuer}/`),
     );
-    const response = await this.fetchImplementation(wellKnown);
+    const response = await this.fetchImplementation(wellKnown, {
+      redirect: "error",
+    });
     if (!response.ok) throw new Error("OIDC discovery failed.");
     const value = discoverySchema.parse(await response.json());
     if (value.issuer !== this.configuration.issuer)
       throw new Error("OIDC issuer mismatch.");
+    trustedOidcEndpoint(value.issuer, "OIDC discovery issuer");
+    trustedOidcEndpoint(
+      value.authorization_endpoint,
+      "OIDC authorization endpoint",
+    );
+    trustedOidcEndpoint(value.token_endpoint, "OIDC token endpoint");
+    trustedOidcEndpoint(value.jwks_uri, "OIDC JWKS endpoint");
     return Object.freeze({
       issuer: value.issuer,
       authorizationEndpoint: value.authorization_endpoint,
@@ -179,7 +210,11 @@ export class StandardsOidcClient implements OidcAuthorizationCodeClient {
     ];
     const header = z
       .object({ alg: z.literal("RS256"), kid: z.string().min(1).max(200) })
-      .strict()
+      // JWT header extensions such as the standard `typ: "JWT"` are not part
+      // of the security decision. Keep validating the only accepted algorithm
+      // and a bounded key identifier, but do not reject an otherwise valid
+      // provider token merely because it carries interoperable metadata.
+      .passthrough()
       .parse(base64UrlJson(encodedHeader));
     const claims = z
       .object({
@@ -196,7 +231,9 @@ export class StandardsOidcClient implements OidcAuthorizationCodeClient {
       })
       .passthrough()
       .parse(base64UrlJson(encodedClaims));
-    const jwksResponse = await this.fetchImplementation(discovery.jwksUri);
+    const jwksResponse = await this.fetchImplementation(discovery.jwksUri, {
+      redirect: "error",
+    });
     if (!jwksResponse.ok) throw new Error("OIDC key retrieval failed.");
     const key = jwksSchema
       .parse(await jwksResponse.json())
@@ -204,7 +241,8 @@ export class StandardsOidcClient implements OidcAuthorizationCodeClient {
         (candidate) =>
           candidate.kid === header.kid &&
           candidate.kty === "RSA" &&
-          candidate.use !== "enc",
+          (candidate.use === undefined || candidate.use === "sig") &&
+          (candidate.alg === undefined || candidate.alg === "RS256"),
       );
     if (key === undefined) throw new Error("OIDC signing key is unavailable.");
     const validSignature = verify(

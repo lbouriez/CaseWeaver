@@ -57,6 +57,11 @@ parent remains `0700`; Docker mounts only the final child, so its fixed UID `655
 can list/read the sanitized files without gaining host-tree traversal outside that
 mount.
 
+Prepared-tree removal is a shared lifecycle operation. It restores server-only write
+permission immediately before deletion, after the read-only tree is no longer mounted;
+this lets every checkout adapter remove its private temporary tree on Linux without
+weakening the OCI mount contract.
+
 Every tool container receives a private name and is force-removed after completion or
 cancellation. Creation verifies the local Linux Docker daemon and configured digest-pinned
 image before attesting the enforced no-network, read-only, and unprivileged command shape.

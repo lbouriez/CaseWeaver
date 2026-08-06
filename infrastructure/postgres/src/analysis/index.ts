@@ -291,7 +291,9 @@ export class PostgresAnalysisExecutionStore implements AnalysisExecutionStore {
       const row = rows[0];
       if (row === undefined) return { kind: "notFound" };
 
-      const recipeRows = await database.$queryRaw<readonly RecipeExecutionRow[]>`
+      const recipeRows = await database.$queryRaw<
+        readonly RecipeExecutionRow[]
+      >`
         SELECT
           request.id AS request_id, request.workspace_id,
           request.case_snapshot_id, request.analysis_profile_version_id,
@@ -457,9 +459,7 @@ export class PostgresAnalysisExecutionStore implements AnalysisExecutionStore {
           }),
           profile: effectiveProfile,
           ...(repositoryRun === undefined ? {} : { repositoryRun }),
-          ...(preparedAttachments === undefined
-            ? {}
-            : { preparedAttachments }),
+          ...(preparedAttachments === undefined ? {} : { preparedAttachments }),
         }),
       };
     });

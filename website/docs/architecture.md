@@ -1,28 +1,50 @@
 ---
-sidebar_position: 2
+sidebar_position: 14
 title: Architecture
 ---
 
-# Architecture orientation
+# Architecture and workflow
 
-CaseWeaver keeps delivery concerns at the edge and business rules toward the center.
-Applications receive requests and compose dependencies; feature and application layers
-coordinate use cases; the domain remains independent of HTTP, databases, connectors,
-and AI providers.
+CaseWeaver keeps vendor behavior at the boundary. Connectors translate external systems,
+AI providers sit behind metered execution, and the domain does not branch on a vendor or
+model name.
 
 ```text
-Browser, API, scheduler, webhook apps
-                |
-     application and feature use cases
-                |
-              domain
+Admin / API / webhook / scheduler
+              |
+ application and feature use cases
+              |
+            domain
+              |
+ PostgreSQL + pgvector / queue / object storage / adapters
 ```
 
-Long-running work is designed to move through durable queue and worker boundaries rather
-than execute directly in a scheduler or webhook request. External systems are integrated
-through named connectors, providers, or infrastructure adapters. AI calls travel through
-the metered execution boundary rather than a feature-specific provider shortcut.
+## Durable work, in order
 
-These are architecture principles, not an operations runbook. Consult the capability
-status page before relying on a particular deployment, connector, or administrative
-workflow.
+1. A synchronization, verified webhook, schedule, or manual command is validated at an
+   ingress boundary.
+2. The command and its outbox record commit with the affected state in PostgreSQL.
+3. A relay delivers the envelope to the durable PostgreSQL queue.
+4. A worker holds a lease, resolves the exact immutable configuration version, and does
+   the bounded connector, storage, retrieval, or AI work.
+5. Results, evidence, cost attribution, audit events, and publication state are
+   retained. Retry/recovery uses the durable record instead of replaying a browser call.
+
+The small **standalone** mode hosts API, webhook ingress, scheduler, worker, and relay
+in one process. **Distributed** mode hosts them separately. Both use the same queue,
+leases, handlers, PostgreSQL state, and immutable version pins; standalone is not an
+in-memory shortcut.
+
+## Evidence, storage, and AI
+
+PostgreSQL is the system of record for configuration history, work, audit, queue state,
+full-text search, and pgvector data. Object storage holds bounded attachment bytes and
+derivatives. An analysis retains the selected source/version and evidence snapshot; a
+later configuration change cannot silently rebind already queued work.
+
+Every model invocation goes through `@caseweaver/ai-execution`. That gateway records
+usage and cost attribution, applies the selected immutable binding and budget, and
+fails safely when price is unknown rather than treating it as zero.
+
+See [Testing](./testing.md) for the checks that exercise these boundaries and
+[Contributing](./contributing.md) before adding an adapter.

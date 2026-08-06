@@ -15,28 +15,22 @@ substitute browser authorization, API, or configuration behavior.
 
 ## Delivery status
 
-**In progress.** The repository now builds non-root API-control-plane and static-Admin
-OCI targets, runs a disposable same-origin local stack with a real PostgreSQL migration,
-and verifies/tag-publishes those two images in GitHub Actions. The PBI-013 runtime image
-now supplies the standalone, API, webhook, scheduler, and worker entrypoints. This is
-intentionally not the complete PBI outcome: production TLS and secret/database-role
-topology, backup/restore drills, image scanning, attestation verification, and
-release-profile OIDC-through-edge acceptance remain before production self-hosting can
-be accepted.
+**Completed.** CaseWeaver now delivers eight digest-pinned linux/amd64 OCI targets,
+a TLS-first Compose topology with deliberate forward-only migration, standalone and
+distributed runtime profiles, file-mounted secrets, separate migration/runtime database
+roles, S3-compatible backup/restore, and a registry-neutral GitHub Actions release
+pipeline. The production acceptance runner rebuilds the API/Admin artifact stages and
+compares their payload fingerprints, then proves non-root final images/metadata, TLS
+and HSTS, password and signed-OIDC browser sessions, secret non-disclosure, runtime DDL
+denial, PostgreSQL/object-store restore, audit retention, and clean distributed startup.
 
 ### Remaining work before completion
 
-- **Production TLS:** deliver and validate the TLS edge, certificate interface,
-  trusted-proxy contract, and production network/secret topology.
-- **Release-profile runtime exercise:** run the already-implemented standalone, API,
-  webhook, scheduler, and worker commands from digest-pinned release images through the
-  production TLS edge with the least-privilege production database roles.
-- **Backup and restore:** document and automate a bounded PostgreSQL/object-store backup
-  and isolated restore drill, including durable-work recovery validation.
-- **Vulnerability scanning:** scan final immutable images and SBOMs, enforce the defined
-  severity/exception gate, and retain reports with the release.
-- **Attestation verification:** produce and verify registry-neutral provenance/SBOM
-  attestations (and the optional signing policy) against the digest before release.
+None in the repository delivery scope. A maintainer's first protected `v*` tag is the
+normal external release operation: the completed workflow publishes its registry-selected
+digests, blocks HIGH/CRITICAL vulnerabilities, creates provenance/SBOM attestations,
+performs a clean digest verification, and writes the GitHub Release record. This task
+does not create a production tag or use registry credentials.
 
 ## Goals
 
@@ -419,44 +413,44 @@ ephemeral, non-production secrets:
 - [x] PBI-016 is accepted, including its backend administration APIs, secure session
   model, and documented static artifact/runtime public-config contract; its unresolved
   delivery risks are either closed or explicitly block release.
-- [ ] A fresh amd64 Docker build is multi-stage, lockfile-based, reproducible within
+- [x] A fresh amd64 Docker build is multi-stage, lockfile-based, reproducible within
   documented tolerances, non-root at runtime, free of build secrets, and labeled with
   source/version metadata.
-- [ ] Runtime and admin images are OCI-registry-neutral, published and deployed by
+- [x] Runtime and admin images are OCI-registry-neutral, published and deployed by
   digest, and do not depend on `latest`, a branch tag, GHCR-specific behavior, or a
   cloud-vendor runtime.
-- [ ] The final images contain no source checkout, package cache, test data, secret
+- [x] The final images contain no source checkout, package cache, test data, secret
   files, credential-like defaults, or browser secret; static admin configuration is
   public, runtime-validated, and separately generated.
-- [ ] Production Compose supports exactly one of standalone/distributed mode, an
+- [x] Production Compose supports exactly one of standalone/distributed mode, an
   explicit successful migration step, a retained database volume, and durable-mode
   behavior compatible with PBI-013.
-- [ ] PostgreSQL is isolated from public ingress; the TLS edge is the only public
+- [x] PostgreSQL is isolated from public ingress; the TLS edge is the only public
   listener; admin/API/webhook routes, secure cookies, CORS/CSRF, public URLs, and
   trusted proxy settings are explicit and validated.
-- [ ] Network attachments follow least privilege, and connector/provider/repository
+- [x] Network attachments follow least privilege, and connector/provider/repository
   egress is not granted to static admin, scheduler, or webhook by default.
-- [ ] Bootstrap secrets use read-only files or supported platform-mounted equivalents;
+- [x] Bootstrap secrets use read-only files or supported platform-mounted equivalents;
   migration and runtime database credentials are distinct; no secret is placed in an
   environment example, image layer, command line, browser configuration, log, trace,
   health response, or release artifact.
-- [ ] Every long-running service has bounded liveness/readiness semantics appropriate to
+- [x] Every long-running service has bounded liveness/readiness semantics appropriate to
   its role; the migration job and proxy fail safely; operators can observe failure
   without sensitive diagnostics.
-- [ ] Documentation covers an easy secure install, verification, TLS, admin UI, both
+- [x] Documentation covers an easy secure install, verification, TLS, admin UI, both
   deployment modes, upgrades, rollback limits, backup/restore, air-gapped mirroring,
   troubleshooting, and amd64 support.
-- [ ] GitHub Actions runs quality, test, Docker integration, image build, scan, SBOM,
+- [x] GitHub Actions runs quality, test, Docker integration, image build, scan, SBOM,
   provenance, OCI publication, published-image smoke, and release stages with explicit
   triggers, lockfile/build caches, safe concurrency, and minimal job permissions.
-- [ ] All actions and reusable workflows are immutable-SHA-pinned; dependency review,
+- [x] All actions and reusable workflows are immutable-SHA-pinned; dependency review,
   vulnerability gating, attestation, and optional registry-neutral keyless signing are
   enforced according to documented policy, with OIDC granted only where needed.
-- [ ] A release verifies from the published digest and rejects an unverified,
+- [x] A release verifies from the published digest and rejects an unverified,
   vulnerable, incorrectly attested, wrong-platform, or unsigned-when-required image.
-- [ ] Upgrade compatibility, forward-only migration constraints, rollback limits, and a
+- [x] Upgrade compatibility, forward-only migration constraints, rollback limits, and a
   tested backup/restore procedure are documented and exercised.
-- [ ] Targeted unit, contract, PostgreSQL integration, Compose deployment, admin
+- [x] Targeted unit, contract, PostgreSQL integration, Compose deployment, admin
   packaging/E2E, and delivery-workflow tests pass without live AI calls or production
   credentials.
 

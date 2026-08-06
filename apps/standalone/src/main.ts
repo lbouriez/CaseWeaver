@@ -5,12 +5,33 @@ import { runWorkerQueueMigration } from "@caseweaver/worker";
 import {
   attachStandaloneShutdownSignals,
   createStandaloneRuntimeFromEnvironment,
+  StandaloneStartupError,
   type StandaloneHostRuntime,
 } from "./index.js";
 
 export interface StandaloneOutput {
   log(message: string): void;
   error(message: string): void;
+}
+
+/**
+ * Startup errors can contain connection URLs, provider responses, or other
+ * deployment secrets. Keep the command's diagnostic intentionally finite and
+ * owned by this process: it is useful to an operator without turning stderr
+ * into a disclosure channel.
+ */
+function safeStartupFailureCode(error: unknown): string | undefined {
+  if (error instanceof StandaloneStartupError) return error.code;
+  if (!(error instanceof Error)) return undefined;
+  const codesByErrorName: Readonly<Record<string, string>> = {
+    AiConfigurationError: "ai.invalidConfiguration",
+    ApiConfigurationError: "api.invalidConfiguration",
+    ObjectStorageConfigurationError: "objectStorage.invalidConfiguration",
+    SchedulerConfigurationError: "scheduler.invalidConfiguration",
+    WebhookConfigurationError: "webhook.invalidConfiguration",
+    WorkerConfigurationError: "worker.invalidConfiguration",
+  };
+  return codesByErrorName[error.name];
 }
 
 export function runStandaloneCommand(
@@ -65,9 +86,14 @@ export async function runStandalone(
     await runtime.start();
     attachStandaloneShutdownSignals(runtime, process);
     return 0;
-  } catch {
+  } catch (error) {
     await runtime?.stop().catch(() => undefined);
-    output.error("Standalone startup failed.");
+    const diagnosticCode = safeStartupFailureCode(error);
+    output.error(
+      diagnosticCode === undefined
+        ? "Standalone startup failed."
+        : `Standalone startup failed (${diagnosticCode}).`,
+    );
     return 1;
   }
 }

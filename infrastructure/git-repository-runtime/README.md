@@ -81,3 +81,5 @@ inspected exact-commit manifest before materializing bounded sanitized UTF-8 fil
 private prepared tree.
 Its returned tree carries only opaque ID, repository ID, commit, and path/line manifest—
 never remote URL, local directory, credential, or secret reference.
+It delegates prepared-tree cleanup to the shared repository-runtime lifecycle so a
+read-only published tree is made writable only during server-side deletion.

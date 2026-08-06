@@ -212,6 +212,22 @@ describe("object-storage runtime configuration", () => {
       storageBackendId: "s3-prod",
       encryption: { algorithm: "AES256" },
     });
+    expect(
+      loadObjectStorageRuntimeConfiguration({
+        NODE_ENV: "production",
+        OBJECT_STORAGE_KIND: "s3",
+        OBJECT_STORAGE_BACKEND_ID: "s3-compose",
+        OBJECT_STORAGE_KEY_DERIVATION_SECRET: secret,
+        OBJECT_STORAGE_S3_BUCKET: "caseweaver-test-bucket",
+        OBJECT_STORAGE_S3_REGION: "ca-central-1",
+        // Compose mapping-form optional environment values are empty strings.
+        OBJECT_STORAGE_S3_ENDPOINT: "",
+        OBJECT_STORAGE_S3_KMS_KEY_ID: "",
+      }),
+    ).toMatchObject({
+      kind: "s3",
+      encryption: { algorithm: "AES256" },
+    });
     expect(() =>
       loadObjectStorageRuntimeConfiguration({
         NODE_ENV: "production",

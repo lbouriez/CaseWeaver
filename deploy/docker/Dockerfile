@@ -21,13 +21,15 @@ RUN npm install --global corepack@0.31.0 \
 # Prisma detects the available OpenSSL ABI while generating its client. This build-only
 # package is not copied into the final API/Admin images.
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends openssl \
+    && apt-get install --yes --no-install-recommends openssl postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Dockerfile.dockerignore deliberately keeps source, Prisma migrations, and browser
 # assets while excluding installed dependencies and every local/generated artifact.
 COPY . .
-RUN pnpm install --frozen-lockfile
+RUN --mount=type=cache,id=caseweaver-pnpm-store,target=/pnpm/store \
+    pnpm config set store-dir /pnpm/store \
+    && pnpm install --frozen-lockfile
 
 # Prisma's CLI is a build-time dependency for the API package, so it is kept in a
 # separate versioned migration image rather than expanding the API runtime image.
@@ -51,7 +53,7 @@ WORKDIR /opt/caseweaver
 # Prisma's migration engine detects its OpenSSL ABI at runtime. Keep this dependency
 # in the operational migration image, not the API/Admin runtime images.
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends openssl \
+    && apt-get install --yes --no-install-recommends openssl postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Prisma is a package-local build dependency of the PostgreSQL adapter. Preserve its
@@ -62,6 +64,7 @@ COPY --from=dependencies --chown=node:node /workspace/infrastructure/postgres/no
 COPY --from=dependencies --chown=node:node /workspace/infrastructure/postgres/prisma ./infrastructure/postgres/prisma
 COPY --from=dependencies --chown=node:node /workspace/infrastructure/postgres/prisma.config.ts ./infrastructure/postgres/prisma.config.ts
 COPY --chown=node:node --chmod=755 deploy/docker/container-entrypoint.sh /usr/local/bin/caseweaver-entrypoint
+COPY --chown=node:node --chmod=755 deploy/docker/grant-runtime-role.sh /usr/local/bin/caseweaver-grant-runtime-role
 
 USER node
 ENTRYPOINT ["/usr/local/bin/caseweaver-entrypoint"]
