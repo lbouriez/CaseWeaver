@@ -136,9 +136,15 @@ export default function Navbar(): React.ReactElement {
               href={repositoryUrl}
               rel="noreferrer"
               target="_blank"
+              title={translate({
+                id: "navbar.repository.title",
+                message: "View the CaseWeaver source on GitHub",
+              })}
             >
               <GitHubMark />
-              <span className={styles.repositoryLabel}>GitHub</span>
+              <span className={styles.repositoryLabel}>
+                <Translate id="navbar.repository.shortLabel">Source</Translate>
+              </span>
             </a>
           </div>
         </div>

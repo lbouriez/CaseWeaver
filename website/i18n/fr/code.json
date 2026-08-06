@@ -9,10 +9,10 @@
     "message": "Des opérations de support attentives aux preuves"
   },
   "homepage.headline": {
-    "message": "Aidez chaque dossier de support à atteindre plus rapidement une prochaine étape étayée par des preuves."
+    "message": "Transformez chaque dossier de support en prochaine étape claire."
   },
   "homepage.lede": {
-    "message": "CaseWeaver réunit les bonnes connaissances de l’entreprise, les politiques opérationnelles et l’historique des dossiers afin que les équipes enquêtent avec le contexte nécessaire plutôt que de repartir de zéro."
+    "message": "CaseWeaver réunit vos connaissances, vos politiques et l’historique des dossiers pour enquêter rapidement, expliquer les preuves et agir en confiance."
   },
   "homepage.primaryAction": {
     "message": "Démarrer en local"
@@ -36,7 +36,7 @@
     "message": "Essayer CaseWeaver en local"
   },
   "homepage.paths.local.copy": {
-    "message": "Démarrez la pile d’évaluation à trois services et connectez-vous à une Console éphémère."
+    "message": "Lancez la pile locale, ouvrez la Console et découvrez le parcours de bout en bout."
   },
   "homepage.paths.local.link": {
     "message": "Ouvrir le démarrage rapide"
@@ -45,7 +45,7 @@
     "message": "Connecter les connaissances en sécurité"
   },
   "homepage.paths.knowledge.copy": {
-    "message": "Choisissez un connecteur, une collection, une planification et un parcours de recherche pour vos connaissances de support."
+    "message": "Ajoutez des sources fiables, organisez-les en collections et choisissez leur fréquence de mise à jour."
   },
   "homepage.paths.knowledge.link": {
     "message": "Planifier une source de connaissances"
@@ -54,7 +54,7 @@
     "message": "Configurer l’IA et les opérations"
   },
   "homepage.paths.console.copy": {
-    "message": "Utilisez la Console pour gérer les références de secrets opaques, les fournisseurs, les budgets, les analyses et l’historique d’audit."
+    "message": "Configurez les fournisseurs, les budgets, les analyses, les autorisations et l’historique d’audit depuis un même espace."
   },
   "homepage.paths.console.link": {
     "message": "Lire le guide de la Console"
@@ -63,7 +63,7 @@
     "message": "Préparer un vrai déploiement"
   },
   "homepage.paths.deploy.copy": {
-    "message": "Séparez les paramètres publics des fichiers de secrets, puis appliquez les procédures d’auto-hébergement et de reprise prises en charge."
+    "message": "Séparez la configuration des secrets, puis déployez avec les guides d’auto-hébergement et de reprise pris en charge."
   },
   "homepage.paths.deploy.link": {
     "message": "Ouvrir le guide de déploiement"
@@ -84,25 +84,25 @@
     "message": "Le parcours d’un dossier"
   },
   "homepage.workflow.title": {
-    "message": "D’une demande entrante à une réponse utile et révisable."
+    "message": "D’une demande entrante à une réponse fiable pour votre équipe."
   },
   "homepage.workflow.capture.title": {
-    "message": "Captez le signal"
+    "message": "Capturez le dossier"
   },
   "homepage.workflow.capture.copy": {
-    "message": "Un dossier de support, une planification ou un événement vérifié lance un travail durable sans faire porter la charge au navigateur ou au webhook."
+    "message": "Un ticket, une planification ou un événement vérifié lance un travail durable ; la plateforme s’occupe du traitement."
   },
   "homepage.workflow.connect.title": {
-    "message": "Reliez le contexte"
+    "message": "Ajoutez le contexte"
   },
   "homepage.workflow.connect.copy": {
-    "message": "Les sources approuvées et les profils de recherche font ressortir les connaissances pertinentes tout en préservant leurs limites de version et de propriété."
+    "message": "Les sources approuvées et les profils de recherche font ressortir les connaissances pertinentes, avec des limites claires de version et de propriété."
   },
   "homepage.workflow.decide.title": {
-    "message": "Examinez la prochaine étape"
+    "message": "Examinez et répondez"
   },
   "homepage.workflow.decide.copy": {
-    "message": "Les équipes reçoivent un résultat attentif aux preuves qu’elles peuvent examiner, approuver et publier par des flux de travail gouvernés."
+    "message": "Les équipes reçoivent un résultat étayé par des preuves, à examiner, approuver et publier dans un flux gouverné."
   },
   "homepage.principles.eyebrow": {
     "message": "Conçu pour inspirer confiance"

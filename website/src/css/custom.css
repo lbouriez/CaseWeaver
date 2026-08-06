@@ -23,6 +23,17 @@
 
 .button {
   border-radius: 999px;
+  font-weight: 750;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    background 160ms ease;
+}
+
+.button:hover,
+.button:focus-visible {
+  box-shadow: 0 0.65rem 1.25rem rgb(15 23 42 / 14%);
+  transform: translateY(-2px);
 }
 
 .button--outline {
@@ -111,6 +122,13 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.8rem;
+}
+
+.homeHero__actions .button {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  min-width: 11rem;
 }
 
 .homeHero__allGuides {
@@ -431,6 +449,11 @@
     transform 160ms ease;
 }
 
+.homePathCard__link,
+.homeStart__links a {
+  text-decoration: none;
+}
+
 .homePathCard:hover,
 .homePathCard:focus-visible {
   border-color: var(--ifm-color-primary);
@@ -609,6 +632,14 @@
   color: var(--ifm-color-primary);
   text-decoration: none;
 }
+
+.homeStart__links a:focus-visible,
+.homePathCard:focus-visible,
+.homeHero__allGuides:focus-visible {
+  outline: 3px solid
+    color-mix(in srgb, var(--ifm-color-primary) 42%, transparent);
+  outline-offset: 4px;
+}
 .homeStart__links span {
   font-size: 1.15rem;
 }
@@ -663,5 +694,20 @@
     right: 4%;
     transform: scale(0.86);
     transform-origin: right bottom;
+  }
+  .homeHero__copy,
+  .homePaths__heading,
+  .homeSection__heading,
+  .homeStart {
+    text-align: center;
+  }
+  .homeHero__actions {
+    justify-content: center;
+  }
+  .homeHero__allGuides {
+    justify-content: center;
+  }
+  .homeHero__proofs {
+    text-align: left;
   }
 }

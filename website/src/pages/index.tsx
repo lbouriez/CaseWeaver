@@ -86,15 +86,14 @@ export default function HomePage(): React.ReactElement {
               </p>
               <h1>
                 <Translate id="homepage.headline">
-                  Help every support case reach a faster, evidence-backed next
-                  step.
+                  Turn every support case into a clear next step.
                 </Translate>
               </h1>
               <p className="homeHero__lede">
                 <Translate id="homepage.lede">
-                  CaseWeaver brings the right company knowledge, operating
-                  policies, and case history together so people can investigate
-                  with context instead of starting from scratch.
+                  CaseWeaver brings your knowledge, policies, and case history
+                  together so teams can investigate quickly, explain the
+                  evidence, and act with confidence.
                 </Translate>
               </p>
               <div className="homeHero__actions">
@@ -182,8 +181,8 @@ export default function HomePage(): React.ReactElement {
               </h3>
               <p>
                 <Translate id="homepage.paths.local.copy">
-                  Start the three-service evaluation stack and sign in to a
-                  disposable Console.
+                  Run the local stack, open the Console, and see the workflow
+                  end to end.
                 </Translate>
               </p>
               <span className="homePathCard__link">
@@ -202,8 +201,8 @@ export default function HomePage(): React.ReactElement {
               </h3>
               <p>
                 <Translate id="homepage.paths.knowledge.copy">
-                  Choose a connector, collection, schedule, and retrieval path
-                  for your support knowledge.
+                  Add trusted sources, organize them into collections, and
+                  choose when they are refreshed.
                 </Translate>
               </p>
               <span className="homePathCard__link">
@@ -225,8 +224,8 @@ export default function HomePage(): React.ReactElement {
               </h3>
               <p>
                 <Translate id="homepage.paths.console.copy">
-                  Use the Console to manage opaque secret references, providers,
-                  budgets, analysis, and audit history.
+                  Configure providers, budgets, analysis, permissions, and audit
+                  history from one workspace.
                 </Translate>
               </p>
               <span className="homePathCard__link">
@@ -245,8 +244,8 @@ export default function HomePage(): React.ReactElement {
               </h3>
               <p>
                 <Translate id="homepage.paths.deploy.copy">
-                  Separate public settings from secret files, then use the
-                  supported self-hosting and recovery procedures.
+                  Keep configuration and secrets separate, then deploy with the
+                  supported self-hosting and recovery guides.
                 </Translate>
               </p>
               <span className="homePathCard__link">
@@ -268,7 +267,7 @@ export default function HomePage(): React.ReactElement {
             </p>
             <h2>
               <Translate id="homepage.workflow.title">
-                From an incoming request to a useful, reviewable answer.
+                From an incoming request to a response your team can trust.
               </Translate>
             </h2>
           </div>
@@ -277,14 +276,13 @@ export default function HomePage(): React.ReactElement {
               <span className="homeSteps__number">01</span>
               <h3>
                 <Translate id="homepage.workflow.capture.title">
-                  Capture the signal
+                  Capture the case
                 </Translate>
               </h3>
               <p>
                 <Translate id="homepage.workflow.capture.copy">
-                  A support case, schedule, or verified event starts durable
-                  work without making the browser or webhook do the heavy
-                  lifting.
+                  A ticket, schedule, or verified event starts durable work; the
+                  platform handles the processing.
                 </Translate>
               </p>
             </li>
@@ -292,14 +290,13 @@ export default function HomePage(): React.ReactElement {
               <span className="homeSteps__number">02</span>
               <h3>
                 <Translate id="homepage.workflow.connect.title">
-                  Connect the context
+                  Add the context
                 </Translate>
               </h3>
               <p>
                 <Translate id="homepage.workflow.connect.copy">
-                  Approved sources and retrieval profiles surface relevant
-                  knowledge while preserving their version and ownership
-                  boundaries.
+                  Approved sources and retrieval profiles surface the relevant
+                  knowledge with clear version and ownership boundaries.
                 </Translate>
               </p>
             </li>
@@ -307,13 +304,13 @@ export default function HomePage(): React.ReactElement {
               <span className="homeSteps__number">03</span>
               <h3>
                 <Translate id="homepage.workflow.decide.title">
-                  Review the next step
+                  Review and respond
                 </Translate>
               </h3>
               <p>
                 <Translate id="homepage.workflow.decide.copy">
-                  Teams receive an evidence-aware result they can inspect,
-                  approve, and publish through governed workflows.
+                  Teams get an evidence-backed result they can inspect, approve,
+                  and publish through a governed workflow.
                 </Translate>
               </p>
             </li>

@@ -12,8 +12,9 @@
 
 .header {
   backdrop-filter: blur(14px);
-  background: color-mix(in srgb, var(--ifm-background-color) 90%, transparent);
+  background: color-mix(in srgb, var(--ifm-background-color) 94%, transparent);
   border-bottom: 1px solid var(--ifm-color-emphasis-200);
+  box-shadow: 0 0.35rem 1.25rem rgb(15 23 42 / 5%);
   position: relative;
   width: 100%;
   z-index: 10;
@@ -64,6 +65,10 @@
   font: inherit;
   min-height: 2.5rem;
   padding: 0 0.85rem;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    transform 160ms ease;
 }
 
 .menuButton,
@@ -79,9 +84,15 @@
 .docsLink:hover,
 .menuButton:hover,
 .localeSelect:hover {
+  background: color-mix(
+    in srgb,
+    var(--ifm-color-primary) 8%,
+    var(--ifm-background-surface-color)
+  );
   border-color: var(--ifm-color-primary);
   color: var(--ifm-color-primary);
   text-decoration: none;
+  transform: translateY(-1px);
 }
 
 .localeSelect {
@@ -94,6 +105,7 @@
   align-items: center;
   gap: 0.45rem;
   justify-content: center;
+  min-width: 2.5rem;
 }
 
 .docsLink {
@@ -143,5 +155,15 @@
 
   .localeSelect {
     max-width: 7.25rem;
+  }
+}
+
+@media (min-width: 461px) {
+  .repositoryLabel {
+    display: none;
+  }
+  .repositoryLink {
+    padding: 0;
+    width: 2.5rem;
   }
 }
