@@ -326,7 +326,6 @@ html {
 }
 
 .homePreview__mark {
-  align-items: center;
   background: #315fe5;
   border-radius: 0.44rem;
   color: #ffffff;
@@ -569,7 +568,6 @@ html {
 }
 
 .homeRoute__arrow {
-  align-items: center;
   background: color-mix(in srgb, var(--home-indigo) 10%, transparent);
   border-radius: 0.65rem;
   color: var(--home-indigo);
@@ -736,10 +734,15 @@ html {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    scroll-behavior: auto !important;
-    transition-duration: 0.01ms !important;
+  html {
+    scroll-behavior: auto;
+  }
+
+  .homeAction,
+  .homeAction svg,
+  .homeTextLink svg,
+  .homeRoute,
+  .homeRoute__arrow svg {
+    transition: none;
   }
 }
