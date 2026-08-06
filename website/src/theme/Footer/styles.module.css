@@ -1,6 +1,7 @@
 .footer {
-  background: #101a30;
-  color: #d8e2f8;
+  background: #f5f8ff;
+  border-top: 1px solid #d4deef;
+  color: #31415f;
   margin-top: 0;
   padding: 2.2rem 1.25rem;
 }
@@ -14,9 +15,9 @@
   text-align: center;
 }
 
-.brand {
+.brand:not(#\#):not(#\#):not(#\#) {
   align-items: center;
-  color: #ffffff;
+  color: #14213d;
   display: inline-flex;
   font-size: 0.98rem;
   font-weight: 760;
@@ -27,12 +28,12 @@
 }
 
 .brand svg {
-  color: #83a7ff;
+  color: #1f4fc4;
 }
 
-.brand:hover,
-.brand:focus-visible {
-  color: #ffffff;
+.brand:not(#\#):not(#\#):not(#\#):hover,
+.brand:not(#\#):not(#\#):not(#\#):focus-visible {
+  color: #14213d;
   text-decoration: none;
 }
 
@@ -43,9 +44,9 @@
   justify-content: center;
 }
 
-.links a {
+.links a:not(#\#):not(#\#):not(#\#) {
   border-radius: 0.5rem;
-  color: #b8c6e1;
+  color: #244b9e;
   font-size: 0.82rem;
   font-weight: 570;
   padding: 0.35rem 0.4rem;
@@ -55,17 +56,47 @@
     color 170ms ease;
 }
 
-.links a:hover,
-.links a:focus-visible {
-  background: rgb(255 255 255 / 9%);
-  color: #ffffff;
+.links a:not(#\#):not(#\#):not(#\#):hover,
+.links a:not(#\#):not(#\#):not(#\#):focus-visible {
+  background: #dfe9ff;
+  color: #112c70;
   text-decoration: none;
 }
 
 .copyright {
-  color: #8494b2;
+  color: #52637f;
   font-size: 0.78rem;
   margin: 0;
+}
+
+:global([data-theme="dark"]) .footer {
+  background: #202b42;
+  border-top-color: #50617f;
+  color: #dbe5f7;
+}
+
+:global([data-theme="dark"]) .brand:not(#\#):not(#\#):not(#\#),
+:global([data-theme="dark"]) .brand:not(#\#):not(#\#):not(#\#):hover,
+:global([data-theme="dark"]) .brand:not(#\#):not(#\#):not(#\#):focus-visible {
+  color: #ffffff;
+}
+
+:global([data-theme="dark"]) .brand svg {
+  color: #b7c9ff;
+}
+
+:global([data-theme="dark"]) .links a:not(#\#):not(#\#):not(#\#) {
+  color: #dbe5ff;
+}
+
+:global([data-theme="dark"]) .links a:not(#\#):not(#\#):not(#\#):hover,
+:global([data-theme="dark"]) .links a:not(#\#):not(#\#):not(#\#):focus-visible {
+  background: #2d3d61;
+  color: #ffffff;
+}
+
+:global([data-theme="dark"]) .copyright {
+  color: #c4cee1;
 }
 
 @media (min-width: 960px) {
