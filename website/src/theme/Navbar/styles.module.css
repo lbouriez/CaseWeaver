@@ -1,5 +1,3 @@
-/* Infima's base navbar selector carries two impossible ID negations. One additional
- * negation keeps this narrowly scoped override effective without !important. */
 :global(.navbar:not(#\#):not(#\#):not(#\#)) {
   background: transparent;
   border: 0;
@@ -11,10 +9,10 @@
 }
 
 .header {
-  backdrop-filter: blur(14px);
-  background: color-mix(in srgb, var(--ifm-background-color) 94%, transparent);
-  border-bottom: 1px solid var(--ifm-color-emphasis-200);
-  box-shadow: 0 0.35rem 1.25rem rgb(15 23 42 / 5%);
+  backdrop-filter: blur(18px);
+  background: color-mix(in srgb, var(--ifm-background-color) 92%, transparent);
+  border-bottom: 1px solid
+    color-mix(in srgb, var(--ifm-color-emphasis-300) 74%, transparent);
   position: relative;
   width: 100%;
   z-index: 10;
@@ -23,93 +21,140 @@
 .container {
   align-items: center;
   display: flex;
-  height: 4rem;
+  height: 4.4rem;
   justify-content: space-between;
   margin: 0 auto;
-  max-width: 80rem;
-  padding: 0 1.25rem;
+  max-width: 78rem;
+  padding: 0 1.35rem;
 }
 
 .leftSection,
 .rightSection,
-.brand {
+.brand,
+.repositoryLink,
+.docsLink,
+.menuButton {
   align-items: center;
   display: flex;
 }
 
 .leftSection,
 .rightSection {
-  gap: 0.75rem;
+  gap: 0.5rem;
 }
 
 .brand {
   color: var(--ifm-font-color-base);
-  font-size: 1.125rem;
-  font-weight: 750;
-  gap: 0.55rem;
+  font-size: 1rem;
+  font-weight: 760;
+  gap: 0.48rem;
+  letter-spacing: -0.025em;
   text-decoration: none;
 }
 
-.brand:hover {
+.brand svg {
+  color: var(--ifm-color-primary);
+}
+
+.brand:hover,
+.brand:focus-visible {
+  color: var(--ifm-font-color-base);
+  text-decoration: none;
+}
+
+.menuButton,
+.docsLink,
+.repositoryLink,
+.localeSelect {
+  border: 0;
+  border-radius: 0.65rem;
+  color: var(--ifm-font-color-base);
+  font: inherit;
+  min-height: 2.55rem;
+  transition:
+    background 170ms ease,
+    color 170ms ease,
+    transform 170ms ease;
+}
+
+.menuButton,
+.docsLink,
+.repositoryLink {
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.docsLink {
+  font-size: 0.875rem;
+  font-weight: 680;
+  justify-content: center;
+  padding: 0 0.65rem;
+}
+
+.docsLink:hover,
+.docsLink:focus-visible,
+.menuButton:hover,
+.menuButton:focus-visible {
+  background: var(--ifm-color-emphasis-100);
   color: var(--ifm-color-primary);
   text-decoration: none;
 }
 
-.menuButton,
-.repositoryLink,
-.docsLink,
-.localeSelect {
-  border: 1px solid var(--ifm-color-emphasis-300);
-  border-radius: 999px;
-  color: var(--ifm-font-color-base);
-  font: inherit;
-  min-height: 2.5rem;
-  padding: 0 0.85rem;
-  transition:
-    border-color 160ms ease,
-    background 160ms ease,
-    transform 160ms ease;
+.menuButton {
+  background: transparent;
+  font-size: 0.82rem;
+  font-weight: 720;
+  justify-content: center;
+  padding: 0 0.6rem;
 }
 
-.menuButton,
-.repositoryLink,
-.docsLink {
-  background: var(--ifm-background-surface-color);
-  cursor: pointer;
-  font-size: 0.875rem;
-  text-decoration: none;
+.repositoryLink {
+  background: var(--ifm-color-emphasis-100);
+  color: var(--ifm-font-color-base);
+  display: grid;
+  height: 2.55rem;
+  min-height: 2.55rem;
+  min-width: 2.55rem;
+  padding: 0;
+  place-items: center;
+  width: 2.55rem;
+}
+
+.repositoryLink svg {
+  display: block;
+  height: 1.08rem;
+  width: 1.08rem;
 }
 
 .repositoryLink:hover,
-.docsLink:hover,
-.menuButton:hover,
-.localeSelect:hover {
-  background: color-mix(
-    in srgb,
-    var(--ifm-color-primary) 8%,
-    var(--ifm-background-surface-color)
-  );
-  border-color: var(--ifm-color-primary);
-  color: var(--ifm-color-primary);
+.repositoryLink:focus-visible {
+  background: var(--ifm-font-color-base);
+  color: var(--ifm-background-surface-color);
   text-decoration: none;
   transform: translateY(-1px);
 }
 
+.repositoryLabel {
+  display: none;
+}
+
+.localeLabel {
+  display: grid;
+}
+
 .localeSelect {
-  background: var(--ifm-background-surface-color);
+  appearance: auto;
+  background: transparent;
   cursor: pointer;
-  font-size: 0.875rem;
-}
-
-.repositoryLink {
-  align-items: center;
-  gap: 0.45rem;
-  justify-content: center;
-  min-width: 2.5rem;
-}
-
-.docsLink {
+  font-size: 0.82rem;
   font-weight: 650;
+  padding: 0 0.25rem;
+}
+
+.localeSelect:hover,
+.localeSelect:focus-visible {
+  background: var(--ifm-color-emphasis-100);
+  color: var(--ifm-color-primary);
 }
 
 .search {
@@ -126,7 +171,7 @@
 
 @media (min-width: 768px) {
   .container {
-    height: 4.5rem;
+    height: 4.75rem;
     padding: 0 2rem;
   }
 }
@@ -138,32 +183,39 @@
 }
 
 @media (max-width: 640px) {
+  .container {
+    padding: 0 0.9rem;
+  }
+
   .docsLink {
     display: none;
   }
 }
 
-@media (max-width: 460px) {
-  .repositoryLink {
-    min-width: 2.5rem;
-    padding: 0;
+@media (max-width: 410px) {
+  .leftSection,
+  .rightSection {
+    gap: 0.25rem;
   }
 
-  .repositoryLabel {
-    display: none;
+  .brand {
+    font-size: 0.92rem;
+  }
+
+  .brand svg {
+    height: 1.55rem;
+    width: 1.55rem;
   }
 
   .localeSelect {
-    max-width: 7.25rem;
+    font-size: 0.75rem;
+    max-width: 5.6rem;
   }
-}
 
-@media (min-width: 461px) {
-  .repositoryLabel {
-    display: none;
-  }
   .repositoryLink {
-    padding: 0;
-    width: 2.5rem;
+    height: 2.4rem;
+    min-height: 2.4rem;
+    min-width: 2.4rem;
+    width: 2.4rem;
   }
 }

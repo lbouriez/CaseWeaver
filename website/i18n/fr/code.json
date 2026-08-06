@@ -1,4 +1,130 @@
 {
+  "homepage.v2.description": {
+    "message": "CaseWeaver transforme les connaissances fiables de l’entreprise en actions de support étayées par des preuves."
+  },
+  "homepage.v2.title": {
+    "message": "Des réponses de support qui tiennent la route"
+  },
+  "homepage.v2.kicker": {
+    "message": "Des opérations de support attentives aux preuves"
+  },
+  "homepage.v2.headline": {
+    "message": "Des réponses de support qui tiennent la route."
+  },
+  "homepage.v2.lede": {
+    "message": "Connectez les connaissances auxquelles votre équipe fait confiance. CaseWeaver les transforme en prochaine étape claire, avec les preuves toujours jointes."
+  },
+  "homepage.v2.primaryAction": {
+    "message": "Commencer"
+  },
+  "homepage.v2.secondaryAction": {
+    "message": "Explorer la documentation"
+  },
+  "homepage.v2.signal.evidence": {
+    "message": "Sources toujours visibles"
+  },
+  "homepage.v2.signal.control": {
+    "message": "Les opérateurs gardent le contrôle"
+  },
+  "homepage.v2.preview.active": {
+    "message": "Analyse prête"
+  },
+  "homepage.v2.preview.caseLabel": {
+    "message": "Dossier / 1042"
+  },
+  "homepage.v2.preview.caseTitle": {
+    "message": "Le client ne peut pas se connecter"
+  },
+  "homepage.v2.preview.caseCopy": {
+    "message": "L’accès échoue après un changement d’équipe."
+  },
+  "homepage.v2.preview.evidenceLabel": {
+    "message": "Éléments probants"
+  },
+  "homepage.v2.preview.knowledge": {
+    "message": "Guide d’identité"
+  },
+  "homepage.v2.preview.policy": {
+    "message": "Politique d’accès"
+  },
+  "homepage.v2.preview.answerLabel": {
+    "message": "Prochaine étape recommandée"
+  },
+  "homepage.v2.preview.answerTitle": {
+    "message": "Rétablir le rôle vérifié, puis réessayer."
+  },
+  "homepage.v2.preview.answerMeta": {
+    "message": "2 sources jointes"
+  },
+  "homepage.v2.flow.kicker": {
+    "message": "Comment cela fonctionne"
+  },
+  "homepage.v2.flow.title": {
+    "message": "Un cycle opérationnel clair."
+  },
+  "homepage.v2.flow.lede": {
+    "message": "Passez d’un dossier difficile à une réponse responsable, sans perdre le contexte qui la rend fiable."
+  },
+  "homepage.v2.flow.capture.title": {
+    "message": "Recevoir le dossier"
+  },
+  "homepage.v2.flow.capture.copy": {
+    "message": "Les tickets, planifications et événements vérifiés lancent un travail durable."
+  },
+  "homepage.v2.flow.ground.title": {
+    "message": "Ancrer la réponse"
+  },
+  "homepage.v2.flow.ground.copy": {
+    "message": "Les sources fiables et les politiques apportent le contexte utile."
+  },
+  "homepage.v2.flow.act.title": {
+    "message": "Passer à l’étape suivante"
+  },
+  "homepage.v2.flow.act.copy": {
+    "message": "Examinez, publiez et auditez une réponse que votre équipe peut expliquer."
+  },
+  "homepage.v2.routes.kicker": {
+    "message": "Trouver votre point de départ"
+  },
+  "homepage.v2.routes.title": {
+    "message": "Partez du travail qui vous attend."
+  },
+  "homepage.v2.routes.lede": {
+    "message": "Chaque guide est pratique, cadré et clair sur les capacités prises en charge aujourd’hui."
+  },
+  "homepage.v2.routes.local.label": {
+    "message": "Installation locale"
+  },
+  "homepage.v2.routes.local.title": {
+    "message": "Exécuter CaseWeaver en local"
+  },
+  "homepage.v2.routes.knowledge.label": {
+    "message": "Connaissances"
+  },
+  "homepage.v2.routes.knowledge.title": {
+    "message": "Connecter des sources fiables"
+  },
+  "homepage.v2.routes.console.label": {
+    "message": "Opérations"
+  },
+  "homepage.v2.routes.console.title": {
+    "message": "Configurer la Console"
+  },
+  "homepage.v2.close.kicker": {
+    "message": "Conçu pour un travail responsable"
+  },
+  "homepage.v2.close.title": {
+    "message": "Des réponses utiles ont besoin de contexte, de contrôles et d’une trace."
+  },
+  "homepage.v2.close.console": {
+    "message": "Ouvrir le guide de la Console"
+  },
+  "homepage.v2.close.status": {
+    "message": "Voir le statut des capacités"
+  },
+  "homepage.v2.close.selfHosting": {
+    "message": "Planifier un déploiement auto-hébergé"
+  },
   "homepage.description": {
     "message": "CaseWeaver aide les équipes de support à transformer les connaissances de l’entreprise en actions de dossier étayées par des preuves."
   },
