@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 import {
   access,
   chmod,
@@ -50,7 +50,7 @@ const httpsPort = 22_000 + portOffset;
 const oidcPort = 23_000 + portOffset;
 const restoreHttpPort = 24_000 + portOffset;
 const restoreHttpsPort = 25_000 + portOffset;
-const subnetSeed = 20 + (randomBytes(1)[0] % 200);
+const subnetSeed = randomInt(20, 220);
 // Docker Desktop commonly allocates every 172.17.0.0/16 through
 // 172.30.0.0/16 to pre-existing Compose projects. Keep this disposable test
 // topology in a distinct private range and vary its third octet per run.

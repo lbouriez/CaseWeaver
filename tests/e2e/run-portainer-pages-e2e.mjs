@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomInt } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -33,7 +33,7 @@ const apiHttpPort = 24_000 + portOffset;
 const apiHttpsPort = 25_000 + portOffset;
 const pagesHttpsPort = 26_000 + portOffset;
 const oidcPort = 27_000 + portOffset;
-const subnetSeed = 20 + (randomBytes(1)[0] % 200);
+const subnetSeed = randomInt(20, 220);
 const applicationSubnet = `10.252.${subnetSeed}.0/24`;
 const egressSubnet = `10.253.${subnetSeed}.0/24`;
 const oidcFixtureIp = `10.253.${subnetSeed}.20`;
