@@ -25,7 +25,11 @@ import {
   createPublicationWorkflowHandlers,
   type PublicationExecutorService,
 } from "./modules/publication/index.js";
-import type { WorkerCommandHandlers } from "./runtime.js";
+import type {
+  AnalysisCompletedEvent,
+  RepositoryChangeExecuteCommand,
+  WorkerCommandHandlers,
+} from "./runtime.js";
 
 /**
  * Deployment composition owns construction of concrete stores, prompts, and
@@ -45,6 +49,20 @@ export interface ProductionWorkerCompositionDependencies {
     readonly executor: PublicationExecutorService;
     /** Schedule eligible publication after a completed analysis event. */
     readonly completedAnalysis: AnalysisCompletedService;
+  }>;
+  readonly repositoryChanges: Readonly<{
+    readonly completedAnalysis: Readonly<{
+      execute(
+        event: AnalysisCompletedEvent,
+        signal: AbortSignal,
+      ): Promise<void>;
+    }>;
+    readonly executor: Readonly<{
+      execute(
+        command: RepositoryChangeExecuteCommand,
+        signal: AbortSignal,
+      ): Promise<void>;
+    }>;
   }>;
   readonly operations: OperationsRuntimeDependencies;
 }
@@ -72,6 +90,21 @@ export function createProductionWorkerCommandHandlers(
       trigger: publication.trigger,
       delivery: publication.publication,
       analysisCompleted: publication.analysisCompleted,
+    }),
+    repositoryChanges: Object.freeze({
+      analysisCompleted: {
+        handle: (event: AnalysisCompletedEvent, signal: AbortSignal) =>
+          dependencies.repositoryChanges.completedAnalysis.execute(
+            event,
+            signal,
+          ),
+      },
+      execute: {
+        handle: (
+          command: RepositoryChangeExecuteCommand,
+          signal: AbortSignal,
+        ) => dependencies.repositoryChanges.executor.execute(command, signal),
+      },
     }),
     operations: createOperationsHandlers(dependencies.operations),
     diagnostics: createDiagnosticsHandlers(dependencies.diagnostics),

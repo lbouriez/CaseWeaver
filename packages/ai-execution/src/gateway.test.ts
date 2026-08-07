@@ -514,6 +514,46 @@ describe("DefaultAiExecutionGateway", () => {
     ]);
   });
 
+  it("meters repository-change architect work under the existing repository-agent binding", async () => {
+    const provider = new DeterministicAiProviderDispatcher({
+      runRepositoryChange: async () => ({
+        value: {
+          summary: "Add a null guard.",
+          documentationImpact: "None.",
+          shouldChange: true,
+          metering: {
+            mode: "observableTurns",
+            turns: [{ turn: 1, usage: { inputTokens: 3, outputTokens: 2 } }],
+          },
+        },
+        metadata: { retryCount: 0 },
+      }),
+    });
+    const test = harness(provider, repositoryAgentBinding());
+
+    await test.gateway.execute(
+      {
+        kind: "repositoryChange",
+        role: "repositoryAgent",
+        request: {
+          runtimePin: repositoryRuntimePin,
+          phase: "architect",
+          instruction: "Plan a narrow correction from the pinned repository.",
+          maximumTurns: 1,
+          maximumInputTokensPerTurn: 10,
+          maximumOutputTokensPerTurn: 5,
+        },
+        budget: { currency: "USD", hard: true },
+      },
+      { workspaceId: "workspace-1", signal: new AbortController().signal },
+    );
+
+    expect(test.starts).toMatchObject([
+      { operationKind: "repositoryChange" },
+      { operationKind: "repositoryChangeTurn" },
+    ]);
+  });
+
   it("reconciles hidden repository-agent turns from aggregate usage", async () => {
     const provider = new DeterministicAiProviderDispatcher({
       runRepositoryAgent: async () => ({

@@ -15,6 +15,8 @@ import {
   type ProviderResult,
   type RepositoryAgentRequest,
   type RepositoryAgentResult,
+  type RepositoryChangeAgentRequest,
+  type RepositoryChangeAgentResult,
   type RerankerRequest,
   type RerankerResult,
   type SecretResolver,
@@ -198,6 +200,12 @@ export class RegisteredAiProviderDispatcher implements AiProviderDispatcher {
     invocation: ProviderInvocation<RepositoryAgentRequest>,
   ): Promise<ProviderResult<RepositoryAgentResult>> {
     return this.provider(invocation).runRepositoryAgent(invocation);
+  }
+
+  public runRepositoryChange(
+    invocation: ProviderInvocation<RepositoryChangeAgentRequest>,
+  ): Promise<ProviderResult<RepositoryChangeAgentResult>> {
+    return this.provider(invocation).runRepositoryChange(invocation);
   }
 
   private provider(

@@ -32,7 +32,7 @@ export type RepositoryAnalysisWorkflowSection =
 type Option = RepositoryAnalysisOption | RepositoryAnalysisDeploymentOption;
 
 const gitRefName =
-  /^(?!refs\/)(?!HEAD$)(?!\/)(?!.*\/$)(?!.*\.\.)(?!.*@\{)[^\s\\:~^?*\[\]]{1,512}$/u;
+  /^(?!refs\/)(?!HEAD$)(?!\/)(?!.*\/$)(?!.*\.\.)(?!.*@\{)[^\s\\:~^?*[\]]{1,512}$/u;
 
 function optionById<T extends { readonly id: string }>(
   values: readonly T[],
@@ -328,6 +328,8 @@ function CodeRepositoryForm({
   >(["branch"]);
   const [refKind, setRefKind] = useState<"branch" | "tag" | "commit">("branch");
   const [refValue, setRefValue] = useState("main");
+  const [automaticDraftPullRequest, setAutomaticDraftPullRequest] =
+    useState(false);
   const [created, setCreated] = useState<RepositoryAnalysisConfiguration>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>();
@@ -353,6 +355,16 @@ function CodeRepositoryForm({
         throw new Error("Provide a repository display name.");
       if (!allowedRefKinds.includes(refKind))
         throw new Error("Allow the checkout reference type that you selected.");
+      if (
+        automaticDraftPullRequest &&
+        (mode !== "remoteHttps" ||
+          refKind !== "branch" ||
+          secretReferenceId.length === 0)
+      ) {
+        throw new Error(
+          "Automatic draft pull requests require a remote branch and registered repository write access.",
+        );
+      }
       const checkoutRef =
         refKind === "commit"
           ? (() => {
@@ -400,6 +412,7 @@ function CodeRepositoryForm({
           location,
           allowedRefKinds,
           checkoutRef,
+          automaticDraftPullRequest,
         }),
       );
       await onChanged();
@@ -470,6 +483,22 @@ function CodeRepositoryForm({
             required={false}
             value={secretReferenceId}
           />
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={automaticDraftPullRequest}
+                onChange={(event) =>
+                  setAutomaticDraftPullRequest(event.target.checked)
+                }
+              />
+            }
+            label="Automatically create a draft Azure DevOps pull request for high-confidence code issues"
+          />
+          <Typography color="text.secondary" variant="body2">
+            CaseWeaver will use this same registered repository credential to
+            create a review-only draft PR from the latest configured branch. It
+            does not run the target repository&apos;s tests or complete PRs.
+          </Typography>
         </>
       ) : (
         <SelectField

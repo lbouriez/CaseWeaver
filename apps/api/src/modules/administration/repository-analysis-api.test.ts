@@ -241,15 +241,19 @@ describe("repository analysis API facade", () => {
           repository: {
             mode: "remoteHttps",
             remoteUrl,
+            checkoutSecretReferenceId: "checkout-secret-1",
             checkoutRef: { kind: "branch", name: "main" },
+            automation: { automaticDraftPullRequest: false },
           },
           repositoryAnalysisProjection: expect.objectContaining({
             configuredCheckoutRef: { kind: "branch", name: "main" },
+            automaticDraftPullRequest: false,
           }),
         }),
         projection: expect.objectContaining({
           mode: "remoteHttps",
           repositoryId: "code-repositories:generated",
+          automaticDraftPullRequest: false,
         }),
       }),
       expect.objectContaining({
@@ -325,6 +329,55 @@ describe("repository analysis API facade", () => {
         expectedRevision: 1,
         lifecycle: "active",
         settings: {},
+      }),
+    ).toThrow();
+  });
+
+  it("permits automatic draft PR opt-in only for a credentialed remote branch", async () => {
+    const subject = facade();
+    await subject.api.createDraft(
+      {
+        resource: "code-repositories",
+        displayName: "Azure DevOps support service",
+        location: {
+          mode: "remoteHttps",
+          remoteUrl:
+            "https://dev.azure.com/organization/project/_git/repository",
+          checkoutSecretReferenceId: "checkout-secret-1",
+        },
+        allowedRefKinds: ["branch"],
+        checkoutRef: { kind: "branch", name: "main" },
+        automaticDraftPullRequest: true,
+      },
+      context,
+    );
+    expect(subject.manager.createCodeRepository).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projection: expect.objectContaining({
+          automaticDraftPullRequest: true,
+        }),
+        settings: expect.objectContaining({
+          repository: expect.objectContaining({
+            automation: { automaticDraftPullRequest: true },
+          }),
+        }),
+      }),
+      expect.anything(),
+    );
+
+    expect(() =>
+      subject.api.parse("createDraft", {
+        resource: "code-repositories",
+        displayName: "Pinned repository",
+        location: {
+          mode: "remoteHttps",
+          remoteUrl:
+            "https://dev.azure.com/organization/project/_git/repository",
+          checkoutSecretReferenceId: "checkout-secret-1",
+        },
+        allowedRefKinds: ["tag"],
+        checkoutRef: { kind: "tag", name: "v1.0.0" },
+        automaticDraftPullRequest: true,
       }),
     ).toThrow();
   });

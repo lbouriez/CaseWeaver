@@ -35,6 +35,7 @@ structured analysis that can be reviewed or published through a destination adap
 - Multimodal attachment extraction and reusable derived-content cache.
 - Hybrid retrieval over documentation and historical cases.
 - Read-only repository investigation.
+- Opt-in, high-confidence repository-fix drafts that always require developer review.
 - Manual, webhook, and scheduled analysis triggers.
 - Structured analysis, evidence, publication, audit, and cost records.
 
@@ -49,7 +50,7 @@ approval policy.
 - Replacing a helpdesk product.
 - Automatically replying to customers.
 - A general workflow automation platform.
-- A general-purpose coding agent.
+- A general-purpose coding agent, autonomous merge, or automatic customer response.
 - A broad chat UI.
 - Supporting every document format or vector database.
 - Training or fine-tuning models.

@@ -189,4 +189,57 @@ describe("CopilotSdkByokRuntimeClient", () => {
       }),
     ).rejects.toThrow("Copilot SDK returned an invalid result.");
   });
+
+  it("accepts an author no-change decision without a patch payload", async () => {
+    const client = new CopilotSdkByokRuntimeClient({
+      environment: { PATH: "/usr/bin" },
+      createTemporaryDirectory: async () => "/tmp/caseweaver-copilot-no-change",
+      removeTemporaryDirectory: async () => undefined,
+      createClient: () => ({
+        createSession: async () => ({
+          on: (_event, handler) => {
+            handler({ data: { inputTokens: 5, outputTokens: 3 } });
+            return () => undefined;
+          },
+          sendAndWait: async () => ({
+            data: {
+              content:
+                '{"summary":"No safe correction is available.","documentationImpact":"","shouldChange":false}',
+            },
+          }),
+          abort: async () => undefined,
+          disconnect: async () => undefined,
+        }),
+        stop: async () => [],
+        forceStop: async () => undefined,
+      }),
+    });
+
+    await expect(
+      client.runRepositoryChange({
+        provider: "openai",
+        baseUrl: "https://models.example/v1",
+        apiKey: "test-key",
+        model: "byok-model",
+        wireApi: "responses",
+        phase: "author",
+        instruction: "Author a narrowly scoped correction.",
+        maximumTurns: 1,
+        maximumInputTokensPerTurn: 10,
+        maximumOutputTokensPerTurn: 10,
+        maximumAggregateInputTokens: 10,
+        maximumAggregateOutputTokens: 10,
+        maximumOutputBytes: 512,
+        tools: { execute: async () => ({}) },
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({
+      summary: "No safe correction is available.",
+      shouldChange: false,
+      metering: {
+        mode: "observableTurns",
+        turns: [{ turn: 1, usage: { inputTokens: 5, outputTokens: 3 } }],
+      },
+    });
+  });
 });

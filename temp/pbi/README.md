@@ -37,6 +37,7 @@ temporary source material for GitHub Issues and should be removed after issue mi
 | 021 | AI catalog onboarding and shared secret-reference management | Completed | 003, 016, 020 | Delivers trusted catalog refresh/import, provider-compatible binding options, and real OpenRouter chat/embedding validation through Admin. Moves cross-cutting secret-reference registration, lifecycle, dependency inspection, and revocation to a dedicated Access & security screen. |
 | 022 | Externally hosted Admin delivery and cross-origin OAuth | Completed | 016, 017, 019 foundation | Backend-only Portainer stack, artifact-only Cloudflare Pages Admin contract, strict cross-origin cookie/OIDC configuration, and deterministic Docker/Playwright acceptance are delivered. |
 | 023 | AI-ready operator and deployment reference | Completed | 016, 017, 018, 020, 021, 022 | Source-verified Console screen/workflow reference, Compose topology and environment-variable catalog, French counterparts, static source-contract checks, and final portal validation are delivered. |
+| 024 | Automatic Azure DevOps draft pull requests | Completed | 003, 010, 013, 016, 020 | High-confidence repository-analysis findings can create one architected, review-only Azure DevOps draft PR through durable, provider-neutral automation; CaseWeaver does not run target tests or merge. |
 
 PBIs should be implemented in order unless their declared dependencies are complete.
 Each PBI must satisfy `.features/11-engineering-standards.md`.
@@ -68,6 +69,7 @@ Each PBI must satisfy `.features/11-engineering-standards.md`.
 | 021 | `packages/administration`, `packages/ai-config`, `providers/*`, `infrastructure/postgres/src/administration`, `apps/{api,admin}`, `tests/{contract,integration,e2e}`, operator documentation; parent owns catalog-source composition, descriptor/runtime registries, API bootstrap, root manifests, and final validation |
 | 022 | `apps/api/src/modules/auth`, `apps/admin`, `deploy/docker`, `.github/workflows/admin-pages.yml`, `tests/e2e`, and operator documentation; parent owns API bootstrap, root manifests, shared Compose/image contracts, and final validation |
 | 023 | `website`, operator/deployment documentation, translation manifests, and documentation source-contract tests; parent owns shared sidebar navigation, root documentation links, and final validation |
+| 024 | `packages/{domain,ai-sdk,ai-execution,repository-changes}`, `providers/copilot-sdk-agent`, `connectors/azure-devops-repositories`, `infrastructure/postgres/src/repository-changes`, `apps/{api,admin,worker}`, `tests/e2e`, feature specifications, and website docs; parent owns envelope/AI/worker/API registries and migration integration |
 
 Agents may touch shared contracts only when their PBI owns the contract or after
 coordinating the change with the owning PBI.

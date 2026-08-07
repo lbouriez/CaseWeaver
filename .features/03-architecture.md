@@ -51,6 +51,7 @@ packages/
   retrieval
   attachments
   analysis
+  repository-changes
   publication
   prompts
   scheduling
@@ -62,6 +63,7 @@ connectors/
   _template
   git-markdown
   jitbit
+  azure-devops-repositories
 providers/
   _template
   openai-compatible
@@ -89,7 +91,8 @@ tests/
 - `scheduler` evaluates per-source synchronization and case-analysis schedules and
   enqueues due commands. It performs no connector synchronization or AI work.
 - `worker` owns all retryable execution: source synchronization, attachments, embedding,
-  retrieval, repository investigation, analysis, and publication.
+  retrieval, repository investigation, analysis, publication, and review-only repository
+  change execution.
 - `mcp` exposes authenticated external tools by calling application use cases.
 - `cli` administers the same application use cases without parallel business logic.
 - `standalone` composes API, webhook, scheduler, and worker modules for small
@@ -125,6 +128,9 @@ hold expensive work, bypass budgets, or create a second orchestration path.
   the same durable delivery contract. Infrastructure adapters never call one another.
 - Queue job leases belong to the queue adapter. Schedule/domain leases are separate
   records owned by PostgreSQL repositories.
+- A completed analysis may fan out to publication and an opt-in repository-change
+  request. Each fan-out consumer has its own durable idempotency state; retrying one
+  never duplicates the other.
 - Standalone and distributed deployments use the same PostgreSQL queue, handlers, leases,
   migrations, and configuration. Standalone only co-locates process lifecycle.
 

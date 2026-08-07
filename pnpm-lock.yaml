@@ -308,6 +308,9 @@ importers:
       '@caseweaver/attachments':
         specifier: workspace:*
         version: link:../../packages/attachments
+      '@caseweaver/azure-devops-repositories':
+        specifier: workspace:*
+        version: link:../../connectors/azure-devops-repositories
       '@caseweaver/connector-git-markdown':
         specifier: workspace:*
         version: link:../../connectors/git-markdown
@@ -350,6 +353,9 @@ importers:
       '@caseweaver/queue-postgres':
         specifier: workspace:*
         version: link:../../infrastructure/queue-postgres
+      '@caseweaver/repository-changes':
+        specifier: workspace:*
+        version: link:../../packages/repository-changes
       '@caseweaver/repository-runtime':
         specifier: workspace:*
         version: link:../../infrastructure/repository-runtime
@@ -366,6 +372,25 @@ importers:
       '@types/pg':
         specifier: ^8.15.6
         version: 8.20.0
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.0.18
+        version: 4.0.18(@opentelemetry/api@1.9.1)(@types/node@22.19.7)(jiti@2.7.0)(jsdom@26.1.0)(tsx@4.21.0)(yaml@2.9.0)
+
+  connectors/azure-devops-repositories:
+    dependencies:
+      '@caseweaver/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
+      '@caseweaver/repository-changes':
+        specifier: workspace:*
+        version: link:../../packages/repository-changes
+    devDependencies:
+      '@types/node':
+        specifier: 22.19.7
+        version: 22.19.7
       typescript:
         specifier: 5.9.3
         version: 5.9.3
@@ -566,6 +591,9 @@ importers:
       '@caseweaver/publication':
         specifier: workspace:*
         version: link:../../packages/publication
+      '@caseweaver/repository-changes':
+        specifier: workspace:*
+        version: link:../../packages/repository-changes
       '@caseweaver/retrieval':
         specifier: workspace:*
         version: link:../../packages/retrieval
@@ -921,6 +949,22 @@ importers:
       zod:
         specifier: ^4.0.0
         version: 4.4.3
+    devDependencies:
+      '@types/node':
+        specifier: 22.19.7
+        version: 22.19.7
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: 4.0.18
+        version: 4.0.18(@opentelemetry/api@1.9.1)(@types/node@22.19.7)(jiti@2.7.0)(jsdom@26.1.0)(tsx@4.21.0)(yaml@2.9.0)
+
+  packages/repository-changes:
+    dependencies:
+      '@caseweaver/domain':
+        specifier: workspace:*
+        version: link:../domain
     devDependencies:
       '@types/node':
         specifier: 22.19.7

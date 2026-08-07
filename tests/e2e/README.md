@@ -1,6 +1,11 @@
 # End-to-end tests
 
-**PBIs:** 013, 016, 017, 021, 022
+**PBIs:** 013, 016, 017, 021, 022, 024
+
+PBI-024 adds `repository-change-automation.spec.ts`, a deterministic worker journey from
+an eligible completed analysis through architect/author phases to a review-only draft PR.
+It asserts the target repository test suite and PR completion are never part of the flow;
+the provider boundary itself remains covered with sanitized Azure DevOps REST fixtures.
 
 Docker-based workflows from source synchronization through analysis and destination
 publication, plus webhook, scheduler, failure recovery, and security-boundary scenarios.

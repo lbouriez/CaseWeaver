@@ -55,6 +55,8 @@ Keep a small critical set:
 2. Changed source reaches searchable knowledge and evidence-backed analysis.
 3. Verified webhook reaches analysis/publication exactly once.
 4. Failure/restart recovers durable queued work.
+5. An eligible completed analysis creates one review-only draft PR after architect and
+   author phases; no target-repository test or merge is invoked.
 
 Additional E2E tests require a distinct production risk.
 

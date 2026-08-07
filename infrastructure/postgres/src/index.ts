@@ -108,6 +108,10 @@ import {
   PostgresPublicationIntentStore,
   PostgresVerifiedWebhookEventStore,
 } from "./publication/index.js";
+import {
+  PostgresRepositoryChangeConfigurationResolver,
+  PostgresRepositoryChangeStore,
+} from "./repository-changes/store.js";
 import { PostgresRepositoryAnalysisRuntimeConfigurationResolver } from "./repository-runtime/repository-analysis-runtime-configuration-resolver.js";
 import { PostgresCaseDiscoveryStateStore } from "./triggers/case-discovery-state-store.js";
 import { PostgresRepositoryAnalysisExecutionInputStore } from "./triggers/repository-analysis-execution-input-store.js";
@@ -852,6 +856,9 @@ export interface PostgresPersistence {
   readonly repositoryAnalysisOptionsStore: PostgresRepositoryAnalysisOptionsStore;
   /** Private exact recipe/version checkout material for PBI-020 worker composition. */
   readonly repositoryAnalysisRuntimeResolver: PostgresRepositoryAnalysisRuntimeConfigurationResolver;
+  /** Durable automatic draft-PR requests and their server-only configuration resolver. */
+  readonly repositoryChangeStore: PostgresRepositoryChangeStore;
+  readonly repositoryChangeConfigurationResolver: PostgresRepositoryChangeConfigurationResolver;
   readonly repositoryDraftTestStore: PostgresRepositoryDraftTestStore;
   /** Public-link values are safe but their development URL policy is deployment-owned. */
   platformLinkReadStore(
@@ -950,6 +957,9 @@ export function createPostgresPersistence(
     ),
     repositoryAnalysisRuntimeResolver:
       new PostgresRepositoryAnalysisRuntimeConfigurationResolver(client),
+    repositoryChangeStore: new PostgresRepositoryChangeStore(unitOfWork),
+    repositoryChangeConfigurationResolver:
+      new PostgresRepositoryChangeConfigurationResolver(client),
     repositoryDraftTestStore: new PostgresRepositoryDraftTestStore(client),
     platformLinkReadStore: (policy: PlatformLinkConfigurationPolicy) =>
       new PostgresPlatformLinkConfigurationReadStore(client, policy),
@@ -998,6 +1008,7 @@ export * from "./knowledge/runtime.js";
 export * from "./knowledge/source-command-store.js";
 export * from "./operations/index.js";
 export * from "./publication/index.js";
+export * from "./repository-changes/index.js";
 export * from "./repository-runtime/index.js";
 export * from "./scheduling/index.js";
 export * from "./triggers/index.js";

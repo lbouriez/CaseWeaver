@@ -1,10 +1,10 @@
 import {
-  analysisTriggerId,
-  analysisTriggerRequestId,
-  analysisTriggerVersionId,
   analysisIdentityId,
   analysisJobId,
   analysisResultId,
+  analysisTriggerId,
+  analysisTriggerRequestId,
+  analysisTriggerVersionId,
   causationId,
   correlationId,
   createEnvelope,
@@ -185,6 +185,53 @@ describe("worker command runtime", () => {
         signal,
       ),
     ).rejects.toMatchObject({ code: "worker.unsupportedEnvelope" });
+  });
+
+  it("fans a completed analysis out to publication and the idempotent draft-PR scheduler, then routes its execute command", async () => {
+    const publicationCompleted = vi.fn(async () => {});
+    const scheduleChange = vi.fn(async () => {});
+    const executeChange = vi.fn(async () => {});
+    const runtime = createWorkerRuntime(
+      createWorkerCommandDispatcher({
+        synchronize: { handle: async () => {} },
+        fullRescan: { handle: async () => {} },
+        analysis: { execute: { handle: async () => {} } },
+        publication: {
+          trigger: { handle: async () => {} },
+          delivery: {
+            execute: { handle: async () => {} },
+            reconcile: { handle: async () => {} },
+          },
+          analysisCompleted: { handle: publicationCompleted },
+        },
+        repositoryChanges: {
+          analysisCompleted: { handle: scheduleChange },
+          execute: { handle: executeChange },
+        },
+      }),
+    );
+    const completed = createEnvelope({
+      ...envelopeMetadata,
+      id: outboxEnvelopeId("outbox-completed-change-1"),
+      kind: "domainEvent",
+      type: "analysis.completed.v1",
+      payload: {
+        analysisJobId: analysisJobId("analysis-job-1"),
+        analysisResultId: analysisResultId("analysis-result-1"),
+      },
+    });
+    const command = createEnvelope({
+      ...envelopeMetadata,
+      id: outboxEnvelopeId("outbox-repository-change-1"),
+      type: "repository-change.execute.v1",
+      payload: { repositoryChangeRequestId: "repository-change-1" as never },
+    });
+    const signal = new AbortController().signal;
+    await runtime.consume(completed, signal);
+    await runtime.consume(command, signal);
+    expect(publicationCompleted).toHaveBeenCalledWith(completed, signal);
+    expect(scheduleChange).toHaveBeenCalledWith(completed, signal);
+    expect(executeChange).toHaveBeenCalledWith(command, signal);
   });
 
   it("routes retention purge through the durable operations handler", async () => {

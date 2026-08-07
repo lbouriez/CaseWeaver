@@ -30,6 +30,12 @@ Admin / API / webhook / scheduler
 5. Results, evidence, cost attribution, audit events, and publication state are
    retained. Retry/recovery uses the durable record instead of replaying a browser call.
 
+An eligible `analysis.completed.v1` event can also create one durable repository-change
+request. The worker treats publication and repository changes as separate idempotent
+consumers. Repository-change planning and authoring still pass through metered AI
+execution and the attested read-only checkout; only the outer Azure DevOps adapter writes
+a bounded branch and draft pull request.
+
 The small **standalone** mode hosts API, webhook ingress, scheduler, worker, and relay
 in one process. **Distributed** mode hosts them separately. Both use the same queue,
 leases, handlers, PostgreSQL state, and immutable version pins; standalone is not an

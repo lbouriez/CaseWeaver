@@ -43,3 +43,23 @@ reads are authorized, workspace-scoped, and audited before protected content is 
 
 If a particular form is absent, the deployment has not composed that managed workflow;
 there is no generic JSON fallback or direct provider/repository call in Admin.
+
+## Automatic draft pull requests
+
+For an Azure DevOps HTTPS repository, an administrator can enable **Automatically create
+a draft Azure DevOps pull request** only when the configured checkout is a branch and a
+registered repository credential is selected. That setting is part of the immutable
+repository version, and the credential is used only by server-side checkout and Azure
+DevOps operations.
+
+When a completed analysis has high confidence and verified repository findings,
+CaseWeaver creates one durable change request. It refreshes the configured target branch,
+uses an Architect model phase before an Author phase, and opens a deterministic **draft**
+PR only for a small, evidenced text-file correction. Developers review and decide what to
+do next. CaseWeaver never completes the PR, changes branch policies, creates work items,
+or runs an unknown target repository test suite. The draft states that target-repository
+tests were not run and records the analysis/case reference when available.
+
+If the Architect finds no safe correction, the request ends as **No change**. A remote
+write whose result cannot be proven is shown as **Outcome unknown** and is not retried as
+a new branch.
