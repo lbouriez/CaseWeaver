@@ -141,11 +141,9 @@ test.describe("operator console browser session", () => {
       page.getByRole("heading", { name: "Connector configuration drafts" }),
     ).toBeVisible();
     await page.getByLabel("Endpoint").fill("https://source.example.test");
-    await page
-      .getByRole("button", { name: "Create server-validated draft" })
-      .click();
+    await page.getByRole("button", { name: "Save inactive connector" }).click();
     await expect(
-      page.getByText(/Draft Fixture source is awaiting server validation/u),
+      page.getByText(/Connector Fixture source was saved inactive/u),
     ).toBeVisible();
     expect(fixture.drafts).toEqual([
       {

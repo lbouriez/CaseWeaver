@@ -561,72 +561,77 @@ describe("attachment derivative identity and processing", () => {
     ["empty access policy", { accessPolicyHash: "" }],
     ["oversized access policy", { accessPolicyHash: "a".repeat(1_025) }],
     ["cache key", { key: "tampered" }],
-  ])("rejects a supplied identity with mismatched %s before claiming or allocating output", async (_boundary, identityOverride) => {
-    const store = new TestBlobStore();
-    const identity = {
-      ...derivativeCacheIdentity(base),
-      ...identityOverride,
-    };
-    let claims = 0;
-    const repository: AttachmentRepository = {
-      claimDerivative: async () => {
-        claims += 1;
-        return { kind: "claimed", claimId: "claim-1" };
-      },
-      completeDerivative: async () => {},
-      failDerivative: async () => {},
-    };
+  ])(
+    "rejects a supplied identity with mismatched %s before claiming or allocating output",
+    async (_boundary, identityOverride) => {
+      const store = new TestBlobStore();
+      const identity = {
+        ...derivativeCacheIdentity(base),
+        ...identityOverride,
+      };
+      let claims = 0;
+      const repository: AttachmentRepository = {
+        claimDerivative: async () => {
+          claims += 1;
+          return { kind: "claimed", claimId: "claim-1" };
+        },
+        completeDerivative: async () => {},
+        failDerivative: async () => {},
+      };
 
-    await expect(
-      processAttachment({
-        attachment: {
-          workspaceId: "workspace-1",
-          sourceReference: reference,
-          blob: {
+      await expect(
+        processAttachment({
+          attachment: {
             workspaceId: "workspace-1",
-            storageBackendId: "test-memory",
-            key: "input",
+            sourceReference: reference,
+            blob: {
+              workspaceId: "workspace-1",
+              storageBackendId: "test-memory",
+              key: "input",
+            },
+            byteLength: 1,
+            sha256: "a".repeat(64),
+            detectedMimeType: "image/png",
           },
-          byteLength: 1,
-          sha256: "a".repeat(64),
-          detectedMimeType: "image/png",
-        },
-        accessPolicyHash: "access-a",
-        identity,
-        processing,
-        repository,
-        blobStore: store,
-        outputStore: store,
-        runtime: {
-          execute: async () => {
-            throw new Error("invalid cache identities must not execute");
+          accessPolicyHash: "access-a",
+          identity,
+          processing,
+          repository,
+          blobStore: store,
+          outputStore: store,
+          runtime: {
+            execute: async () => {
+              throw new Error("invalid cache identities must not execute");
+            },
+            cleanup: async () => {
+              throw new Error(
+                "invalid cache identities must not clean outputs",
+              );
+            },
           },
-          cleanup: async () => {
-            throw new Error("invalid cache identities must not clean outputs");
+          quotas: {
+            timeoutMs: 100,
+            maximumMemoryBytes: 100,
+            maximumInputBytes: 100,
+            maximumOutputBytes: 100,
+            maximumFiles: 1,
+            maximumExpandedBytes: 100,
+            maximumExtractedFileBytes: 100,
+            maximumArchiveDepth: 1,
+            maximumCompressionRatio: 10,
           },
-        },
-        quotas: {
-          timeoutMs: 100,
-          maximumMemoryBytes: 100,
-          maximumInputBytes: 100,
-          maximumOutputBytes: 100,
-          maximumFiles: 1,
-          maximumExpandedBytes: 100,
-          maximumExtractedFileBytes: 100,
-          maximumArchiveDepth: 1,
-          maximumCompressionRatio: 10,
-        },
-        vision,
-        signal: new AbortController().signal,
-      }),
-    ).rejects.toMatchObject({
-      code: "attachment.invalidCacheIdentity",
-      retryable: false,
-    });
+          vision,
+          signal: new AbortController().signal,
+        }),
+      ).rejects.toMatchObject({
+        code: "attachment.invalidCacheIdentity",
+        retryable: false,
+      });
 
-    expect(claims).toBe(0);
-    expect(store.createdOutputs).toEqual([]);
-  });
+      expect(claims).toBe(0);
+      expect(store.createdOutputs).toEqual([]);
+    },
+  );
 
   it.each([
     ["access policy", { accessPolicyHash: "access-b" }],
@@ -653,69 +658,72 @@ describe("attachment derivative identity and processing", () => {
       "vision binding",
       { vision: { ...vision, bindingVersionId: "binding.v2" } },
     ],
-  ] as const)("rejects stale current %s parameters before claiming or allocating output", async (_parameter, current) => {
-    const store = new TestBlobStore();
-    let claims = 0;
-    const repository: AttachmentRepository = {
-      claimDerivative: async () => {
-        claims += 1;
-        return { kind: "claimed", claimId: "claim-1" };
-      },
-      completeDerivative: async () => {},
-      failDerivative: async () => {},
-    };
+  ] as const)(
+    "rejects stale current %s parameters before claiming or allocating output",
+    async (_parameter, current) => {
+      const store = new TestBlobStore();
+      let claims = 0;
+      const repository: AttachmentRepository = {
+        claimDerivative: async () => {
+          claims += 1;
+          return { kind: "claimed", claimId: "claim-1" };
+        },
+        completeDerivative: async () => {},
+        failDerivative: async () => {},
+      };
 
-    await expect(
-      processAttachment({
-        attachment: {
-          workspaceId: "workspace-1",
-          sourceReference: reference,
-          blob: {
+      await expect(
+        processAttachment({
+          attachment: {
             workspaceId: "workspace-1",
-            storageBackendId: "test-memory",
-            key: "input",
+            sourceReference: reference,
+            blob: {
+              workspaceId: "workspace-1",
+              storageBackendId: "test-memory",
+              key: "input",
+            },
+            byteLength: 1,
+            sha256: "a".repeat(64),
+            detectedMimeType: "image/png",
           },
-          byteLength: 1,
-          sha256: "a".repeat(64),
-          detectedMimeType: "image/png",
-        },
-        accessPolicyHash: "access-a",
-        identity: derivativeCacheIdentity(base),
-        processing,
-        repository,
-        blobStore: store,
-        outputStore: store,
-        runtime: {
-          execute: async () => {
-            throw new Error("stale cache identities must not execute");
+          accessPolicyHash: "access-a",
+          identity: derivativeCacheIdentity(base),
+          processing,
+          repository,
+          blobStore: store,
+          outputStore: store,
+          runtime: {
+            execute: async () => {
+              throw new Error("stale cache identities must not execute");
+            },
+            cleanup: async () => {
+              throw new Error("stale cache identities must not clean outputs");
+            },
           },
-          cleanup: async () => {
-            throw new Error("stale cache identities must not clean outputs");
+          quotas: {
+            timeoutMs: 100,
+            maximumMemoryBytes: 100,
+            maximumInputBytes: 100,
+            maximumOutputBytes: 100,
+            maximumFiles: 1,
+            maximumExpandedBytes: 100,
+            maximumExtractedFileBytes: 100,
+            maximumArchiveDepth: 1,
+            maximumCompressionRatio: 10,
           },
-        },
-        quotas: {
-          timeoutMs: 100,
-          maximumMemoryBytes: 100,
-          maximumInputBytes: 100,
-          maximumOutputBytes: 100,
-          maximumFiles: 1,
-          maximumExpandedBytes: 100,
-          maximumExtractedFileBytes: 100,
-          maximumArchiveDepth: 1,
-          maximumCompressionRatio: 10,
-        },
-        vision,
-        signal: new AbortController().signal,
-        ...current,
-      }),
-    ).rejects.toMatchObject({
-      code: "attachment.invalidCacheIdentity",
-      retryable: false,
-    });
+          vision,
+          signal: new AbortController().signal,
+          ...current,
+        }),
+      ).rejects.toMatchObject({
+        code: "attachment.invalidCacheIdentity",
+        retryable: false,
+      });
 
-    expect(claims).toBe(0);
-    expect(store.createdOutputs).toEqual([]);
-  });
+      expect(claims).toBe(0);
+      expect(store.createdOutputs).toEqual([]);
+    },
+  );
 });
 
 describe("safe text and archive boundaries", () => {

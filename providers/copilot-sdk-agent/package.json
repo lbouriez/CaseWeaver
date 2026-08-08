@@ -17,12 +17,12 @@
   "dependencies": {
     "@caseweaver/administration": "workspace:*",
     "@caseweaver/ai-sdk": "workspace:*",
-    "@github/copilot-sdk": "1.0.6",
-    "zod": "^4.0.0"
+    "@github/copilot-sdk": "1.0.9",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@types/node": "22.19.7",
-    "typescript": "5.9.3",
-    "vitest": "4.0.18"
+    "@types/node": "26.1.2",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
   }
 }

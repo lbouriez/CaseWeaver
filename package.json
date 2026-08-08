@@ -28,12 +28,12 @@
     "db:test:reset": "pnpm db:test:down && pnpm db:test:up"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.4.8",
-    "@playwright/test": "1.56.1",
-    "@types/node": "22.19.7",
-    "dependency-cruiser": "17.3.6",
-    "tsx": "4.21.0",
-    "typescript": "5.9.3",
-    "vitest": "4.0.18"
+    "@biomejs/biome": "2.5.7",
+    "@playwright/test": "1.62.1",
+    "@types/node": "26.1.2",
+    "dependency-cruiser": "18.1.1",
+    "tsx": "4.23.11",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
   }
 }

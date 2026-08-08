@@ -73,14 +73,17 @@ describe("parseApiConfig", () => {
     ["PORT", "0"],
     ["DATABASE_READINESS_TIMEOUT_MS", undefined],
     ["DATABASE_READINESS_TIMEOUT_MS", "0"],
-  ])("rejects invalid required %s without exposing validation details", (key, value) => {
-    expect(() => parseApiConfig({ ...validEnvironment, [key]: value })).toThrow(
-      ApiConfigurationError,
-    );
-    expect(() => parseApiConfig({ ...validEnvironment, [key]: value })).toThrow(
-      "API configuration is invalid.",
-    );
-  });
+  ])(
+    "rejects invalid required %s without exposing validation details",
+    (key, value) => {
+      expect(() =>
+        parseApiConfig({ ...validEnvironment, [key]: value }),
+      ).toThrow(ApiConfigurationError);
+      expect(() =>
+        parseApiConfig({ ...validEnvironment, [key]: value }),
+      ).toThrow("API configuration is invalid.");
+    },
+  );
 
   it("requires complete HTTPS OIDC bootstrap configuration", () => {
     expect(() =>

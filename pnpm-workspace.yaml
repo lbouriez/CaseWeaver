@@ -8,4 +8,5 @@ packages:
 allowBuilds:
   "@prisma/engines": true
   esbuild: true
+  koffi: false
   prisma: true
