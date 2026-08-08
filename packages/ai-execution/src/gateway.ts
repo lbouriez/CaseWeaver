@@ -30,6 +30,7 @@ import {
   type RepositoryAgentMetering,
   type RepositoryAgentRequest,
   type RepositoryAgentTurn,
+  type RepositoryChangeAgentRequest,
   type RerankerRequest,
   type SecretResolver,
   type VisionRequest,
@@ -101,12 +102,19 @@ export interface MeteredRepositoryAgentRequest extends MeteredRequestBase {
   readonly request: RepositoryAgentRequest;
 }
 
+export interface MeteredRepositoryChangeAgentRequest
+  extends MeteredRequestBase {
+  readonly kind: "repositoryChange";
+  readonly request: RepositoryChangeAgentRequest;
+}
+
 export type MeteredAiRequest =
   | MeteredEmbeddingRequest
   | MeteredVisionRequest
   | MeteredGenerationRequest
   | MeteredRerankerRequest
-  | MeteredRepositoryAgentRequest;
+  | MeteredRepositoryAgentRequest
+  | MeteredRepositoryChangeAgentRequest;
 
 export interface AiExecutionContext {
   readonly workspaceId: string;
@@ -223,6 +231,9 @@ function expectedRole(kind: AiOperationKind, role: AiRole): boolean {
       return role === "repositoryAgent";
     case "repositoryAgentTurn":
       return role === "repositoryAgent";
+    case "repositoryChange":
+    case "repositoryChangeTurn":
+      return role === "repositoryAgent";
   }
 }
 
@@ -241,7 +252,10 @@ function requestedCapabilities(
   if (request.kind === "vision") {
     return [...(request.requiredCapabilities ?? []), "vision"];
   }
-  if (request.kind === "repositoryAgent") {
+  if (
+    request.kind === "repositoryAgent" ||
+    request.kind === "repositoryChange"
+  ) {
     return [...(request.requiredCapabilities ?? []), "repositoryAgent"];
   }
   return request.requiredCapabilities ?? [];
@@ -294,7 +308,7 @@ function isPositiveInteger(value: unknown): value is number {
 }
 
 function repositoryAgentTokenBounds(
-  request: RepositoryAgentRequest,
+  request: RepositoryAgentRequest | RepositoryChangeAgentRequest,
   hardBudget: boolean,
 ): RepositoryAgentTokenBounds {
   if (
@@ -663,7 +677,8 @@ export class DefaultAiExecutionGateway
       });
       const finishedAt = this.dependencies.clock.now();
       const accounting =
-        request.kind === "repositoryAgent"
+        request.kind === "repositoryAgent" ||
+        request.kind === "repositoryChange"
           ? repositoryAgentAccounting(
               providerResult,
               requireRepositoryAgentTokenBounds(repositoryBounds),
@@ -696,7 +711,10 @@ export class DefaultAiExecutionGateway
                   parentOperationId: operationId,
                   workspaceId: context.workspaceId,
                   role: request.role,
-                  operationKind: "repositoryAgentTurn",
+                  operationKind:
+                    request.kind === "repositoryAgent"
+                      ? "repositoryAgentTurn"
+                      : "repositoryChangeTurn",
                   bindingVersionId: binding.bindingVersionId,
                   providerInstanceVersionId: binding.providerInstanceVersionId,
                   catalogSnapshotId: binding.catalogSnapshotId,
@@ -784,7 +802,7 @@ export class DefaultAiExecutionGateway
       );
     }
     const repositoryBounds =
-      request.kind === "repositoryAgent"
+      request.kind === "repositoryAgent" || request.kind === "repositoryChange"
         ? repositoryAgentTokenBounds(request.request, request.budget.hard)
         : undefined;
     const startedAt = this.dependencies.clock.now();
@@ -805,7 +823,7 @@ export class DefaultAiExecutionGateway
       request.maximumInputTokens ??
       binding.maximumInputTokens;
     const maximumOutputTokens =
-      request.kind === "repositoryAgent"
+      request.kind === "repositoryAgent" || request.kind === "repositoryChange"
         ? repositoryBounds?.maximumOutputTokens
         : request.kind === "embedding" || request.kind === "reranker"
           ? 0
@@ -892,6 +910,11 @@ export class DefaultAiExecutionGateway
         });
       case "repositoryAgent":
         return this.dependencies.providerDispatcher.runRepositoryAgent({
+          ...base,
+          request: request.request,
+        });
+      case "repositoryChange":
+        return this.dependencies.providerDispatcher.runRepositoryChange({
           ...base,
           request: request.request,
         });

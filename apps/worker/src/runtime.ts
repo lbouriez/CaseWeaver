@@ -22,6 +22,8 @@ export type PublicationExecuteCommand = EnvelopeFor<"publication.execute.v1">;
 export type PublicationReconcileCommand =
   EnvelopeFor<"publication.reconcile.v1">;
 export type AnalysisCompletedEvent = EnvelopeFor<"analysis.completed.v1">;
+export type RepositoryChangeExecuteCommand =
+  EnvelopeFor<"repository-change.execute.v1">;
 export type RetentionReapCommand = EnvelopeFor<"retention.reap.v1">;
 export type RetentionPurgeCommand = EnvelopeFor<"retention.purge.v1">;
 export type DiagnosticsExportGenerateCommand =
@@ -43,6 +45,11 @@ export interface PublicationWorkflowCommandHandlers {
   readonly analysisCompleted: WorkerCommandHandler<AnalysisCompletedEvent>;
 }
 
+export interface RepositoryChangeWorkflowCommandHandlers {
+  readonly analysisCompleted: WorkerCommandHandler<AnalysisCompletedEvent>;
+  readonly execute: WorkerCommandHandler<RepositoryChangeExecuteCommand>;
+}
+
 export interface OperationsCommandHandlers {
   readonly retention: {
     readonly reap: WorkerCommandHandler<RetentionReapCommand>;
@@ -57,6 +64,7 @@ export interface DiagnosticsCommandHandlers {
 export interface WorkerCommandHandlers extends KnowledgeCommandHandlers {
   readonly analysis: AnalysisCommandHandlers;
   readonly publication?: PublicationWorkflowCommandHandlers;
+  readonly repositoryChanges?: RepositoryChangeWorkflowCommandHandlers;
   readonly operations?: OperationsCommandHandlers;
   readonly diagnostics?: DiagnosticsCommandHandlers;
 }
@@ -182,10 +190,28 @@ export function createWorkerCommandDispatcher(
           );
           return;
         case "analysis.completed.v1":
-          if (handlers.publication === undefined) {
+          if (
+            handlers.publication === undefined &&
+            handlers.repositoryChanges === undefined
+          ) {
             throw new UnsupportedWorkerEnvelopeError(envelope.type);
           }
-          await handlers.publication.analysisCompleted.handle(envelope, signal);
+          // Each fan-out path persists its own idempotency record. Retrying a
+          // later path therefore cannot duplicate publication or a draft PR.
+          await handlers.publication?.analysisCompleted.handle(
+            envelope,
+            signal,
+          );
+          await handlers.repositoryChanges?.analysisCompleted.handle(
+            envelope,
+            signal,
+          );
+          return;
+        case "repository-change.execute.v1":
+          if (handlers.repositoryChanges === undefined) {
+            throw new UnsupportedWorkerEnvelopeError(envelope.type);
+          }
+          await handlers.repositoryChanges.execute.handle(envelope, signal);
           return;
         case "retention.reap.v1":
           if (handlers.operations === undefined) {

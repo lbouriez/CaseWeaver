@@ -121,6 +121,8 @@ export interface CodeRepositoryConfigurationProjection {
   readonly allowedRefKinds: readonly CodeRepositoryAllowedRefKind[];
   /** Private settings retain the value; projection keeps it for validation only. */
   readonly configuredCheckoutRef: CodeRepositoryCheckoutRef;
+  /** Immutable opt-in; only a remote branch with a registered write credential may enable it. */
+  readonly automaticDraftPullRequest?: boolean;
 }
 
 /**
@@ -252,6 +254,7 @@ export interface CodeRepositoryConfigurationSummary {
   readonly mode: CodeRepositoryMode;
   readonly allowedRefKinds: readonly CodeRepositoryAllowedRefKind[];
   readonly hasCheckoutSecretReference: boolean;
+  readonly automaticDraftPullRequest: boolean;
 }
 
 export interface RepositoryExecutionPolicyConfigurationSummary {
@@ -1167,10 +1170,28 @@ function assertRepository(
 ): void {
   assertIdentifier(repository.repositoryId, "Repository identifier");
   if (
+    repository.automaticDraftPullRequest !== undefined &&
+    typeof repository.automaticDraftPullRequest !== "boolean"
+  ) {
+    throw new RangeError(
+      "Repository automatic draft-pull-request setting is invalid.",
+    );
+  }
+  if (
     repository.mode !== "deploymentMounted" &&
     repository.mode !== "remoteHttps"
   ) {
     throw new RangeError("Repository mode is invalid.");
+  }
+  if (
+    repository.automaticDraftPullRequest === true &&
+    (repository.mode !== "remoteHttps" ||
+      repository.configuredCheckoutRef.kind !== "branch" ||
+      secretReferenceIds.length !== 1)
+  ) {
+    throw new RangeError(
+      "Repository automatic draft-pull-request setting is invalid.",
+    );
   }
   assertDistinctValues(
     repository.allowedRefKinds,

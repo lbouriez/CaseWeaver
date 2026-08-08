@@ -100,6 +100,7 @@ export class PostgresRepositoryAnalysisConfigurationStore
         mode: true,
         allowedRefKinds: true,
         checkoutCredentialRequired: true,
+        automaticDraftPullRequest: true,
       },
     });
     const mode = input.repository.mode;
@@ -112,7 +113,9 @@ export class PostgresRepositoryAnalysisConfigurationStore
         existing.id !== input.configurationVersionId ||
         existing.mode !== mode ||
         !sameStringArray(existing.allowedRefKinds, allowedRefKinds) ||
-        existing.checkoutCredentialRequired !== checkoutCredentialRequired
+        existing.checkoutCredentialRequired !== checkoutCredentialRequired ||
+        existing.automaticDraftPullRequest !==
+          (input.repository.automaticDraftPullRequest ?? false)
       ) {
         throw new AdministrationValidationError();
       }
@@ -126,6 +129,8 @@ export class PostgresRepositoryAnalysisConfigurationStore
         mode,
         allowedRefKinds,
         checkoutCredentialRequired,
+        automaticDraftPullRequest:
+          input.repository.automaticDraftPullRequest ?? false,
       },
     });
   }

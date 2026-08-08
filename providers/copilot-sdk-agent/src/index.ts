@@ -17,6 +17,8 @@ import {
   type RepositoryAgentSandboxLimits,
   type RepositoryAgentToolGateway,
   type RepositoryAgentUnverifiedResult,
+  type RepositoryChangeAgentRequest,
+  type RepositoryChangeAgentResult,
   type RerankerRequest,
   type RerankerResult,
   type VisionRequest,
@@ -51,10 +53,46 @@ export interface CopilotSdkByokClient {
     readonly tools: RepositoryAgentToolGateway;
     readonly signal: AbortSignal;
   }): Promise<CopilotSdkByokResult>;
+  runRepositoryChange(input: {
+    readonly provider: "openai";
+    readonly baseUrl: string;
+    readonly apiKey: string;
+    readonly model: string;
+    readonly wireApi: "completions" | "responses";
+    readonly phase: "architect" | "author";
+    readonly instruction: string;
+    readonly maximumTurns: number;
+    readonly maximumInputTokensPerTurn: number;
+    readonly maximumOutputTokensPerTurn: number;
+    readonly maximumAggregateInputTokens: number;
+    readonly maximumAggregateOutputTokens: number;
+    readonly maximumOutputBytes: number;
+    readonly tools: RepositoryAgentToolGateway;
+    readonly signal: AbortSignal;
+  }): Promise<CopilotSdkRepositoryChangeResult>;
 }
 
 export interface CopilotSdkByokResult extends RepositoryAgentUnverifiedResult {
   /** Required: hard budget execution cannot price an unmetered agent run. */
+  readonly usage: NormalizedUsage;
+  readonly metering: Extract<
+    import("@caseweaver/ai-sdk").RepositoryAgentMetering,
+    { readonly mode: "observableTurns" }
+  >;
+  readonly requestId?: string;
+  readonly effectiveModel?: string;
+}
+
+export interface CopilotSdkRepositoryChangeResult {
+  readonly summary: string;
+  readonly documentationImpact: string;
+  readonly shouldChange: boolean;
+  readonly title?: string;
+  readonly description?: string;
+  readonly files?: readonly {
+    readonly path: string;
+    readonly content: string;
+  }[];
   readonly usage: NormalizedUsage;
   readonly metering: Extract<
     import("@caseweaver/ai-sdk").RepositoryAgentMetering,
@@ -289,6 +327,155 @@ export class CopilotSdkAgentProvider implements AiProviderDispatcher {
     invocation: ProviderInvocation<RepositoryAgentRequest>,
   ): Promise<ProviderResult<RepositoryAgentResult>> {
     return this.runPinnedRepositoryAgent(invocation);
+  }
+
+  public async runRepositoryChange(
+    invocation: ProviderInvocation<RepositoryChangeAgentRequest>,
+  ): Promise<ProviderResult<RepositoryChangeAgentResult>> {
+    const runtimePin = invocation.request.runtimePin;
+    assertRuntimePin(runtimePin);
+    assertBinding(invocation.binding);
+    if (
+      invocation.request.phase !== "architect" &&
+      invocation.request.phase !== "author"
+    ) {
+      throw new AiConfigurationError("Repository-change phase is invalid.");
+    }
+    assertPositiveInteger(invocation.request.maximumTurns, "maximumTurns");
+    assertPositiveInteger(
+      invocation.request.maximumInputTokensPerTurn,
+      "maximumInputTokensPerTurn",
+    );
+    assertPositiveInteger(
+      invocation.request.maximumOutputTokensPerTurn,
+      "maximumOutputTokensPerTurn",
+    );
+    if (invocation.request.maximumTurns > this.options.limits.maximumTurns) {
+      throw new AiConfigurationError(
+        "Repository-change request exceeds its configured turn limit.",
+      );
+    }
+    const maximumAggregateInputTokens = aggregateTokenLimit(
+      invocation.request.maximumInputTokensPerTurn,
+      invocation.request.maximumTurns,
+      "Repository-change input",
+    );
+    const maximumAggregateOutputTokens = aggregateTokenLimit(
+      invocation.request.maximumOutputTokensPerTurn,
+      invocation.request.maximumTurns,
+      "Repository-change output",
+    );
+    if (
+      maximumAggregateInputTokens >
+        this.options.limits.maximumAggregateInputTokens ||
+      maximumAggregateOutputTokens >
+        this.options.limits.maximumAggregateOutputTokens ||
+      invocation.secret.value.length === 0
+    ) {
+      throw new AiConfigurationError(
+        "Repository-change execution is unavailable.",
+      );
+    }
+    const resolvedRuntime = await this.options.runtimeResolver.resolve(
+      runtimePin,
+      invocation.signal,
+    );
+    assertResolvedRuntime(runtimePin, resolvedRuntime);
+    const sandboxLimits = constrainedSandboxLimits({
+      resolved: resolvedRuntime.limits,
+      configured: this.options.limits,
+    });
+    const started = this.now();
+    try {
+      let clientResult: CopilotSdkRepositoryChangeResult | undefined;
+      const checked = await resolvedRuntime.executor.run(
+        {
+          runtime: resolvedRuntime.runtime,
+          instruction: invocation.request.instruction,
+          allowedTools: resolvedRuntime.allowedTools,
+          limits: sandboxLimits,
+          signal: invocation.signal,
+        },
+        async (context) => {
+          clientResult = await this.options.client.runRepositoryChange({
+            provider: "openai",
+            baseUrl: safeBaseUrl(invocation.binding.endpoint),
+            apiKey: invocation.secret.value,
+            model: invocation.binding.canonicalModel,
+            wireApi: wireApi(invocation.binding),
+            phase: invocation.request.phase,
+            instruction: invocation.request.instruction,
+            maximumTurns: invocation.request.maximumTurns,
+            maximumInputTokensPerTurn:
+              invocation.request.maximumInputTokensPerTurn,
+            maximumOutputTokensPerTurn:
+              invocation.request.maximumOutputTokensPerTurn,
+            maximumAggregateInputTokens,
+            maximumAggregateOutputTokens,
+            maximumOutputBytes: sandboxLimits.maximumOutputBytes,
+            tools: context.tools,
+            signal: context.signal,
+          });
+          // The sandbox attests the checkout/tool protocol. The change proposal
+          // itself is intentionally retained only in the worker flow, not evidence.
+          return { summary: clientResult.summary, findings: [] };
+        },
+      );
+      if (clientResult === undefined) {
+        throw new AiProviderError("Copilot SDK did not return a result.", {
+          provider: "copilot-sdk-agent",
+        });
+      }
+      const usage = assertUsage(
+        clientResult.usage,
+        maximumAggregateInputTokens,
+        maximumAggregateOutputTokens,
+      );
+      return {
+        value: Object.freeze({
+          summary: clientResult.summary,
+          documentationImpact: clientResult.documentationImpact,
+          shouldChange: clientResult.shouldChange,
+          ...(clientResult.title === undefined
+            ? {}
+            : { title: clientResult.title }),
+          ...(clientResult.description === undefined
+            ? {}
+            : { description: clientResult.description }),
+          ...(clientResult.files === undefined
+            ? {}
+            : { files: clientResult.files }),
+          metering: clientResult.metering,
+        }),
+        usage,
+        metadata: {
+          ...(clientResult.requestId === undefined
+            ? {}
+            : { providerRequestId: clientResult.requestId }),
+          ...(clientResult.effectiveModel === undefined
+            ? {}
+            : { effectiveModel: clientResult.effectiveModel }),
+          latencyMs: Math.max(0, this.now() - started),
+          retryCount: 0,
+          rawRedacted: {
+            checkedRepositoryEvidenceCount: checked.evidence.length,
+          },
+        },
+      };
+    } catch (cause) {
+      if (invocation.signal.aborted) throw cause;
+      if (
+        cause instanceof AiConfigurationError ||
+        cause instanceof AiProviderError
+      ) {
+        throw cause;
+      }
+      throw new AiProviderError(
+        "Copilot SDK BYOK repository-change execution failed.",
+        { provider: "copilot-sdk-agent", retryable: true },
+        cause,
+      );
+    }
   }
 
   public embed(

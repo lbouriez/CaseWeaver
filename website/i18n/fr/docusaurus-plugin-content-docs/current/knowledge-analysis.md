@@ -34,3 +34,23 @@ pièce jointe. Ce n'est pas le profil analyse. L'intake fige la recette afin qu'
 conserve commit, preuves, prompt/contexte et bindings. Les lectures sensibles sont
 autorisées, isolées et auditées avant ouverture. Sans formulaire, pas de fallback JSON
 ni appel fournisseur/dépôt direct dans Admin.
+
+## Pull requests brouillons automatiques
+
+Pour un dépôt HTTPS Azure DevOps, un administrateur peut activer **Créer automatiquement
+une pull request brouillon Azure DevOps** seulement si le checkout configuré est une
+branche et si un accès dépôt enregistré est sélectionné. Ce choix fait partie de la
+version immuable du dépôt ; le secret reste utilisé uniquement côté serveur pour le
+checkout et les opérations Azure DevOps.
+
+Lorsqu'une analyse terminée a une confiance élevée et des constats dépôt vérifiés,
+CaseWeaver crée une seule demande durable. Il actualise la branche cible configurée,
+exécute une phase Architecte avant une phase Auteur, puis ouvre une PR **brouillon**
+déterministe seulement pour une correction texte courte et étayée. Les développeurs
+révisent et décident de la suite. CaseWeaver ne complète jamais la PR, ne modifie pas les
+politiques de branche, ne crée pas de work item et n'exécute pas une suite de tests dépôt
+inconnue. Le brouillon indique que les tests du dépôt cible n'ont pas été exécutés.
+
+Si l'Architecte ne trouve pas de correction sûre, la demande se termine par **Aucune
+modification**. Un résultat d'écriture distant non prouvable devient **Résultat inconnu**
+et n'est pas relancé sur une nouvelle branche.

@@ -8,6 +8,8 @@ import type {
   ProviderResult,
   RepositoryAgentRequest,
   RepositoryAgentResult,
+  RepositoryChangeAgentRequest,
+  RepositoryChangeAgentResult,
   RerankerRequest,
   RerankerResult,
   VisionRequest,
@@ -26,6 +28,10 @@ export interface DeterministicProviderHandlers {
   readonly runRepositoryAgent?: Handler<
     RepositoryAgentRequest,
     RepositoryAgentResult
+  >;
+  readonly runRepositoryChange?: Handler<
+    RepositoryChangeAgentRequest,
+    RepositoryChangeAgentResult
   >;
 }
 
@@ -72,6 +78,16 @@ export class DeterministicAiProviderDispatcher implements AiProviderDispatcher {
       "repositoryAgent",
       invocation,
       this.handlers.runRepositoryAgent,
+    );
+  }
+
+  public runRepositoryChange(
+    invocation: ProviderInvocation<RepositoryChangeAgentRequest>,
+  ): Promise<ProviderResult<RepositoryChangeAgentResult>> {
+    return this.call(
+      "repositoryChange",
+      invocation,
+      this.handlers.runRepositoryChange,
     );
   }
 

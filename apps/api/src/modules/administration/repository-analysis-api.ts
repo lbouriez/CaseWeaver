@@ -148,6 +148,7 @@ const codeRepositoryDraft = z
     location: repositoryLocation,
     allowedRefKinds,
     checkoutRef,
+    automaticDraftPullRequest: z.boolean().default(false),
   })
   .strict()
   .superRefine((value, context) => {
@@ -156,6 +157,19 @@ const codeRepositoryDraft = z
         code: "custom",
         message: "The configured checkout reference kind must be allowed.",
         path: ["checkoutRef"],
+      });
+    }
+    if (
+      value.automaticDraftPullRequest &&
+      (value.location.mode !== "remoteHttps" ||
+        value.checkoutRef.kind !== "branch" ||
+        value.location.checkoutSecretReferenceId === undefined)
+    ) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "Automatic draft pull requests require a remote branch and registered repository write access.",
+        path: ["automaticDraftPullRequest"],
       });
     }
   });
@@ -835,6 +849,7 @@ function codeRepositoryCommand(
     mode: command.location.mode,
     allowedRefKinds: Object.freeze([...command.allowedRefKinds]),
     configuredCheckoutRef: Object.freeze({ ...command.checkoutRef }),
+    automaticDraftPullRequest: command.automaticDraftPullRequest,
   });
   return Object.freeze({
     displayName: command.displayName,
@@ -844,12 +859,24 @@ function codeRepositoryCommand(
           ? {
               mode: "remoteHttps",
               remoteUrl: command.location.remoteUrl,
+              ...(command.location.checkoutSecretReferenceId === undefined
+                ? {}
+                : {
+                    checkoutSecretReferenceId:
+                      command.location.checkoutSecretReferenceId,
+                  }),
               checkoutRef: command.checkoutRef,
+              automation: {
+                automaticDraftPullRequest: command.automaticDraftPullRequest,
+              },
             }
           : {
               mode: "deploymentMounted",
               mountAlias: command.location.mountAlias,
               checkoutRef: command.checkoutRef,
+              automation: {
+                automaticDraftPullRequest: command.automaticDraftPullRequest,
+              },
             },
       ),
       repositoryAnalysisProjection: projection,

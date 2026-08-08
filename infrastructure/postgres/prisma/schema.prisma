@@ -57,6 +57,7 @@ model Workspace {
   analysisJobs                              AnalysisJob[]
   analysisAttempts                          AnalysisAttempt[]
   analysisResults                           AnalysisResult[]
+  repositoryChangeRequests                  RepositoryChangeRequest[]
   analysisExecutionInputs                   AnalysisExecutionInput[]
   analysisResultProtectedContents           AnalysisResultProtectedContent[]
   analysisTriggerRequestAnalyses            AnalysisTriggerRequestAnalysis[]
@@ -926,6 +927,7 @@ model CodeRepositoryVersion {
   mode                       String
   allowedRefKinds            Json      @map("allowed_ref_kinds")
   checkoutCredentialRequired Boolean   @map("checkout_credential_required")
+  automaticDraftPullRequest Boolean   @default(false) @map("automatic_draft_pull_request")
   createdAt                  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   workspace                  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
 
@@ -1284,10 +1286,43 @@ model AnalysisResult {
   job           AnalysisJob @relation(fields: [workspaceId, analysisJobId], references: [workspaceId, id], onDelete: Restrict)
   evidence      Evidence[]
   protectedContent AnalysisResultProtectedContent?
+  repositoryChangeRequest RepositoryChangeRequest?
 
   @@unique([workspaceId, analysisJobId])
   @@unique([workspaceId, id])
   @@map("analysis_results")
+}
+
+/**
+ * One review-only code-change request per immutable analysis result. The
+ * source, credential locator, generated source text, and model transcript are
+ * deliberately absent; they remain in runtime-local boundaries.
+ */
+model RepositoryChangeRequest {
+  id                  String   @id
+  workspaceId         String   @map("workspace_id")
+  analysisResultId    String   @map("analysis_result_id")
+  runtimeVersionId    String   @map("runtime_version_id")
+  repositoryId        String   @map("repository_id")
+  analyzedCommit      String   @map("analyzed_commit")
+  targetBranch        String   @map("target_branch")
+  state               String
+  leaseToken          String?  @map("lease_token")
+  leaseExpiresAt      DateTime? @map("lease_expires_at") @db.Timestamptz(6)
+  architectSummary    String?  @map("architect_summary")
+  documentationImpact String?  @map("documentation_impact")
+  targetCommit        String?  @map("target_commit")
+  pullRequestUrl      String?  @map("pull_request_url")
+  errorCode           String?  @map("error_code")
+  createdAt           DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace           Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  analysisResult      AnalysisResult @relation(fields: [workspaceId, analysisResultId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@unique([workspaceId, analysisResultId])
+  @@unique([workspaceId, id])
+  @@index([workspaceId, state, leaseExpiresAt, createdAt])
+  @@map("repository_change_requests")
 }
 
 /** Encrypted governed prompt/context/output content, never a generic read model. */

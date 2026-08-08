@@ -859,6 +859,10 @@ function boundMeteredTestRequest(
         request: request.request,
         ...common,
       });
+    case "repositoryChange":
+      // Repository changes are durable worker workflows, never an ad-hoc
+      // administrator capability test.
+      throw new AdministrationValidationError();
   }
 }
 

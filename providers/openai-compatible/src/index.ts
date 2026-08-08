@@ -13,6 +13,8 @@ import {
   type ProviderResult,
   type RepositoryAgentRequest,
   type RepositoryAgentResult,
+  type RepositoryChangeAgentRequest,
+  type RepositoryChangeAgentResult,
   type RerankerRequest,
   type RerankerResult,
   type VisionRequest,
@@ -346,6 +348,14 @@ export class OpenAiCompatibleProvider implements AiProviderDispatcher {
   ): Promise<ProviderResult<RepositoryAgentResult>> {
     throw new AiConfigurationError(
       "OpenAI-compatible repository agents are unavailable: this adapter has no standardized attested immutable-runtime pin and read-only tool-loop protocol.",
+    );
+  }
+
+  public async runRepositoryChange(
+    _invocation: ProviderInvocation<RepositoryChangeAgentRequest>,
+  ): Promise<ProviderResult<RepositoryChangeAgentResult>> {
+    throw new AiConfigurationError(
+      "OpenAI-compatible repository change agents are unavailable: this adapter has no standardized attested immutable-runtime pin and read-only tool-loop protocol.",
     );
   }
 

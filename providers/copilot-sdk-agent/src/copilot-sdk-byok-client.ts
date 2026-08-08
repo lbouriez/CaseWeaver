@@ -18,7 +18,11 @@ import {
 } from "@github/copilot-sdk";
 import { z } from "zod";
 
-import type { CopilotSdkByokClient, CopilotSdkByokResult } from "./index.js";
+import type {
+  CopilotSdkByokClient,
+  CopilotSdkByokResult,
+  CopilotSdkRepositoryChangeResult,
+} from "./index.js";
 
 const toolNames = ["listFiles", "readFile", "searchFiles"] as const;
 const modelOutput = z
@@ -48,6 +52,56 @@ const modelOutput = z
       .max(100),
   })
   .strict();
+const changePlanOutput = z
+  .object({
+    summary: z.string().trim().min(1).max(16_000),
+    documentationImpact: z.string().trim().max(16_000),
+    shouldChange: z.boolean(),
+  })
+  .strict();
+const changeAuthorOutput = changePlanOutput
+  .extend({
+    title: z.string().trim().min(1).max(240).optional(),
+    description: z.string().trim().max(32_000).optional(),
+    files: z
+      .array(
+        z
+          .object({
+            path: z.string().min(1).max(1_024),
+            content: z.string().max(512 * 1_024),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(25)
+      .optional(),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const hasAuthoringOutput =
+      value.title !== undefined &&
+      value.description !== undefined &&
+      value.files !== undefined;
+    if (value.shouldChange && !hasAuthoringOutput) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "A corrective author result must include a title, description, and files.",
+      });
+    }
+    if (
+      !value.shouldChange &&
+      (value.title !== undefined ||
+        value.description !== undefined ||
+        value.files !== undefined)
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          "A no-change author result must not include a title, description, or files.",
+      });
+    }
+  });
 const listFilesInput = z
   .object({
     prefix: z.string().min(1).max(1_024).optional(),
@@ -249,6 +303,23 @@ function systemInstruction(): string {
   ].join("\n");
 }
 
+function repositoryChangeSystemInstruction(
+  phase: "architect" | "author",
+): string {
+  const output =
+    phase === "architect"
+      ? 'Schema: {"summary":"safe implementation plan","documentationImpact":"documentation impact or empty","shouldChange":true}.'
+      : 'Schema: {"summary":"safe implementation summary","documentationImpact":"documentation impact or empty","shouldChange":true,"title":"concise PR title","description":"reviewer context; say target-repository tests were not run","files":[{"path":"relative/file","content":"complete replacement UTF-8 file"}]}. Return shouldChange false with no title, description, or files when no safe correction exists.';
+  return [
+    "You are a repository change agent running in an isolated multi-tenant service.",
+    "Use only the supplied read-only repository tools. Do not ask for, access, infer, or disclose credentials, configuration values, environment data, URLs, or source excerpts outside the required private replacement-file content.",
+    "Do not use shell, filesystem, network, Git, MCP, skills, subagents, plugins, or write tools.",
+    "Do not run tests. Propose only a small, directly evidenced correction; do not modify binary files, generated files, lockfiles, CI, or dependencies.",
+    "Return exactly one JSON object.",
+    output,
+  ].join("\n");
+}
+
 function parseModelOutput(
   value: string,
   maximumOutputBytes: number,
@@ -284,6 +355,72 @@ function parseModelOutput(
         }),
       ),
     ),
+  });
+}
+
+function parseRepositoryChangeOutput(
+  value: string,
+  maximumOutputBytes: number,
+  phase: "architect" | "author",
+): Omit<
+  CopilotSdkRepositoryChangeResult,
+  "usage" | "metering" | "requestId" | "effectiveModel"
+> {
+  if (new TextEncoder().encode(value).byteLength > maximumOutputBytes) {
+    throw new AiProviderError("Copilot SDK returned an oversized result.", {
+      provider: "copilot-sdk-agent",
+    });
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new AiProviderError("Copilot SDK returned an invalid result.", {
+      provider: "copilot-sdk-agent",
+    });
+  }
+  if (phase === "architect") {
+    const output = changePlanOutput.safeParse(parsed);
+    if (!output.success) {
+      throw new AiProviderError("Copilot SDK returned an invalid result.", {
+        provider: "copilot-sdk-agent",
+      });
+    }
+    return Object.freeze({
+      summary: output.data.summary,
+      documentationImpact: output.data.documentationImpact,
+      shouldChange: output.data.shouldChange,
+    });
+  }
+  const output = changeAuthorOutput.safeParse(parsed);
+  if (!output.success) {
+    throw new AiProviderError("Copilot SDK returned an invalid result.", {
+      provider: "copilot-sdk-agent",
+    });
+  }
+  if (!output.data.shouldChange) {
+    return Object.freeze({
+      summary: output.data.summary,
+      documentationImpact: output.data.documentationImpact,
+      shouldChange: false,
+    });
+  }
+  const { title, description, files } = output.data;
+  if (title === undefined || description === undefined || files === undefined) {
+    throw new AiProviderError(
+      "Copilot SDK returned an invalid author result.",
+      {
+        provider: "copilot-sdk-agent",
+      },
+    );
+  }
+  return Object.freeze({
+    summary: output.data.summary,
+    documentationImpact: output.data.documentationImpact,
+    shouldChange: true,
+    title,
+    description,
+    files: Object.freeze(files.map((file) => Object.freeze({ ...file }))),
   });
 }
 
@@ -470,6 +607,114 @@ export class CopilotSdkByokRuntimeClient implements CopilotSdkByokClient {
         effectiveModel = result.data.model;
         return Object.freeze({
           ...parseModelOutput(result.data.content, input.maximumOutputBytes),
+          metering: metering(turns),
+          usage: aggregateUsage(turns),
+          ...(requestId === undefined ? {} : { requestId }),
+          ...(effectiveModel === undefined ? {} : { effectiveModel }),
+        });
+      } finally {
+        unsubscribeUsage();
+        input.signal.removeEventListener("abort", abort);
+      }
+    } finally {
+      try {
+        await session?.disconnect();
+      } catch {
+        await client?.forceStop().catch(() => undefined);
+      }
+      try {
+        await client?.stop();
+      } catch {
+        await client?.forceStop().catch(() => undefined);
+      }
+      await this.removeTemporaryDirectory(temporaryDirectory).catch(
+        () => undefined,
+      );
+    }
+  }
+
+  public async runRepositoryChange(
+    input: Parameters<CopilotSdkByokClient["runRepositoryChange"]>[0],
+  ): Promise<CopilotSdkRepositoryChangeResult> {
+    if (input.signal.aborted) throw input.signal.reason;
+    const temporaryDirectory = await this.createTemporaryDirectory();
+    let client: CopilotClientPort | undefined;
+    let session: CopilotSessionPort | undefined;
+    const turns: NormalizedUsage[] = [];
+    let requestId: string | undefined;
+    let effectiveModel: string | undefined;
+    try {
+      const requestHandler = new PinnedByokRequestHandler(
+        input.baseUrl,
+        input.maximumTurns,
+      );
+      client = this.createClient({
+        mode: "empty",
+        baseDirectory: temporaryDirectory,
+        workingDirectory: temporaryDirectory,
+        env: safeChildEnvironment(temporaryDirectory, this.environment),
+        useLoggedInUser: false,
+        logLevel: "none",
+        requestHandler,
+      });
+      session = await client.createSession({
+        clientName: "caseweaver-repository-change-agent",
+        model: input.model,
+        provider: {
+          type: input.provider,
+          baseUrl: input.baseUrl,
+          apiKey: input.apiKey,
+          wireApi: input.wireApi,
+          transport: "http",
+          maxPromptTokens: input.maximumInputTokensPerTurn,
+          maxOutputTokens: input.maximumOutputTokensPerTurn,
+        },
+        availableTools: (() => {
+          const available = new ToolSet();
+          for (const name of toolNames) available.addCustom(name);
+          return available.toArray();
+        })(),
+        tools: repositoryTools(input.tools),
+        enableConfigDiscovery: false,
+        skipCustomInstructions: true,
+        enableSessionTelemetry: false,
+        enableSkills: false,
+        enableHostGitOperations: false,
+        enableSessionStore: false,
+        remoteSession: "off",
+        infiniteSessions: { enabled: false },
+        systemMessage: {
+          mode: "replace",
+          content: repositoryChangeSystemInstruction(input.phase),
+        },
+      });
+      const unsubscribeUsage = session.on("assistant.usage", (event) => {
+        turns.push(usage(event.data));
+        if (turns.length > input.maximumTurns) {
+          void session?.abort().catch(() => undefined);
+        }
+        requestId ??= event.data.providerCallId;
+      });
+      const abort = () => void session?.abort().catch(() => undefined);
+      input.signal.addEventListener("abort", abort, { once: true });
+      try {
+        const result = await session.sendAndWait(
+          { prompt: input.instruction },
+          Math.min(15 * 60_000, Math.max(1_000, input.maximumTurns * 60_000)),
+        );
+        if (result === undefined) {
+          throw new AiProviderError("Copilot SDK returned no result.", {
+            provider: "copilot-sdk-agent",
+          });
+        }
+        requestId ??= result.data.apiCallId;
+        effectiveModel = result.data.model;
+        return Object.freeze({
+          ...parseRepositoryChangeOutput(
+            result.data.content,
+            input.maximumOutputBytes,
+            input.phase,
+          ),
           metering: metering(turns),
           usage: aggregateUsage(turns),
           ...(requestId === undefined ? {} : { requestId }),

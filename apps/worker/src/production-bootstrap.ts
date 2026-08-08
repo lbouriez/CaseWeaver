@@ -37,6 +37,10 @@ import {
   type AttachmentRuntimeQuotas,
   type PreparedAttachmentDerivative,
 } from "@caseweaver/attachments";
+import {
+  AzureDevOpsRepositoryChangeGateway,
+  AzureDevOpsRestApi,
+} from "@caseweaver/azure-devops-repositories";
 import { createGitMarkdownRuntimeContributions } from "@caseweaver/connector-git-markdown";
 import { createJitbitRuntimeContributions } from "@caseweaver/connector-jitbit";
 import {
@@ -86,6 +90,11 @@ import {
   PgBossDurableMessageQueue,
   runPgBossMigrations,
 } from "@caseweaver/queue-postgres";
+import {
+  ExecuteRepositoryChange,
+  type RepositoryChangeAuthor,
+  ScheduleRepositoryChangeForCompletedAnalysis,
+} from "@caseweaver/repository-changes";
 import { RetrievalService } from "@caseweaver/retrieval";
 import { RuntimeCaseDiscoveryService } from "./feature-handlers/analysis-discovery.js";
 import { RuntimeCaseSourceSnapshotCapture } from "./feature-handlers/analysis-trigger.js";
@@ -111,6 +120,7 @@ import {
   type PreparedAttachmentTextReader,
 } from "./modules/attachments/index.js";
 import { RuntimePublicationDestinationResolver } from "./modules/publication/index.js";
+import { MeteredRepositoryChangeAuthor } from "./modules/repository-changes/author.js";
 import { createWorkerProcess, type WorkerProcess } from "./process.js";
 import { createProductionWorkerCommandHandlers } from "./production-composition.js";
 import { createWorkerCommandDispatcher } from "./runtime.js";
@@ -507,6 +517,20 @@ class UnavailableAttachmentRuntime implements AttachmentRuntime {
 
   public async cleanup(): Promise<void> {
     // No output is created when the isolated runtime is unavailable.
+  }
+}
+
+class UnavailableRepositoryChangeAuthor implements RepositoryChangeAuthor {
+  public async plan(): Promise<never> {
+    throw new AiConfigurationError(
+      "Repository-change automation requires the configured repository-agent runtime.",
+    );
+  }
+
+  public async author(): Promise<never> {
+    throw new AiConfigurationError(
+      "Repository-change automation requires the configured repository-agent runtime.",
+    );
   }
 }
 
@@ -1152,6 +1176,29 @@ export async function createProductionWorkerRuntimeFromEnvironment(
         clock,
       ),
     });
+    const repositoryChangeGateway = new AzureDevOpsRepositoryChangeGateway({
+      configurations: persistence.repositoryChangeConfigurationResolver,
+      tokens: new EnvironmentConnectorSecretResolver(environment),
+      api: new AzureDevOpsRestApi(),
+    });
+    const repositoryChangeAuthor: RepositoryChangeAuthor =
+      repositoryAgent === undefined
+        ? new UnavailableRepositoryChangeAuthor()
+        : new MeteredRepositoryChangeAuthor(
+            ai.gateway,
+            analysisRepositoryRuntimeResolver,
+          );
+    const repositoryChanges = Object.freeze({
+      completedAnalysis: new ScheduleRepositoryChangeForCompletedAnalysis(
+        persistence.repositoryChangeStore,
+      ),
+      executor: new ExecuteRepositoryChange({
+        store: persistence.repositoryChangeStore,
+        preparation: repositoryChangeGateway,
+        author: repositoryChangeAuthor,
+        publisher: repositoryChangeGateway,
+      }),
+    });
     const operations = Object.freeze({
       retention: Object.freeze({
         reaper: new ReapExpiredRetentionWork(
@@ -1195,6 +1242,7 @@ export async function createProductionWorkerRuntimeFromEnvironment(
           complete: (event) => publication.completedAnalysis.execute(event),
         },
       },
+      repositoryChanges,
       operations,
     });
     const queue = new PgBossDurableMessageQueue({

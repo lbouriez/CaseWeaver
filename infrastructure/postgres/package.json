@@ -28,6 +28,7 @@
     "@caseweaver/publication": "workspace:*",
     "@caseweaver/prompts": "workspace:*",
     "@caseweaver/retrieval": "workspace:*",
+    "@caseweaver/repository-changes": "workspace:*",
     "@caseweaver/scheduling": "workspace:*",
     "@caseweaver/security": "workspace:*",
     "@caseweaver/webhooks": "workspace:*",

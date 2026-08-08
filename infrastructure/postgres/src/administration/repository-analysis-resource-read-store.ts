@@ -182,6 +182,7 @@ export class PostgresRepositoryAnalysisResourceReadStore {
             mode: true,
             allowedRefKinds: true,
             checkoutCredentialRequired: true,
+            automaticDraftPullRequest: true,
           },
         });
         if (value === null) return Object.freeze({});
@@ -189,6 +190,7 @@ export class PostgresRepositoryAnalysisResourceReadStore {
           mode: value.mode,
           allowedRefKindCount: safeStringArray(value.allowedRefKinds).length,
           checkoutCredentialRequired: value.checkoutCredentialRequired,
+          automaticDraftPullRequest: value.automaticDraftPullRequest,
         });
       }
       case "repository-execution-policies": {

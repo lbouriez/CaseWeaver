@@ -19,7 +19,9 @@ export type AiOperationKind =
   | "generation"
   | "reranker"
   | "repositoryAgent"
-  | "repositoryAgentTurn";
+  | "repositoryAgentTurn"
+  | "repositoryChange"
+  | "repositoryChangeTurn";
 
 export type AiCapability =
   | "vision"
@@ -220,6 +222,35 @@ export interface RepositoryAgentResult {
   readonly metering: RepositoryAgentMetering;
 }
 
+/**
+ * A write-intent protocol. The provider still gets only the existing read-only
+ * repository tools; it returns bounded replacement-file content for a separate
+ * repository adapter to validate and publish.
+ */
+export interface RepositoryChangeAgentRequest {
+  readonly runtimePin: RepositoryAgentRuntimePin;
+  readonly phase: "architect" | "author";
+  readonly instruction: string;
+  readonly maximumTurns: number;
+  readonly maximumInputTokensPerTurn: number;
+  readonly maximumOutputTokensPerTurn: number;
+}
+
+export interface RepositoryChangeFileProposal {
+  readonly path: string;
+  readonly content: string;
+}
+
+export interface RepositoryChangeAgentResult {
+  readonly summary: string;
+  readonly documentationImpact: string;
+  readonly shouldChange: boolean;
+  readonly title?: string;
+  readonly description?: string;
+  readonly files?: readonly RepositoryChangeFileProposal[];
+  readonly metering: RepositoryAgentMetering;
+}
+
 export interface EmbeddingProvider {
   embed(
     invocation: ProviderInvocation<EmbeddingRequest>,
@@ -250,9 +281,16 @@ export interface RepositoryAgentProvider {
   ): Promise<ProviderResult<RepositoryAgentResult>>;
 }
 
+export interface RepositoryChangeAgentProvider {
+  runRepositoryChange(
+    invocation: ProviderInvocation<RepositoryChangeAgentRequest>,
+  ): Promise<ProviderResult<RepositoryChangeAgentResult>>;
+}
+
 export interface AiProviderDispatcher
   extends EmbeddingProvider,
     VisionProvider,
     GenerationProvider,
     RerankerProvider,
-    RepositoryAgentProvider {}
+    RepositoryAgentProvider,
+    RepositoryChangeAgentProvider {}

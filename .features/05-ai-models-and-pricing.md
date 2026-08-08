@@ -42,6 +42,7 @@ interface EmbeddingProvider {}
 interface VisionProvider {}
 interface GenerationProvider {}
 interface RepositoryAgentProvider {}
+interface RepositoryChangeAgentProvider {}
 interface RerankerProvider {}
 ```
 
@@ -49,7 +50,13 @@ Feature packages do not invoke these provider ports directly. A single metered A
 execution gateway resolves the immutable binding, reserves budgets, calls the provider,
 normalizes usage, finalizes the operation ledger and costs, then returns the normalized
 result. This applies to embeddings, vision, generation, reranking, repository agents,
-and future chat.
+repository-change planning/authoring, and future chat.
+
+Repository-change planning and authoring reuse the immutable `repositoryAgent` model
+binding and its hard budget. The provider receives the same attested, read-only tool
+gateway as investigation. It returns a bounded replacement-file proposal; a separate
+repository connector validates and writes it. Providers never receive a Git credential
+or write tool.
 
 Interfaces return normalized output and normalized usage while preserving the encrypted
 or redacted provider response needed for diagnostics. Provider-specific request options

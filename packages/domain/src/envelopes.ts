@@ -20,6 +20,8 @@ import {
   outboxEnvelopeId,
   type PublicationIntentId,
   publicationIntentId,
+  type RepositoryChangeRequestId,
+  repositoryChangeRequestId,
   type UtcInstant,
   utcInstant,
   type WorkspaceId,
@@ -40,6 +42,7 @@ export type EnvelopeType =
   | "publication.execute.v1"
   | "publication.reconcile.v1"
   | "analysis.completed.v1"
+  | "repository-change.execute.v1"
   | "knowledge.synchronize.v1"
   | "knowledge.full-rescan.v1"
   | "knowledge.synchronize.v2"
@@ -120,6 +123,11 @@ export interface AnalysisCompletedPayload {
   readonly analysisResultId: AnalysisResultId;
 }
 
+/** A durable, idempotent request to prepare one review-only code change. */
+export interface RepositoryChangeExecutePayload {
+  readonly repositoryChangeRequestId: RepositoryChangeRequestId;
+}
+
 /**
  * A legacy knowledge command is deserializable only so workers can classify it
  * as unavailable. Its single historical pin is never a connector pin.
@@ -186,6 +194,7 @@ export type EnvelopePayloadByType = {
   readonly "publication.execute.v1": PublicationExecutePayload;
   readonly "publication.reconcile.v1": PublicationReconcilePayload;
   readonly "analysis.completed.v1": AnalysisCompletedPayload;
+  readonly "repository-change.execute.v1": RepositoryChangeExecutePayload;
   readonly "knowledge.synchronize.v1": LegacyKnowledgeSynchronizePayload;
   readonly "knowledge.full-rescan.v1": LegacyKnowledgeFullRescanPayload;
   readonly "knowledge.synchronize.v2": KnowledgeSynchronizePayload;
@@ -423,6 +432,15 @@ function parsePayload(
           requireString(payload.analysisResultId, "analysisResultId"),
         ),
       });
+    case "repository-change.execute.v1":
+      return Object.freeze({
+        repositoryChangeRequestId: repositoryChangeRequestId(
+          requireNonEmptyString(
+            payload.repositoryChangeRequestId,
+            "repositoryChangeRequestId",
+          ),
+        ),
+      });
     case "knowledge.synchronize.v1":
     case "knowledge.full-rescan.v1": {
       const trigger = requireString(payload.trigger, "trigger");
@@ -541,6 +559,7 @@ function parseEnvelope(value: unknown, allowLegacy: boolean): Envelope {
       "publication.execute.v1",
       "publication.reconcile.v1",
       "analysis.completed.v1",
+      "repository-change.execute.v1",
       "knowledge.synchronize.v1",
       "knowledge.full-rescan.v1",
       "knowledge.synchronize.v2",

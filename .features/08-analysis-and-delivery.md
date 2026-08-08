@@ -58,6 +58,24 @@ Store binding/profile versions, request parameters, schemas, prompt and evidence
 tool transcript references, provider identifiers, and source snapshots. Privacy deletion
 leaves explicit tombstones and hashes rather than a claim of exact reproduction.
 
+## Automatic draft pull requests
+
+An immutable remote-HTTPS repository version may opt in to automatic Azure DevOps draft
+pull requests only when its configured checkout reference is a branch and it has one
+registered repository write credential. After a completed analysis, CaseWeaver schedules
+at most one request when the structured result has `high` confidence and validated
+repository findings. It resolves the latest configured target branch, keeps the analyzed
+and refreshed commits separately, asks an architect phase to decide whether a narrow
+correction is safe, then asks an author phase for bounded text-file replacements.
+
+The Azure DevOps adapter creates a deterministic source branch and **draft** pull request.
+It never runs an unknown target repository test suite, completes a pull request, alters
+branch policy, creates a work item, or bypasses developer review. The PR body links the
+analysis and any already-retained case/work-item reference, records documentation impact,
+and explicitly says target-repository tests were not run. Durable states distinguish
+queued, planning, authoring, draft created, no change, failed, and outcome unknown; an
+uncertain remote write is never retried as a new branch.
+
 ## Publication policy
 
 A separate publication profile versions:

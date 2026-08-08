@@ -106,6 +106,7 @@ describe("RepositoryAnalysisWorkflows", () => {
         location: { mode: "remoteHttps", remoteUrl: url },
         allowedRefKinds: ["branch"],
         checkoutRef: { kind: "branch", name: "main" },
+        automaticDraftPullRequest: false,
       }),
     );
     expect(
