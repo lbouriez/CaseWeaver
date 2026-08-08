@@ -18,10 +18,10 @@
     "@caseweaver/administration": "workspace:*",
     "@caseweaver/connector-runtime": "workspace:*",
     "@caseweaver/connector-sdk": "workspace:*",
-    "zod": "^4.0.0"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "typescript": "5.9.3",
-    "vitest": "4.0.18"
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
   }
 }

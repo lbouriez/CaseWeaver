@@ -19,19 +19,19 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@caseweaver/analysis": "workspace:*",
-    "@caseweaver/azure-devops-repositories": "workspace:*",
     "@caseweaver/administration": "workspace:*",
     "@caseweaver/ai-execution": "workspace:*",
     "@caseweaver/ai-provider-runtime": "workspace:*",
     "@caseweaver/ai-sdk": "workspace:*",
+    "@caseweaver/analysis": "workspace:*",
     "@caseweaver/application": "workspace:*",
     "@caseweaver/attachment-runtime": "workspace:*",
     "@caseweaver/attachments": "workspace:*",
+    "@caseweaver/azure-devops-repositories": "workspace:*",
     "@caseweaver/connector-git-markdown": "workspace:*",
     "@caseweaver/connector-jitbit": "workspace:*",
-    "@caseweaver/connector-sdk": "workspace:*",
     "@caseweaver/connector-runtime": "workspace:*",
+    "@caseweaver/connector-sdk": "workspace:*",
     "@caseweaver/copilot-sdk-agent": "workspace:*",
     "@caseweaver/domain": "workspace:*",
     "@caseweaver/git-repository-runtime": "workspace:*",
@@ -42,15 +42,15 @@
     "@caseweaver/postgres": "workspace:*",
     "@caseweaver/publication": "workspace:*",
     "@caseweaver/queue-postgres": "workspace:*",
-    "@caseweaver/repository-runtime": "workspace:*",
     "@caseweaver/repository-changes": "workspace:*",
+    "@caseweaver/repository-runtime": "workspace:*",
     "@caseweaver/retrieval": "workspace:*",
-    "pg": "^8.16.3"
+    "pg": "^8.22.0"
   },
   "devDependencies": {
-    "@types/pg": "^8.15.6",
-    "@types/node": "22.19.7",
-    "typescript": "5.9.3",
-    "vitest": "4.0.18"
+    "@types/node": "26.1.2",
+    "@types/pg": "^8.20.4",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
   }
 }

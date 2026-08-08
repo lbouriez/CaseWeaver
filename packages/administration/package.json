@@ -15,15 +15,15 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@caseweaver/ai-sdk": "workspace:*",
     "@caseweaver/ai-config": "workspace:*",
     "@caseweaver/ai-execution": "workspace:*",
+    "@caseweaver/ai-sdk": "workspace:*",
     "@caseweaver/domain": "workspace:*",
     "@caseweaver/security": "workspace:*",
-    "zod": "^4.0.0"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
-    "typescript": "5.9.3",
-    "vitest": "4.0.18"
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
   }
 }

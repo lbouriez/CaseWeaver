@@ -171,40 +171,43 @@ describe("PostgresRepositoryAnalysisConfigurationStore", () => {
         activeVersionId: "repository-agent-v2",
       },
     ],
-  ])("rejects an execution policy when the repository-agent binding %s", async (_reason, version, binding) => {
-    const policyCreate = vi.fn(async () => undefined);
-    const bindingVersionFind = vi.fn(async () => version);
-    const store = configurationStore({
-      ...activeExecutionPolicyConfiguration(),
-      aiModelBindingVersion: { findUnique: bindingVersionFind },
-      aiModelBinding: { findUnique: async () => binding ?? null },
-      repositoryExecutionPolicyVersion: {
-        findUnique: async () => null,
-        create: policyCreate,
-      },
-    });
-
-    await expect(
-      store.writeRepositoryExecutionPolicy({
-        workspaceId: "workspace-a",
-        configurationVersionId: "execution-policy-v1",
-        lifecycle: "enabled",
-        policy: executionPolicy,
-      }),
-    ).rejects.toThrow();
-
-    expect(bindingVersionFind).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: {
-          workspaceId_id: {
-            workspaceId: "workspace-a",
-            id: "repository-agent-v1",
-          },
+  ])(
+    "rejects an execution policy when the repository-agent binding %s",
+    async (_reason, version, binding) => {
+      const policyCreate = vi.fn(async () => undefined);
+      const bindingVersionFind = vi.fn(async () => version);
+      const store = configurationStore({
+        ...activeExecutionPolicyConfiguration(),
+        aiModelBindingVersion: { findUnique: bindingVersionFind },
+        aiModelBinding: { findUnique: async () => binding ?? null },
+        repositoryExecutionPolicyVersion: {
+          findUnique: async () => null,
+          create: policyCreate,
         },
-      }),
-    );
-    expect(policyCreate).not.toHaveBeenCalled();
-  });
+      });
+
+      await expect(
+        store.writeRepositoryExecutionPolicy({
+          workspaceId: "workspace-a",
+          configurationVersionId: "execution-policy-v1",
+          lifecycle: "enabled",
+          policy: executionPolicy,
+        }),
+      ).rejects.toThrow();
+
+      expect(bindingVersionFind).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            workspaceId_id: {
+              workspaceId: "workspace-a",
+              id: "repository-agent-v1",
+            },
+          },
+        }),
+      );
+      expect(policyCreate).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects an active recipe that pins a repository binding without tool support", async () => {
     const recipeCreate = vi.fn(async () => undefined);

@@ -91,20 +91,23 @@ describe("Git Markdown configuration", () => {
     "C:\\unallowlisted\\docs",
     "..\\repositories\\docs",
     "C:\\repositories\\docs\\..\\secrets",
-  ])("rejects a non-allowlisted or traversing local repository path: %s", (path) => {
-    expect(() =>
-      gitMarkdownConfigurationSchema.parse({
-        schemaVersion: 1,
-        connectorType: "git-markdown",
-        secrets: {},
-        settings: {
-          connectorInstanceId: "documentation",
-          repository: { kind: "local", path },
-          ref: { kind: "branch", name: "main" },
-        },
-      }),
-    ).toThrow();
-  });
+  ])(
+    "rejects a non-allowlisted or traversing local repository path: %s",
+    (path) => {
+      expect(() =>
+        gitMarkdownConfigurationSchema.parse({
+          schemaVersion: 1,
+          connectorType: "git-markdown",
+          secrets: {},
+          settings: {
+            connectorInstanceId: "documentation",
+            repository: { kind: "local", path },
+            ref: { kind: "branch", name: "main" },
+          },
+        }),
+      ).toThrow();
+    },
+  );
 
   it("accepts a local repository resolved within a configured allowed root", () => {
     const repositoryPath = process.cwd();
